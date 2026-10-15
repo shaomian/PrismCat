@@ -114,7 +114,12 @@ func truncateLabel(s string, maxChars int) string {
 	return s
 }
 
-// esc Mermaid 标签清洗：单行化（truncateLabel 已压缩空白）
+// esc Mermaid 标签清洗。
+// sequenceDiagram 语法中 ";" 充当语句结束符、"#" 之后到行尾的内容会被当作注释丢弃，
+// 且标签必须单行，因此压缩空白并把这两个字符替换为全角标点；其余字符在消息文本区均安全。
 func esc(s string) string {
+	s = strings.Join(strings.Fields(s), " ") // 单行化
+	s = strings.ReplaceAll(s, ";", "；")
+	s = strings.ReplaceAll(s, "#", "＃")
 	return strings.TrimSpace(s)
 }
