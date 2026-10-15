@@ -94,8 +94,10 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
 
   // 切换 trace 时载入该 trace 已保存的对话历史（首次挂载同样生效）
   const hydratedTraceRef = useRef<string | null>(null)
+  const traceIdRef = useRef(traceId)
   useEffect(() => {
     hydratedTraceRef.current = null
+    traceIdRef.current = traceId
     setMessages(loadSavedMessages(traceId))
     setInput('')
     setError('')
@@ -159,6 +161,7 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
     const q = question.trim()
     if (!q || streaming) return
     setError('')
+    const streamTrace = traceId
     const history: AnalysisMessage[] = [
       ...messages.map(m => ({ role: m.role, content: m.content })),
       { role: 'user', content: q },
@@ -173,6 +176,8 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
       let acc = ''
       const updateLast = (fn: (m: DisplayMessage) => DisplayMessage) => {
         setMessages(prev => {
+          // 面板关闭后流式回调仍在后台运行；若期间已切换到其它 trace，丢弃旧 trace 的迟到更新
+          if (traceIdRef.current !== streamTrace) return prev
           const next = [...prev]
           if (next.length > 0 && next[next.length - 1].role === 'assistant') {
             next[next.length - 1] = fn(next[next.length - 1])
@@ -195,9 +200,9 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
             updateLast(m => ({ ...m, content: '' }))
           }
         })
-      if (result.error) setError(result.error)
+      if (traceIdRef.current === streamTrace && result.error) setError(result.error)
     } catch (e) {
-      setError((e as Error).message)
+      if (traceIdRef.current === streamTrace) setError((e as Error).message)
     } finally {
       setStreaming(false)
     }
