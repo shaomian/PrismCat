@@ -31,6 +31,7 @@ type Config struct {
 	Storage   StorageConfig             `yaml:"storage"`
 	Overrides RequestOverridesConfig    `yaml:"request_overrides"`
 	Usage     UsageExtractionConfig     `yaml:"usage_extraction"`
+	Analysis  AnalysisConfig            `yaml:"analysis"`
 
 	configPath     string // 配置文件路径
 	fileUIPassword string
@@ -48,6 +49,7 @@ type persistedConfig struct {
 	Storage   StorageConfig             `yaml:"storage"`
 	Overrides RequestOverridesConfig    `yaml:"request_overrides"`
 	Usage     UsageExtractionConfig     `yaml:"usage_extraction"`
+	Analysis  AnalysisConfig            `yaml:"analysis"`
 }
 
 // ServerConfig 服务器配置
@@ -81,6 +83,26 @@ type ServerConfig struct {
 	CORSAllowOrigins []string `yaml:"cors_allow_origins"`
 	CORSAllowMethods []string `yaml:"cors_allow_methods"`
 	CORSAllowHeaders []string `yaml:"cors_allow_headers"`
+}
+
+// AnalysisConfig AI 分析模型配置
+//
+// BaseURL 指向 OpenAI 兼容端点（如 https://api.openai.com/v1），
+// 也可以指向 PrismCat 自身的代理地址（如 http://localhost:8711/_proxy/openai），
+// 后者能让分析流量也被记录（dogfooding）。
+type AnalysisConfig struct {
+	Enabled        bool   `yaml:"enabled" json:"enabled"`
+	BaseURL        string `yaml:"base_url" json:"base_url"`
+	APIKey         string `yaml:"api_key" json:"-"`
+	Model          string `yaml:"model" json:"model"`
+	TimeoutSeconds int    `yaml:"timeout_seconds,omitempty" json:"timeout_seconds,omitempty"`
+}
+
+// AnalysisSnapshot returns a copy of the current analysis config.
+func (c *Config) AnalysisSnapshot() AnalysisConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Analysis
 }
 
 // UpstreamConfig 上游配置
@@ -1111,6 +1133,7 @@ func (c *Config) saveLocked() error {
 		Storage:   c.Storage,
 		Overrides: c.Overrides,
 		Usage:     c.Usage,
+		Analysis:  c.Analysis,
 	}
 	if c.envUIPassword {
 		saved.Server.UIPassword = c.fileUIPassword

@@ -30,6 +30,7 @@ Thumbs.db
 .idea/
 
 # === 其他 ===
+.tools/
 .gemini/
 .agent/
 docs/

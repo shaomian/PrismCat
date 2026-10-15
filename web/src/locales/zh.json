@@ -293,6 +293,62 @@
         "back_to_list": "返回调用链",
         "total_span": "总耗时"
     },
+    "timeline": {
+        "tab_conversation": "对话视图",
+        "tab_diagram": "流程图",
+        "tab_requests": "请求视图",
+        "export": {
+            "events": "导出压缩 JSONL",
+            "raw": "导出原始 JSONL"
+        },
+        "diagram": {
+            "copy_source": "复制源码",
+            "copy_failed": "复制失败",
+            "render_failed": "流程图渲染失败，已显示源码",
+            "load_failed": "加载流程图失败"
+        },
+        "carried": "折叠了 {{count}} 条历史消息（与上文重复）",
+        "truncated": "内容被截断",
+        "expand": "展开",
+        "collapse": "收起",
+        "open_log": "查看原始日志",
+        "parse_error": "无法解析为对话：{{reason}}",
+        "empty": "暂无可展示的对话事件",
+        "load_failed": "加载对话时间线失败",
+        "role": {
+            "system": "系统",
+            "user": "用户",
+            "assistant": "助手",
+            "tool": "工具"
+        },
+        "kind": {
+            "message": "消息",
+            "tool_call": "工具调用",
+            "tool_result": "工具结果",
+            "thinking": "思考",
+            "image": "图片"
+        }
+    },
+    "analysis": {
+        "open_button": "AI 分析",
+        "sheet_title": "AI 分析",
+        "setup_title": "配置分析模型",
+        "setup_hint": "填写一个 OpenAI 兼容端点。也可以直接填 PrismCat 自身的代理地址（如 http://localhost:8711/_proxy/你的上游名），这样分析流量也会被记录，可在日志里查看。",
+        "base_url": "Base URL",
+        "api_key": "API Key",
+        "api_key_keep": "已配置，留空保持不变",
+        "model": "模型",
+        "save_and_start": "保存并开始分析",
+        "config_saved": "分析模型配置已保存",
+        "empty_hint": "选择一个问题快速开始，或直接输入你想问的",
+        "preset_summary": "这个 Agent 执行了哪些操作？请按阶段归纳",
+        "preset_errors": "这次执行有没有出错或异常？具体在第几步？",
+        "preset_tokens": "Token 和耗时主要消耗在哪些请求上？",
+        "input_placeholder": "问点什么，例如：第 3 个请求为什么失败了？",
+        "send": "发送",
+        "tool_fetching": "正在调取请求原文…",
+        "tool_fetched": "已调取原文 {{chars}} 字符"
+    },
     "nav": {
         "dashboard": "日志",
         "traces": "调用链",

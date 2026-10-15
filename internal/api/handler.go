@@ -67,6 +67,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/replay", h.handleReplay)
 	mux.HandleFunc("/api/traces", h.handleTraces)
 	mux.HandleFunc("/api/traces/", h.handleTraceDetail)
+	mux.HandleFunc("/api/analysis/chat", h.handleAnalysisChat)
 }
 
 // handleLogs 获取日志列表
@@ -574,7 +575,23 @@ func (h *Handler) handleTraceDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	traceID := strings.TrimPrefix(r.URL.Path, "/api/traces/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/traces/")
+
+	// 子路径: /api/traces/{id}/timeline | /diagram | /export
+	if traceID, ok := strings.CutSuffix(path, "/timeline"); ok {
+		h.handleTraceTimeline(w, r, traceID)
+		return
+	}
+	if traceID, ok := strings.CutSuffix(path, "/diagram"); ok {
+		h.handleTraceDiagram(w, r, traceID)
+		return
+	}
+	if traceID, ok := strings.CutSuffix(path, "/export"); ok {
+		h.handleTraceExport(w, r, traceID)
+		return
+	}
+
+	traceID := path
 	if traceID == "" {
 		h.jsonError(w, "缺少 trace ID", http.StatusBadRequest)
 		return
@@ -887,6 +904,7 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 		serverCfg := h.cfg.ServerSnapshot()
 		overrides := h.cfg.RequestOverridesSnapshot()
 		usageExtraction := h.cfg.UsageExtractionSnapshot()
+		analysis := h.cfg.AnalysisSnapshot()
 		h.jsonResponse(w, map[string]interface{}{
 			"version": config.Version,
 			"server": map[string]interface{}{
@@ -912,6 +930,13 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 			},
 			"request_overrides": overrides,
 			"usage_extraction":  usageExtraction,
+			// api_key 不回显，只告知是否已配置
+			"analysis": map[string]interface{}{
+				"enabled":     analysis.Enabled,
+				"base_url":    analysis.BaseURL,
+				"model":       analysis.Model,
+				"has_api_key": analysis.APIKey != "",
+			},
 		})
 		return
 	}
@@ -938,6 +963,12 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 			} `json:"storage"`
 			RequestOverrides *config.RequestOverridesConfig `json:"request_overrides"`
 			UsageExtraction  *config.UsageExtractionConfig  `json:"usage_extraction"`
+			Analysis         *struct {
+				Enabled *bool   `json:"enabled"`
+				BaseURL *string `json:"base_url"`
+				APIKey  *string `json:"api_key"`
+				Model   *string `json:"model"`
+			} `json:"analysis"`
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -994,6 +1025,22 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			if req.UsageExtraction != nil {
 				c.Usage = config.NormalizeUsageExtraction(*req.UsageExtraction)
+			}
+
+			if req.Analysis != nil {
+				if req.Analysis.Enabled != nil {
+					c.Analysis.Enabled = *req.Analysis.Enabled
+				}
+				if req.Analysis.BaseURL != nil {
+					c.Analysis.BaseURL = strings.TrimSpace(*req.Analysis.BaseURL)
+				}
+				if req.Analysis.Model != nil {
+					c.Analysis.Model = strings.TrimSpace(*req.Analysis.Model)
+				}
+				// api_key 为空字符串表示"保持不变"，非空则覆盖
+				if req.Analysis.APIKey != nil && *req.Analysis.APIKey != "" {
+					c.Analysis.APIKey = strings.TrimSpace(*req.Analysis.APIKey)
+				}
 			}
 		})
 

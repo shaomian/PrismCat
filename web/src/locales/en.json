@@ -293,6 +293,62 @@
         "back_to_list": "Back to Traces",
         "total_span": "total"
     },
+    "timeline": {
+        "tab_conversation": "Conversation",
+        "tab_diagram": "Diagram",
+        "tab_requests": "Requests",
+        "export": {
+            "events": "Export Events JSONL",
+            "raw": "Export Raw JSONL"
+        },
+        "diagram": {
+            "copy_source": "Copy Source",
+            "copy_failed": "Copy failed",
+            "render_failed": "Diagram render failed, showing source",
+            "load_failed": "Failed to load diagram"
+        },
+        "carried": "{{count}} history messages collapsed (duplicated above)",
+        "truncated": "content truncated",
+        "expand": "Expand",
+        "collapse": "Collapse",
+        "open_log": "Open raw log",
+        "parse_error": "Cannot parse as conversation: {{reason}}",
+        "empty": "No conversation events to display",
+        "load_failed": "Failed to load conversation timeline",
+        "role": {
+            "system": "System",
+            "user": "User",
+            "assistant": "Assistant",
+            "tool": "Tool"
+        },
+        "kind": {
+            "message": "Message",
+            "tool_call": "Tool Call",
+            "tool_result": "Tool Result",
+            "thinking": "Thinking",
+            "image": "Image"
+        }
+    },
+    "analysis": {
+        "open_button": "AI Analysis",
+        "sheet_title": "AI Analysis",
+        "setup_title": "Configure Analysis Model",
+        "setup_hint": "Fill in an OpenAI-compatible endpoint. You can also point it at PrismCat itself (e.g. http://localhost:8711/_proxy/your-upstream) so analysis traffic gets logged too.",
+        "base_url": "Base URL",
+        "api_key": "API Key",
+        "api_key_keep": "Configured, leave empty to keep",
+        "model": "Model",
+        "save_and_start": "Save & Start",
+        "config_saved": "Analysis model config saved",
+        "empty_hint": "Pick a question to get started, or ask anything",
+        "preset_summary": "What did this Agent do? Summarize by phase",
+        "preset_errors": "Were there any errors or anomalies? At which step?",
+        "preset_tokens": "Which requests consumed the most tokens and time?",
+        "input_placeholder": "Ask anything, e.g. why did request #3 fail?",
+        "send": "Send",
+        "tool_fetching": "Fetching raw request…",
+        "tool_fetched": "Fetched {{chars}} chars"
+    },
     "nav": {
         "dashboard": "Logs",
         "traces": "Traces",

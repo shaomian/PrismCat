@@ -3,12 +3,17 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   Network, ArrowLeft, Clock, AlertCircle, Layers, Activity,
-  ChevronRight,
+  ChevronRight, MessagesSquare, ListTree, GitBranch, FileDown, Sparkles,
 } from 'lucide-react'
-import { fetchTraceDetail, type TraceDetail as TraceDetailType, type RequestLog } from '@/lib/api'
+import { fetchTraceDetail, fetchTraceTimeline, fetchTraceDiagram, traceExportUrl, type TraceDetail as TraceDetailType, type TraceTimeline, type RequestLog } from '@/lib/api'
 import { cn, formatLatency, formatDate, getStatusColor, METHOD_CLASS } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { LogDetail } from '@/components/LogDetail'
+import { TraceTimelineView } from '@/components/TraceTimeline'
+import { TraceDiagram } from '@/components/TraceDiagram'
+import { AnalysisChat } from '@/components/AnalysisChat'
 import { toast } from 'sonner'
 
 export function TraceDetail() {
@@ -17,8 +22,11 @@ export function TraceDetail() {
   const navigate = useNavigate()
 
   const [detail, setDetail] = useState<TraceDetailType | null>(null)
+  const [timeline, setTimeline] = useState<TraceTimeline | null>(null)
+  const [diagram, setDiagram] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null)
+  const [analysisOpen, setAnalysisOpen] = useState(false)
 
   const loadDetail = useCallback(async () => {
     if (!traceId) return
@@ -33,9 +41,31 @@ export function TraceDetail() {
     }
   }, [traceId, t])
 
+  const loadTimeline = useCallback(async () => {
+    if (!traceId) return
+    try {
+      const res = await fetchTraceTimeline(traceId)
+      setTimeline(res)
+    } catch {
+      toast.error(t('timeline.load_failed'))
+    }
+  }, [traceId, t])
+
+  const loadDiagram = useCallback(async () => {
+    if (!traceId) return
+    try {
+      const res = await fetchTraceDiagram(traceId)
+      setDiagram(res.mermaid)
+    } catch {
+      toast.error(t('timeline.diagram.load_failed'))
+    }
+  }, [traceId, t])
+
   useEffect(() => {
     loadDetail()
-  }, [loadDetail])
+    loadTimeline()
+    loadDiagram()
+  }, [loadDetail, loadTimeline, loadDiagram])
 
   const requests = useMemo(() => detail?.requests ?? [], [detail?.requests])
   const summary = detail?.summary
@@ -62,6 +92,11 @@ export function TraceDetail() {
     if (!summary) return 1
     return Math.max(summary.last_time - summary.first_time, 1)
   }, [summary])
+
+  const handleOpenLog = useCallback((logId: string) => {
+    const log = requests.find(r => r.id === logId)
+    if (log) setSelectedLog(log)
+  }, [requests])
 
   if (loading) {
     return (
@@ -131,17 +166,73 @@ export function TraceDetail() {
         />
       </div>
 
-      {/* Upstream badges */}
-      {summary.upstreams?.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {summary.upstreams.map(u => (
-            <span key={u} className="inline-flex items-center h-[22px] px-2 rounded text-xs font-semibold tracking-tight bg-primary/10 text-primary">
-              {u}
-            </span>
-          ))}
-        </div>
-      )}
+      {/* Upstream badges + 导出 */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {summary.upstreams?.map(u => (
+          <span key={u} className="inline-flex items-center h-[22px] px-2 rounded text-xs font-semibold tracking-tight bg-primary/10 text-primary">
+            {u}
+          </span>
+        ))}
+        {traceId && (
+          <div className="ml-auto flex items-center gap-1.5">
+            <Button variant="default" size="sm" className="gap-1.5 h-7 text-xs" onClick={() => setAnalysisOpen(true)}>
+              <Sparkles className="h-3 w-3" />
+              {t('analysis.open_button')}
+            </Button>
+            <a href={traceExportUrl(traceId, 'events')} download>
+              <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs">
+                <FileDown className="h-3 w-3" />
+                {t('timeline.export.events')}
+              </Button>
+            </a>
+            <a href={traceExportUrl(traceId, 'raw')} download>
+              <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs">
+                <FileDown className="h-3 w-3" />
+                {t('timeline.export.raw')}
+              </Button>
+            </a>
+          </div>
+        )}
+      </div>
 
+      {/* 视图切换：对话时间线 / 请求列表 */}
+      <Tabs defaultValue="conversation">
+        <TabsList>
+          <TabsTrigger value="conversation" className="gap-1.5">
+            <MessagesSquare className="h-3.5 w-3.5" />
+            {t('timeline.tab_conversation')}
+          </TabsTrigger>
+          <TabsTrigger value="diagram" className="gap-1.5">
+            <GitBranch className="h-3.5 w-3.5" />
+            {t('timeline.tab_diagram')}
+          </TabsTrigger>
+          <TabsTrigger value="requests" className="gap-1.5">
+            <ListTree className="h-3.5 w-3.5" />
+            {t('timeline.tab_requests')}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="conversation" className="pt-4">
+          {!timeline ? (
+            <div className="flex min-h-[20vh] items-center justify-center">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          ) : (
+            <TraceTimelineView requests={timeline.requests} onOpenLog={handleOpenLog} />
+          )}
+        </TabsContent>
+
+        <TabsContent value="diagram" className="pt-4">
+          {!diagram ? (
+            <div className="flex min-h-[20vh] items-center justify-center">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          ) : (
+            <TraceDiagram code={diagram} />
+          )}
+        </TabsContent>
+
+        <TabsContent value="requests" className="pt-4">
       {/* Timeline */}
       <div className="space-y-0">
         {requests.map((req, idx) => {
@@ -259,6 +350,8 @@ export function TraceDetail() {
           <span>{formatDate(new Date(summary.last_time).toISOString(), i18n.language)}</span>
         </div>
       )}
+        </TabsContent>
+      </Tabs>
 
       {/* Log detail Sheet */}
       <LogDetail
@@ -278,6 +371,22 @@ export function TraceDetail() {
           })
         }}
       />
+
+      {/* AI 分析面板 */}
+      <Sheet open={analysisOpen} onOpenChange={setAnalysisOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-xl p-4 flex flex-col">
+          <SheetHeader className="p-0 pb-2">
+            <SheetTitle className="text-sm flex items-center gap-1.5">
+              <Sparkles className="h-4 w-4 text-primary" />
+              {t('analysis.sheet_title')}
+            </SheetTitle>
+            <SheetDescription className="text-xs truncate font-mono">{traceId}</SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 min-h-0">
+            <AnalysisChat traceId={traceId ?? ''} open={analysisOpen} />
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

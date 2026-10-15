@@ -368,6 +368,147 @@ export async function fetchTraceDetail(traceId: string): Promise<TraceDetail> {
     return response.json()
 }
 
+// 调用链对话时间线
+export interface TimelineEvent {
+    role: string
+    kind: 'message' | 'tool_call' | 'tool_result' | 'thinking' | 'image'
+    content?: string
+    truncated?: boolean
+    tool_name?: string
+    tool_call_id?: string
+    tool_args?: string
+}
+
+export interface TimelineRequest {
+    log_id: string
+    seq: number
+    created_at: number
+    latency_ms: number
+    status_code: number
+    error?: string
+    upstream: string
+    path: string
+    model?: string
+    format: string
+    carried: number
+    new_events: TimelineEvent[] | null
+    response_events: TimelineEvent[] | null
+    parse_error?: string
+    usage_input_tokens?: number
+    usage_output_tokens?: number
+}
+
+export interface TraceTimeline {
+    trace_id: string
+    requests: TimelineRequest[]
+    summary: {
+        request_count: number
+        parsed_count: number
+        total_new_events: number
+        total_carried: number
+    }
+}
+
+export async function fetchTraceTimeline(traceId: string): Promise<TraceTimeline> {
+    const response = await fetch(`${API_BASE}/traces/${encodeURIComponent(traceId)}/timeline`)
+    if (!response.ok) throw new Error('获取对话时间线失败')
+    return response.json()
+}
+
+export async function fetchTraceDiagram(traceId: string): Promise<{ mermaid: string }> {
+    const response = await fetch(`${API_BASE}/traces/${encodeURIComponent(traceId)}/diagram`)
+    if (!response.ok) throw new Error('获取流程图失败')
+    return response.json()
+}
+
+// 调用链 JSONL 导出下载地址（浏览器直接下载，依赖会话 cookie）
+export function traceExportUrl(traceId: string, mode: 'events' | 'raw'): string {
+    return `${API_BASE}/traces/${encodeURIComponent(traceId)}/export?mode=${mode}`
+}
+
+// AI 分析对话（SSE 流式）
+export interface AnalysisMessage {
+    role: 'user' | 'assistant'
+    content: string
+}
+
+export type AnalysisEvent =
+    | { kind: 'tool_call'; name: string; args: string }
+    | { kind: 'tool_result'; name: string; chars: number }
+    | { kind: 'reset' }
+
+export interface AnalysisStreamResult {
+    content: string
+    error?: string
+    usage?: Record<string, unknown>
+    rounds?: number
+    toolCalls?: number
+}
+
+export async function streamAnalysisChat(
+    traceId: string,
+    messages: AnalysisMessage[],
+    onDelta: (delta: string) => void,
+    onEvent?: (ev: AnalysisEvent) => void,
+): Promise<AnalysisStreamResult> {
+    const response = await fetch(`${API_BASE}/analysis/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trace_id: traceId, messages }),
+    })
+    if (!response.ok || !response.body) {
+        const error = await response.json().catch(() => ({ error: '请求失败' }))
+        throw new Error(error.error || 'AI 分析请求失败')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let content = ''
+    let result: AnalysisStreamResult = { content: '' }
+
+    const handleEvent = (data: string) => {
+        try {
+            const parsed = JSON.parse(data)
+            if (typeof parsed.delta === 'string') {
+                content += parsed.delta
+                result = { ...result, content }
+                onDelta(parsed.delta)
+            } else if (parsed.tool_call) {
+                onEvent?.({ kind: 'tool_call', name: parsed.tool_call.name, args: parsed.tool_call.args })
+            } else if (parsed.tool_result) {
+                onEvent?.({ kind: 'tool_result', name: parsed.tool_result.name, chars: parsed.tool_result.chars })
+            } else if (parsed.reset) {
+                content = ''
+                result = { ...result, content: '' }
+                onEvent?.({ kind: 'reset' })
+            } else if (parsed.error) {
+                result = { ...result, error: parsed.error }
+            } else if (parsed.done) {
+                result = { ...result, usage: parsed.usage, rounds: parsed.rounds, toolCalls: parsed.tool_calls }
+            }
+        } catch {
+            // 忽略无法解析的行
+        }
+    }
+
+    for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() ?? ''
+        for (const part of parts) {
+            const dataLines = part.split('\n')
+                .filter(l => l.startsWith('data:'))
+                .map(l => l.slice(5).trim())
+            if (dataLines.length > 0) handleEvent(dataLines.join('\n'))
+        }
+    }
+    if (buffer.trim().startsWith('data:')) handleEvent(buffer.trim().slice(5).trim())
+    return result
+}
+
 export async function addUpstream(
     name: string,
     target: string,
@@ -498,6 +639,12 @@ export interface AppConfig {
         }>
         rules: unknown[]
     }
+    analysis: {
+        enabled: boolean
+        base_url: string
+        model: string
+        has_api_key: boolean
+    }
 }
 
 export async function updateLogAnnotation(
@@ -520,6 +667,12 @@ export interface ConfigUpdate {
     server?: {
         enable_path_routing?: boolean
         path_routing_prefix?: string
+    }
+    analysis?: {
+        enabled?: boolean
+        base_url?: string
+        api_key?: string
+        model?: string
     }
     logging?: {
         max_request_body?: number
