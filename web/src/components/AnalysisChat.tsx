@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Sparkles, Send, Loader2, Settings2, AlertCircle, Wrench, FileSearch } from 'lucide-react'
+import { Sparkles, Send, Loader2, Settings2, AlertCircle, Wrench, FileSearch, Trash2 } from 'lucide-react'
 import {
   fetchConfig, updateConfig, streamAnalysisChat,
   type AnalysisMessage, type AppConfig,
@@ -23,6 +23,29 @@ const PRESET_QUESTIONS = [
   'analysis.preset_errors',
   'analysis.preset_tokens',
 ] as const
+
+// 对话历史按 trace 保存在浏览器 localStorage：误触关闭面板、刷新页面后可恢复
+const chatStorageKey = (traceId: string) => `prismcat-analysis-chat:${traceId}`
+const maxSavedMessages = 200
+
+function loadSavedMessages(traceId: string): DisplayMessage[] {
+  if (!traceId) return []
+  try {
+    const raw = window.localStorage.getItem(chatStorageKey(traceId))
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((m): m is DisplayMessage =>
+      !!m && typeof m === 'object'
+      && ((m as DisplayMessage).role === 'user' || (m as DisplayMessage).role === 'assistant')
+      && typeof (m as DisplayMessage).content === 'string'
+      // 跳过空占位（无内容且无工具活动的半截消息）
+      && ((m as DisplayMessage).content !== '' || ((m as DisplayMessage).activity ?? []).length > 0),
+    )
+  } catch {
+    return []
+  }
+}
 
 function isConfigured(cfg: AppConfig['analysis'] | null): cfg is AppConfig['analysis'] {
   return !!cfg && cfg.enabled && !!cfg.base_url && !!cfg.model
@@ -69,12 +92,43 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
     }
   }, [open, loadConfig])
 
-  // 切换 trace 时重置对话
+  // 切换 trace 时载入该 trace 已保存的对话历史（首次挂载同样生效）
+  const hydratedTraceRef = useRef<string | null>(null)
   useEffect(() => {
-    setMessages([])
+    hydratedTraceRef.current = null
+    setMessages(loadSavedMessages(traceId))
     setInput('')
     setError('')
   }, [traceId])
+
+  // 对话变化即保存；已载入当前 trace 的历史后才允许写回，
+  // 避免切换 trace 的瞬间把上一 trace 的消息写进新 key
+  useEffect(() => {
+    if (hydratedTraceRef.current !== traceId) {
+      hydratedTraceRef.current = traceId
+      return
+    }
+    try {
+      const save = messages
+        .filter(m => m.content !== '' || (m.activity ?? []).length > 0)
+        .slice(-maxSavedMessages)
+      if (save.length > 0) {
+        window.localStorage.setItem(chatStorageKey(traceId), JSON.stringify(save))
+      } else {
+        window.localStorage.removeItem(chatStorageKey(traceId))
+      }
+    } catch {
+      // 存储配额溢出等异常时忽略，不影响当前对话
+    }
+  }, [messages, traceId])
+
+  // 清空当前 trace 的对话历史
+  const handleClear = useCallback(() => {
+    try { window.localStorage.removeItem(chatStorageKey(traceId)) } catch { /* ignore */ }
+    setMessages([])
+    setError('')
+    toast.success(t('analysis.cleared'))
+  }, [traceId, t])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -212,12 +266,24 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
   const empty = messages.length === 0
   return (
     <div className="flex flex-col h-full min-h-0 gap-3">
-      {/* 配置摘要 */}
+      {/* 配置摘要 + 清空历史 */}
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
         <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" />
         <span className="font-medium shrink-0">{config.model}</span>
         <span className="opacity-50 shrink-0">·</span>
         <span className="font-mono truncate">{config.base_url}</span>
+        {messages.length > 0 && (
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={streaming}
+            title={t('analysis.clear')}
+            aria-label={t('analysis.clear')}
+            className="ml-auto shrink-0 inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-danger transition-colors disabled:opacity-50 disabled:pointer-events-none"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       {/* 消息列表 */}

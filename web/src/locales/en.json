@@ -347,7 +347,9 @@
         "input_placeholder": "Ask anything, e.g. why did request #3 fail?",
         "send": "Send",
         "tool_fetching": "Fetching raw request…",
-        "tool_fetched": "Fetched {{chars}} chars"
+        "tool_fetched": "Fetched {{chars}} chars",
+        "clear": "Clear conversation",
+        "cleared": "Conversation cleared"
     },
     "nav": {
         "dashboard": "Logs",
