@@ -10,7 +10,7 @@ import { cn, formatLatency, getStatusColor } from '@/lib/utils'
 const PREVIEW_CHARS = 600
 
 const ROLE_STYLE: Record<string, { icon: typeof User; badge: string; accent: string }> = {
-  system: { icon: Shield, badge: 'bg-purple-500/10 text-purple-500', accent: 'border-l-purple-500/50' },
+  system: { icon: Shield, badge: 'bg-system/10 text-system', accent: 'border-l-system/50' },
   user: { icon: User, badge: 'bg-info/10 text-info', accent: 'border-l-info/50' },
   assistant: { icon: Bot, badge: 'bg-success/10 text-success', accent: 'border-l-success/50' },
   tool: { icon: Terminal, badge: 'bg-warning/10 text-warning', accent: 'border-l-warning/50' },

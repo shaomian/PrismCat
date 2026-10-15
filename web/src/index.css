@@ -38,6 +38,7 @@
   --color-warning: hsl(var(--warning));
   --color-danger: hsl(var(--destructive));
   --color-info: hsl(var(--info));
+  --color-system: hsl(var(--system));
 
   /* 平铺元素一律不用阴影,层级由 1px 边框表达;阴影只留给真浮层(弹窗/抽屉) */
   --shadow-card: none;
@@ -79,6 +80,7 @@
   --success: 152 62% 30%;
   --warning: 32 88% 38%;
   --info: 212 80% 42%;
+  --system: 263 65% 48%;
   /* 白画布上边框要承担全部分隔职责,比常规再深一档才读得出来 */
   --border: 0 0% 89%;
   --input: 0 0% 89%;
@@ -116,6 +118,7 @@
   --success: 152 50% 50%;
   --warning: 38 85% 58%;
   --info: 212 80% 62%;
+  --system: 263 75% 70%;
   --border: 0 0% 20%;
   --input: 0 0% 20%;
   --ring: 263 75% 70%;
