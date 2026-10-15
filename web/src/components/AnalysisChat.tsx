@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Sparkles, Send, Loader2, Settings2, AlertCircle, Wrench, FileSearch, Trash2 } from 'lucide-react'
 import {
@@ -24,6 +24,12 @@ const PRESET_QUESTIONS = [
   'analysis.preset_tokens',
 ] as const
 
+// ---------------------------------------------------------------------------
+// 模块级会话存储：对话状态与流式输出不依赖组件生命周期。
+// 关闭分析面板（组件卸载）后流式更新与持久化仍在后台继续；
+// 重新打开（甚至离开 trace 页面再回来）都能看到进行中/已完成的回答。
+// ---------------------------------------------------------------------------
+
 // 对话历史按 trace 保存在浏览器 localStorage：误触关闭面板、刷新页面后可恢复
 const chatStorageKey = (traceId: string) => `prismcat-analysis-chat:${traceId}`
 const maxSavedMessages = 200
@@ -47,6 +53,120 @@ function loadSavedMessages(traceId: string): DisplayMessage[] {
   }
 }
 
+interface ChatSession {
+  messages: DisplayMessage[]
+  streaming: boolean
+  error: string
+}
+
+const sessions = new Map<string, ChatSession>()
+const sessionListeners = new Map<string, Set<() => void>>()
+
+function emitSession(traceId: string) {
+  sessionListeners.get(traceId)?.forEach(fn => fn())
+}
+
+function subscribeSession(traceId: string, cb: () => void) {
+  let set = sessionListeners.get(traceId)
+  if (!set) {
+    set = new Set()
+    sessionListeners.set(traceId, set)
+  }
+  set.add(cb)
+  return () => { set.delete(cb) }
+}
+
+function getSession(traceId: string): ChatSession {
+  let s = sessions.get(traceId)
+  if (!s) {
+    s = { messages: loadSavedMessages(traceId), streaming: false, error: '' }
+    sessions.set(traceId, s)
+  }
+  return s
+}
+
+function updateSession(traceId: string, mutate: (s: ChatSession) => ChatSession) {
+  sessions.set(traceId, mutate(getSession(traceId)))
+  persistSession(traceId)
+  emitSession(traceId)
+}
+
+function persistSession(traceId: string) {
+  try {
+    const save = getSession(traceId).messages
+      .filter(m => m.content !== '' || (m.activity ?? []).length > 0)
+      .slice(-maxSavedMessages)
+    if (save.length > 0) {
+      window.localStorage.setItem(chatStorageKey(traceId), JSON.stringify(save))
+    } else {
+      window.localStorage.removeItem(chatStorageKey(traceId))
+    }
+  } catch {
+    // 存储配额溢出等异常时忽略，不影响当前对话
+  }
+}
+
+// 发起一轮提问；运行在模块作用域，面板关闭后依旧继续执行到底
+async function runSend(traceId: string, question: string) {
+  if (!traceId || getSession(traceId).streaming) return
+  const history: AnalysisMessage[] = [
+    ...getSession(traceId).messages.map(m => ({ role: m.role, content: m.content })),
+    { role: 'user', content: question },
+  ]
+  updateSession(traceId, s => ({
+    ...s,
+    error: '',
+    streaming: true,
+    messages: [...s.messages,
+      { role: 'user', content: question },
+      { role: 'assistant', content: '', activity: [] },
+    ],
+  }))
+
+  let acc = ''
+  const updateLast = (fn: (m: DisplayMessage) => DisplayMessage) => {
+    updateSession(traceId, s => {
+      const messages = [...s.messages]
+      if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
+        messages[messages.length - 1] = fn(messages[messages.length - 1])
+      }
+      return { ...s, messages }
+    })
+  }
+
+  try {
+    const result = await streamAnalysisChat(traceId, history,
+      delta => {
+        acc += delta
+        updateLast(m => ({ ...m, content: acc }))
+      },
+      ev => {
+        if (ev.kind === 'tool_call') {
+          updateLast(m => ({ ...m, activity: [...(m.activity ?? []), { kind: 'tool_call', name: ev.name, args: ev.args }] }))
+        } else if (ev.kind === 'tool_result') {
+          updateLast(m => ({ ...m, activity: [...(m.activity ?? []), { kind: 'tool_result', name: ev.name, chars: ev.chars }] }))
+        } else if (ev.kind === 'reset') {
+          acc = ''
+          updateLast(m => ({ ...m, content: '' }))
+        }
+      })
+    const err = result.error
+    if (err) updateSession(traceId, s => ({ ...s, error: err }))
+  } catch (e) {
+    updateSession(traceId, s => ({ ...s, error: (e as Error).message }))
+  } finally {
+    updateSession(traceId, s => ({ ...s, streaming: false }))
+  }
+}
+
+function clearSession(traceId: string) {
+  try { window.localStorage.removeItem(chatStorageKey(traceId)) } catch { /* ignore */ }
+  sessions.delete(traceId)
+  emitSession(traceId)
+}
+
+// ---------------------------------------------------------------------------
+
 function isConfigured(cfg: AppConfig['analysis'] | null): cfg is AppConfig['analysis'] {
   return !!cfg && cfg.enabled && !!cfg.base_url && !!cfg.model
 }
@@ -62,11 +182,12 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
   const [model, setModel] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // 对话状态
-  const [messages, setMessages] = useState<DisplayMessage[]>([])
+  const subscribe = useCallback((cb: () => void) => subscribeSession(traceId, cb), [traceId])
+  const getSnapshot = useCallback(() => getSession(traceId), [traceId])
+  const session = useSyncExternalStore(subscribe, getSnapshot)
+  const { messages, streaming, error } = session
+
   const [input, setInput] = useState('')
-  const [streaming, setStreaming] = useState(false)
-  const [error, setError] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const loadConfig = useCallback(async () => {
@@ -88,49 +209,12 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
   useEffect(() => {
     if (open) {
       loadConfig()
-      setError('')
     }
   }, [open, loadConfig])
 
-  // 切换 trace 时载入该 trace 已保存的对话历史（首次挂载同样生效）
-  const hydratedTraceRef = useRef<string | null>(null)
-  const traceIdRef = useRef(traceId)
   useEffect(() => {
-    hydratedTraceRef.current = null
-    traceIdRef.current = traceId
-    setMessages(loadSavedMessages(traceId))
     setInput('')
-    setError('')
   }, [traceId])
-
-  // 对话变化即保存；已载入当前 trace 的历史后才允许写回，
-  // 避免切换 trace 的瞬间把上一 trace 的消息写进新 key
-  useEffect(() => {
-    if (hydratedTraceRef.current !== traceId) {
-      hydratedTraceRef.current = traceId
-      return
-    }
-    try {
-      const save = messages
-        .filter(m => m.content !== '' || (m.activity ?? []).length > 0)
-        .slice(-maxSavedMessages)
-      if (save.length > 0) {
-        window.localStorage.setItem(chatStorageKey(traceId), JSON.stringify(save))
-      } else {
-        window.localStorage.removeItem(chatStorageKey(traceId))
-      }
-    } catch {
-      // 存储配额溢出等异常时忽略，不影响当前对话
-    }
-  }, [messages, traceId])
-
-  // 清空当前 trace 的对话历史
-  const handleClear = useCallback(() => {
-    try { window.localStorage.removeItem(chatStorageKey(traceId)) } catch { /* ignore */ }
-    setMessages([])
-    setError('')
-    toast.success(t('analysis.cleared'))
-  }, [traceId, t])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -157,56 +241,17 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
     }
   }
 
-  const handleSend = useCallback(async (question: string) => {
+  const handleSend = useCallback((question: string) => {
     const q = question.trim()
-    if (!q || streaming) return
-    setError('')
-    const streamTrace = traceId
-    const history: AnalysisMessage[] = [
-      ...messages.map(m => ({ role: m.role, content: m.content })),
-      { role: 'user', content: q },
-    ]
-    setMessages(prev => [...prev,
-      { role: 'user', content: q },
-      { role: 'assistant', content: '', activity: [] },
-    ])
-    setInput('')
-    setStreaming(true)
-    try {
-      let acc = ''
-      const updateLast = (fn: (m: DisplayMessage) => DisplayMessage) => {
-        setMessages(prev => {
-          // 面板关闭后流式回调仍在后台运行；若期间已切换到其它 trace，丢弃旧 trace 的迟到更新
-          if (traceIdRef.current !== streamTrace) return prev
-          const next = [...prev]
-          if (next.length > 0 && next[next.length - 1].role === 'assistant') {
-            next[next.length - 1] = fn(next[next.length - 1])
-          }
-          return next
-        })
-      }
-      const result = await streamAnalysisChat(traceId, history,
-        delta => {
-          acc += delta
-          updateLast(m => ({ ...m, content: acc }))
-        },
-        ev => {
-          if (ev.kind === 'tool_call') {
-            updateLast(m => ({ ...m, activity: [...(m.activity ?? []), { kind: 'tool_call', name: ev.name, args: ev.args }] }))
-          } else if (ev.kind === 'tool_result') {
-            updateLast(m => ({ ...m, activity: [...(m.activity ?? []), { kind: 'tool_result', name: ev.name, chars: ev.chars }] }))
-          } else if (ev.kind === 'reset') {
-            acc = ''
-            updateLast(m => ({ ...m, content: '' }))
-          }
-        })
-      if (traceIdRef.current === streamTrace && result.error) setError(result.error)
-    } catch (e) {
-      if (traceIdRef.current === streamTrace) setError((e as Error).message)
-    } finally {
-      setStreaming(false)
-    }
-  }, [messages, streaming, traceId])
+    if (!q) return
+    void runSend(traceId, q)
+  }, [traceId])
+
+  // 清空当前 trace 的对话历史
+  const handleClear = useCallback(() => {
+    clearSession(traceId)
+    toast.success(t('analysis.cleared'))
+  }, [traceId, t])
 
   if (configLoading) {
     return (

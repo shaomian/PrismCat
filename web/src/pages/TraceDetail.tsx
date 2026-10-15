@@ -372,9 +372,9 @@ export function TraceDetail() {
         }}
       />
 
-      {/* AI 分析面板：forceMount 使关闭时仅隐藏不卸载，流式输出在后台继续完成 */}
+      {/* AI 分析面板：流式状态在模块级 store 中，关闭面板不中断输出 */}
       <Sheet open={analysisOpen} onOpenChange={setAnalysisOpen}>
-        <SheetContent forceMount side="right" className="w-full sm:max-w-xl p-4 flex flex-col">
+        <SheetContent side="right" className="w-full sm:max-w-xl p-4 flex flex-col">
           <SheetHeader className="p-0 pb-2">
             <SheetTitle className="text-sm flex items-center gap-1.5">
               <Sparkles className="h-4 w-4 text-primary" />
