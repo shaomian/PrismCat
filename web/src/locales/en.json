@@ -353,6 +353,7 @@
         "preset_tokens": "Which requests consumed the most tokens and time?",
         "input_placeholder": "Ask anything, e.g. why did request #3 fail?",
         "send": "Send",
+        "stop": "Stop",
         "tool_fetching": "Fetching raw request…",
         "tool_fetched": "Fetched {{chars}} chars",
         "clear": "Clear conversation",

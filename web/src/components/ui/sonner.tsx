@@ -5,15 +5,18 @@ import {
   OctagonXIcon,
   TriangleAlertIcon,
 } from "lucide-react"
-import { useTheme } from "next-themes"
+import { useSyncExternalStore } from "react"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
+import { getTheme, subscribeTheme } from "@/lib/theme"
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+  // 从全局主题 store 读取（此前误用 next-themes 的 useTheme，但没有
+  // ThemeProvider，导致 toast 永远跟随系统偏好而不是应用主题）
+  const theme = useSyncExternalStore(subscribeTheme, getTheme)
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={theme}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

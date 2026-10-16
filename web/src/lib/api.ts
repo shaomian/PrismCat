@@ -471,11 +471,13 @@ export async function streamAnalysisChat(
     messages: AnalysisMessage[],
     onDelta: (delta: string) => void,
     onEvent?: (ev: AnalysisEvent) => void,
+    signal?: AbortSignal,
 ): Promise<AnalysisStreamResult> {
     const response = await fetch(`${API_BASE}/analysis/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trace_id: traceId, messages }),
+        signal,
     })
     if (!response.ok || !response.body) {
         const error = await response.json().catch(() => ({ error: '请求失败' }))

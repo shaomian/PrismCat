@@ -94,8 +94,8 @@ export function LogFilters({
         onExport?.({ ...draft, offset: 0 })
     }
 
-    // 分页计算
-    const pageSize = filter.limit || 50
+    // 分页计算（与默认过滤器 limit: 20 保持一致，避免未设置时页码计算错位）
+    const pageSize = filter.limit || 20
     const currentPage = Math.floor((filter.offset || 0) / pageSize) + 1
     const totalPages = Math.max(1, Math.ceil(total / pageSize))
     const [pageDraft, setPageDraft] = useState(String(currentPage))

@@ -40,7 +40,7 @@ interface AppLayoutProps {
 function AppLayout({ onSignOut }: AppLayoutProps) {
   const { t, i18n } = useTranslation()
   const location = useLocation()
-  const [version, setVersion] = useState<string>('v1.4.0') // 初始显式 v1.4.0，直到接口返回
+  const [version, setVersion] = useState<string>('') // 接口返回前显示空占位，避免版本号过期误导
 
   useEffect(() => {
     fetchConfig()
@@ -168,7 +168,9 @@ function AppLayout({ onSignOut }: AppLayoutProps) {
               <TooltipContent>{t('auth.sign_out')}</TooltipContent>
             </Tooltip>
           </div>
-          <p className="mt-2 select-none px-1 text-xs text-muted-foreground/70">PrismCat {version}</p>
+          <p className="mt-2 select-none px-1 text-xs text-muted-foreground/70">
+            PrismCat {version || '…'}
+          </p>
         </div>
       </aside>
 

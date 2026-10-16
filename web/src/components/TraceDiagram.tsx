@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import mermaid from 'mermaid'
 import { Copy, Check, Download, FileText } from 'lucide-react'
@@ -8,21 +8,24 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import type { DiagramLabel } from '@/lib/api'
+import { getTheme, subscribeTheme, type Theme } from '@/lib/theme'
 
-let mermaidInitialized = false
+let mermaidTheme = ''
 let renderSeq = 0
 
 // 原生 <title> 悬停提示的长度上限（完整内容点击弹窗查看）
 const TOOLTIP_CHARS = 300
 
-function initMermaid() {
-  const dark = document.documentElement.classList.contains('dark')
+// 主题变化时重新初始化并触发重渲染，否则首次渲染后主题被冻结，
+// 暗色切换后流程图仍是旧主题（浅色文字在暗色卡片上不可读）
+function ensureMermaid(theme: Theme) {
+  if (mermaidTheme === theme) return
   mermaid.initialize({
     startOnLoad: false,
-    theme: dark ? 'dark' : 'default',
+    theme: theme === 'dark' ? 'dark' : 'default',
     sequence: { actorMargin: 60, messageMargin: 36, useMaxWidth: true },
   })
-  mermaidInitialized = true
+  mermaidTheme = theme
 }
 
 // 与后端 esc() 保持一致：Mermaid 源码中 ";" 与 "#" 被替换为全角标点
@@ -73,6 +76,7 @@ export function TraceDiagram({
   onOpenLog?: (logId: string) => void
 }) {
   const { t } = useTranslation()
+  const theme = useSyncExternalStore(subscribeTheme, getTheme)
   const containerRef = useRef<HTMLDivElement>(null)
   const [error, setError] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -81,7 +85,7 @@ export function TraceDiagram({
 
   useEffect(() => {
     if (!code) return
-    if (!mermaidInitialized) initMermaid()
+    ensureMermaid(theme)
     let cancelled = false
     setError(false)
     mermaid
@@ -99,7 +103,7 @@ export function TraceDiagram({
     return () => {
       cancelled = true
     }
-  }, [code, labels])
+  }, [code, labels, theme])
 
   const copySource = async () => {
     try {

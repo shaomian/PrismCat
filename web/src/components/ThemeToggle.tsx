@@ -1,29 +1,13 @@
 import { Moon, Sun } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useSyncExternalStore } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { useEffect, useState } from 'react'
-
-function getInitialDarkMode() {
-    return typeof localStorage === 'undefined' || localStorage.getItem('theme') !== 'light'
-}
-
-function applyTheme(isDark: boolean) {
-    document.documentElement.classList.toggle('dark', isDark)
-    localStorage.setItem('theme', isDark ? 'dark' : 'light')
-}
+import { getTheme, subscribeTheme, toggleTheme } from '@/lib/theme'
 
 export function ThemeToggle() {
     const { t } = useTranslation()
-    const [isDark, setIsDark] = useState(getInitialDarkMode)
-
-    useEffect(() => {
-        applyTheme(isDark)
-    }, [isDark])
-
-    const toggleTheme = () => {
-        setIsDark((current) => !current)
-    }
+    const isDark = useSyncExternalStore(subscribeTheme, getTheme) === 'dark'
 
     const label = isDark ? t('common.theme_to_light') : t('common.theme_to_dark')
 

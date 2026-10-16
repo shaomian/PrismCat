@@ -353,6 +353,7 @@
         "preset_tokens": "Token 和耗时主要消耗在哪些请求上？",
         "input_placeholder": "问点什么，例如：第 3 个请求为什么失败了？",
         "send": "发送",
+        "stop": "停止",
         "tool_fetching": "正在调取请求原文…",
         "tool_fetched": "已调取原文 {{chars}} 字符",
         "clear": "清空对话",

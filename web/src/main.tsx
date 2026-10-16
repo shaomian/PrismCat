@@ -10,7 +10,11 @@ import '@fontsource/fira-code/500.css'
 import './assets/fonts/noto-sans-sc.css'
 import './index.css'
 import './i18n'
+import { initTheme } from './lib/theme'
 import App from './App.tsx'
+
+// 首帧前应用存储的主题（跟随系统偏好），避免闪错主题
+initTheme()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

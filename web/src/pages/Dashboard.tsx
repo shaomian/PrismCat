@@ -5,6 +5,7 @@ import { StatsCards } from '@/components/StatsCards'
 import { LogTable } from '@/components/LogTable'
 import { LogFilters } from '@/components/LogFilters'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 const LogDetailPanel = lazy(async () => {
     const module = await import('@/components/LogDetail')
@@ -26,18 +27,27 @@ export function Dashboard() {
     const selectSeq = useRef(0)
 
     // 加载日志
+    const loadSeq = useRef(0)
     const loadLogs = useCallback(async () => {
+        // 快速翻页/改过滤条件时并发多个请求，旧响应可能后到；
+        // 用序号丢弃过期响应，避免第 2 页的行显示在第 3 页的页头下
+        const seq = ++loadSeq.current
         setLoading(true)
         try {
             const data: LogListResponse = await fetchLogs(filter)
+            if (loadSeq.current !== seq) return
             setLogs(data.logs || [])
             setTotal(data.total)
         } catch (err) {
+            if (loadSeq.current !== seq) return
             console.error('[Dashboard] Failed to load logs:', err)
+            toast.error(t('app.load_logs_failed'))
         } finally {
-            setLoading(false)
+            if (loadSeq.current === seq) {
+                setLoading(false)
+            }
         }
-    }, [filter])
+    }, [filter, t])
 
     // 加载统计
     const loadStats = useCallback(async () => {

@@ -261,6 +261,17 @@ function getOverrideRuleName(rule: unknown, fallback: string) {
     return typeof name === 'string' && name.trim() ? name.trim() : fallback
 }
 
+// canonicalJson 生成与键序无关的规范化 JSON，用于「编辑器内容是否
+// 与规则对象语义一致」的判断（见选中规则同步 effect）。
+function canonicalJson(value: unknown): string {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+    const entries = Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => v !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`
+}
+
 function getOverrideRuleEnabled(rule: unknown) {
     if (!rule || typeof rule !== 'object') return false
     const enabled = (rule as { enabled?: unknown }).enabled
@@ -801,7 +812,7 @@ function SettingSection({
 
 
 export function Settings() {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const navigate = useNavigate()
     const [upstreams, setUpstreams] = useState<Upstream[]>([])
     const [config, setConfig] = useState<AppConfig | null>(null)
@@ -1050,11 +1061,27 @@ export function Settings() {
             setSelectedOverrideRuleIndex(nextIndex)
         }
         const nextRule = overrideRuleObjects[nextIndex]
-        setSelectedOverrideRuleText(JSON.stringify(nextRule, null, 2))
         setSelectedOverrideRuleName(getOverrideRuleName(nextRule, `rule-${nextIndex + 1}`))
-        setSelectedOverrideMatchText(JSON.stringify(nextRule.match ?? {}, null, 2))
-        setSelectedOverridePatchText(JSON.stringify(nextRule.patch ?? [], null, 2))
-    }, [overrideRulesParse.error, overrideRuleObjects, selectedOverrideRuleIndex])
+
+        // 用户编辑合法 JSON 时会立即回写 overrideRuleObjects（新的对象标识
+        // 会触发本 effect）。若此时把 pretty-print 结果覆盖回编辑器，
+        // 每次合法按键都会重排整个 textarea 并把光标甩到末尾——
+        // 因此编辑器内容与选中规则语义一致时跳过同步。
+        const editorMatchesRule = (() => {
+            const raw = selectedOverrideRuleText.trim()
+            if (!raw) return false
+            try {
+                return canonicalJson(JSON.parse(raw)) === canonicalJson(nextRule)
+            } catch {
+                return false
+            }
+        })()
+        if (!editorMatchesRule) {
+            setSelectedOverrideRuleText(JSON.stringify(nextRule, null, 2))
+            setSelectedOverrideMatchText(JSON.stringify(nextRule.match ?? {}, null, 2))
+            setSelectedOverridePatchText(JSON.stringify(nextRule.patch ?? [], null, 2))
+        }
+    }, [overrideRulesParse.error, overrideRuleObjects, selectedOverrideRuleIndex, selectedOverrideRuleText])
 
     useEffect(() => {
         if (usageRulesParse.error || usageRuleObjects.length === 0) {
@@ -1105,14 +1132,17 @@ export function Settings() {
             setUsageExtractionEnabled(configData.usage_extraction?.enabled ?? false)
             setUsageBindings(configData.usage_extraction?.upstreams ?? {})
             const usageRules = configData.usage_extraction?.rules ?? []
-            setUsageRulesText(usageRules.length ? JSON.stringify(usageRules, null, 2) : usageExtractionExample)
+            // 空规则时保持空文本（示例仅作为 textarea 占位符展示）。
+            // 此前会把内置示例当作真实规则回填，用户只想保存无关配置时
+            // 示例规则会被一并持久化，且删不干净（重新加载又会复活）。
+            setUsageRulesText(usageRules.length ? JSON.stringify(usageRules, null, 2) : '')
         } catch (err) {
             console.error('Failed to load settings:', err)
-            toast.error(t('common.error'))
+            toast.error(i18n.t('common.error'))
         } finally {
             setLoading(false)
         }
-    }, [t])
+    }, [i18n])
 
     useEffect(() => {
         loadData()
@@ -2623,8 +2653,13 @@ export function Settings() {
                                                 </TableHeader>
                                                 <TableBody>
                                                     {sortedUpstreams.map(upstream => {
-                                                        const overrideConfig = activeTargetConfig(upstream)?.request_overrides || overrideBindings[upstream.name]
-                                                        const overrideEnabled = activeTargetConfig(upstream)?.request_overrides?.enabled || overrideBindings[upstream.name]?.enabled
+                                                        // 有目标预设的上游以激活目标的配置为准（显式 false 不再回退到
+                                                        // 旧版绑定，否则已禁用的目标会因残留绑定而显示错误的徽标）
+                                                        const targetConfig = activeTargetConfig(upstream)
+                                                        const overrideConfig = targetConfig?.request_overrides || (!targetConfig ? overrideBindings[upstream.name] : undefined)
+                                                        const overrideEnabled = targetConfig
+                                                            ? targetConfig.request_overrides?.enabled ?? false
+                                                            : overrideBindings[upstream.name]?.enabled ?? false
                                                         const overrideRuleCount = getBindingRuleNames(overrideConfig).length
                                                         const targetNames = upstream.targets ? Object.keys(upstream.targets) : []
                                                         const activeTarget = upstream.active_target || targetNames[0]

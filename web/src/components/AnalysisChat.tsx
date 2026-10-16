@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Sparkles, Send, Loader2, Settings2, AlertCircle, Wrench, FileSearch, Trash2 } from 'lucide-react'
+import { Sparkles, Send, Loader2, Settings2, AlertCircle, Wrench, FileSearch, Trash2, Square } from 'lucide-react'
 import {
   fetchConfig, updateConfig, streamAnalysisChat,
   type AnalysisMessage, type AppConfig,
@@ -61,6 +61,54 @@ interface ChatSession {
 
 const sessions = new Map<string, ChatSession>()
 const sessionListeners = new Map<string, Set<() => void>>()
+// 每个 trace 的进行中请求；用于「停止」按钮中止后台流
+const abortControllers = new Map<string, AbortController>()
+
+// localStorage 持久化防抖：流式输出期间每个 token 都会 mutate 会话，
+// 逐次同步写 localStorage 会卡主线程（长回答可达数千次写/回答）
+const PERSIST_DEBOUNCE_MS = 1000
+const persistTimers = new Map<string, number>()
+
+function persistSession(traceId: string) {
+  try {
+    const save = getSession(traceId).messages
+      .filter(m => m.content !== '' || (m.activity ?? []).length > 0)
+      .slice(-maxSavedMessages)
+    if (save.length > 0) {
+      window.localStorage.setItem(chatStorageKey(traceId), JSON.stringify(save))
+    } else {
+      window.localStorage.removeItem(chatStorageKey(traceId))
+    }
+  } catch {
+    // 存储配额溢出等异常时忽略，不影响当前对话
+  }
+}
+
+function schedulePersist(traceId: string, immediate = false) {
+  const existing = persistTimers.get(traceId)
+  if (immediate) {
+    if (existing !== undefined) {
+      clearTimeout(existing)
+      persistTimers.delete(traceId)
+    }
+    persistSession(traceId)
+    return
+  }
+  if (existing !== undefined) return
+  persistTimers.set(traceId, window.setTimeout(() => {
+    persistTimers.delete(traceId)
+    persistSession(traceId)
+  }, PERSIST_DEBOUNCE_MS))
+}
+
+function flushPersistAll() {
+  for (const traceId of persistTimers.keys()) {
+    schedulePersist(traceId, true)
+  }
+}
+
+// 页面关闭/隐藏时立即落盘，防抖窗口内的更新不丢失
+window.addEventListener('pagehide', flushPersistAll)
 
 function emitSession(traceId: string) {
   sessionListeners.get(traceId)?.forEach(fn => fn())
@@ -87,30 +135,18 @@ function getSession(traceId: string): ChatSession {
 
 function updateSession(traceId: string, mutate: (s: ChatSession) => ChatSession) {
   sessions.set(traceId, mutate(getSession(traceId)))
-  persistSession(traceId)
+  schedulePersist(traceId)
   emitSession(traceId)
-}
-
-function persistSession(traceId: string) {
-  try {
-    const save = getSession(traceId).messages
-      .filter(m => m.content !== '' || (m.activity ?? []).length > 0)
-      .slice(-maxSavedMessages)
-    if (save.length > 0) {
-      window.localStorage.setItem(chatStorageKey(traceId), JSON.stringify(save))
-    } else {
-      window.localStorage.removeItem(chatStorageKey(traceId))
-    }
-  } catch {
-    // 存储配额溢出等异常时忽略，不影响当前对话
-  }
 }
 
 // 发起一轮提问；运行在模块作用域，面板关闭后依旧继续执行到底
 async function runSend(traceId: string, question: string) {
   if (!traceId || getSession(traceId).streaming) return
+  // 历史里跳过空内容占位（上一轮流被中断/出错时残留），否则会把空消息发给服务端
   const history: AnalysisMessage[] = [
-    ...getSession(traceId).messages.map(m => ({ role: m.role, content: m.content })),
+    ...getSession(traceId).messages
+      .filter(m => m.content !== '')
+      .map(m => ({ role: m.role, content: m.content })),
     { role: 'user', content: question },
   ]
   updateSession(traceId, s => ({
@@ -122,6 +158,9 @@ async function runSend(traceId: string, question: string) {
       { role: 'assistant', content: '', activity: [] },
     ],
   }))
+
+  const controller = new AbortController()
+  abortControllers.set(traceId, controller)
 
   let acc = ''
   const updateLast = (fn: (m: DisplayMessage) => DisplayMessage) => {
@@ -149,14 +188,26 @@ async function runSend(traceId: string, question: string) {
           acc = ''
           updateLast(m => ({ ...m, content: '' }))
         }
-      })
+      },
+      controller.signal)
     const err = result.error
     if (err) updateSession(traceId, s => ({ ...s, error: err }))
   } catch (e) {
-    updateSession(traceId, s => ({ ...s, error: (e as Error).message }))
+    // 用户主动停止不算错误，保留已收到的部分内容
+    if ((e as Error).name !== 'AbortError') {
+      updateSession(traceId, s => ({ ...s, error: (e as Error).message }))
+    }
   } finally {
+    abortControllers.delete(traceId)
     updateSession(traceId, s => ({ ...s, streaming: false }))
+    // 流结束后立即落盘，不等防抖窗口
+    schedulePersist(traceId, true)
   }
+}
+
+// 中止进行中的分析流（「停止」按钮）
+function stopStream(traceId: string) {
+  abortControllers.get(traceId)?.abort()
 }
 
 function clearSession(traceId: string) {
@@ -189,6 +240,8 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
 
   const [input, setInput] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+  // 用户向上翻阅时不再强制滚回底部，避免「跟读者抢滚动条」
+  const stickToBottomRef = useRef(true)
 
   const loadConfig = useCallback(async () => {
     setConfigLoading(true)
@@ -217,7 +270,9 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
   }, [traceId])
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+    if (stickToBottomRef.current) {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+    }
   }, [messages])
 
   const saveConfig = async () => {
@@ -245,6 +300,10 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
     const q = question.trim()
     if (!q) return
     void runSend(traceId, q)
+  }, [traceId])
+
+  const handleStop = useCallback(() => {
+    stopStream(traceId)
   }, [traceId])
 
   // 清空当前 trace 的对话历史
@@ -337,7 +396,15 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
       </div>
 
       {/* 消息列表 */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+      <div
+        ref={scrollRef}
+        className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1"
+        onScroll={() => {
+          const el = scrollRef.current
+          if (!el) return
+          stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+        }}
+      >
         {empty && (
           <div className="space-y-2 pt-4">
             <p className="text-xs text-muted-foreground text-center">{t('analysis.empty_hint')}</p>
@@ -413,10 +480,23 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
           className="text-xs"
           disabled={streaming}
         />
-        <Button size="sm" className="gap-1 shrink-0" onClick={() => handleSend(input)} disabled={streaming || !input.trim()}>
-          {streaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-          {t('analysis.send')}
-        </Button>
+        {streaming ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1 shrink-0"
+            onClick={handleStop}
+            title={t('analysis.stop')}
+          >
+            <Square className="h-3 w-3" />
+            {t('analysis.stop')}
+          </Button>
+        ) : (
+          <Button size="sm" className="gap-1 shrink-0" onClick={() => handleSend(input)} disabled={!input.trim()}>
+            <Send className="h-3.5 w-3.5" />
+            {t('analysis.send')}
+          </Button>
+        )}
       </div>
     </div>
   )

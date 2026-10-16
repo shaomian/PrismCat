@@ -1,4 +1,4 @@
-import { useState, useEffect, useId, useMemo, useCallback } from 'react'
+import { useState, useEffect, useId, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
 import { Send, Plus, Trash2, Loader2, Copy, Check, ChevronDown, Braces, AlertCircle } from 'lucide-react'
@@ -51,8 +51,50 @@ function getErrorMessage(error: unknown, fallback: string) {
     return error instanceof Error ? error.message : fallback
 }
 
-export function Playground() {
+// 模块级组件：定义在 Playground 内部会在每次输入触发重渲染时产生新的
+// 组件类型，导致子树被整棵重挂载（丢焦点、丢 hover 态）
+function RawBodyViewer({ text }: { text: string }) {
+    return (
+        <pre className="whitespace-pre-wrap break-all text-xs font-mono leading-relaxed text-foreground select-text">
+            {text}
+        </pre>
+    )
+}
+
+function ViewToggle({
+    value,
+    onChange,
+}: {
+    value: ResponseViewMode
+    onChange: (value: ResponseViewMode) => void
+}) {
     const { t } = useTranslation()
+    return (
+        <div className="flex items-center gap-1 rounded-md border border-border bg-background p-1">
+            {([
+                { value: 'pretty', label: t('log_detail.view_pretty', 'Pretty') },
+                { value: 'raw', label: t('log_detail.view_raw', 'Raw') },
+            ] as const).map((option) => (
+                <Button
+                    key={option.value}
+                    type="button"
+                    variant={value === option.value ? 'secondary' : 'ghost'}
+                    size="sm"
+                    onClick={() => onChange(option.value)}
+                    className={cn(
+                        'h-6 px-2 text-xs font-medium',
+                        value === option.value && 'shadow-none'
+                    )}
+                >
+                    {option.label}
+                </Button>
+            ))}
+        </div>
+    )
+}
+
+export function Playground() {
+    const { t, i18n } = useTranslation()
     const location = useLocation()
     const jsonErrorId = useId()
 
@@ -84,11 +126,16 @@ export function Playground() {
 
     // Load upstreams
     useEffect(() => {
-        fetchUpstreams().then((data) => {
-            setUpstreams(data || [])
-            setUpstream((current) => current || data?.[0]?.name || '')
-        })
-    }, [])
+        fetchUpstreams()
+            .then((data) => {
+                setUpstreams(data || [])
+                setUpstream((current) => current || data?.[0]?.name || '')
+            })
+            .catch((err: unknown) => {
+                // 上游列表拉不下来时明确提示，而不是静默留空的下拉框
+                toast.error(getErrorMessage(err, i18n.t('app.load_upstreams_failed')))
+            })
+    }, [i18n])
 
     // Pre-fill from navigation state (replay from LogDetail)
     useEffect(() => {
@@ -179,13 +226,19 @@ export function Playground() {
         setHeaders(headers.map((h) => (h.id === id ? { ...h, [field]: val } : h)))
     }
 
+    const copiedTimerRef = useRef<number | null>(null)
+    useEffect(() => () => {
+        if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current)
+    }, [])
+
     const copyToClipboard = async (text: string, field: string) => {
         if (!(await copyText(text))) {
             toast.error(t('log_detail.copy_failed'))
             return
         }
         setCopiedField(field)
-        setTimeout(() => setCopiedField(null), 2000)
+        if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current)
+        copiedTimerRef.current = window.setTimeout(() => setCopiedField(null), 2000)
     }
 
     const formatRequestBody = () => {
@@ -233,41 +286,6 @@ export function Playground() {
             setSending(false)
         }
     }, [targetMode, upstream, targetUrl, method, path, headers, body])
-
-    const RawBodyViewer = ({ text }: { text: string }) => (
-        <pre className="whitespace-pre-wrap break-all text-xs font-mono leading-relaxed text-foreground select-text">
-            {text}
-        </pre>
-    )
-
-    const ViewToggle = ({
-        value,
-        onChange,
-    }: {
-        value: ResponseViewMode
-        onChange: (value: ResponseViewMode) => void
-    }) => (
-        <div className="flex items-center gap-1 rounded-md border border-border bg-background p-1">
-            {([
-                { value: 'pretty', label: t('log_detail.view_pretty', 'Pretty') },
-                { value: 'raw', label: t('log_detail.view_raw', 'Raw') },
-            ] as const).map((option) => (
-                <Button
-                    key={option.value}
-                    type="button"
-                    variant={value === option.value ? 'secondary' : 'ghost'}
-                    size="sm"
-                    onClick={() => onChange(option.value)}
-                    className={cn(
-                        'h-6 px-2 text-xs font-medium',
-                        value === option.value && 'shadow-none'
-                    )}
-                >
-                    {option.label}
-                </Button>
-            ))}
-        </div>
-    )
 
     // Handle Ctrl+Enter to send
     useEffect(() => {
