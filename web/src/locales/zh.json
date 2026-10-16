@@ -305,10 +305,17 @@
             "copy_source": "复制源码",
             "copy_failed": "复制失败",
             "render_failed": "流程图渲染失败，已显示源码",
-            "load_failed": "加载流程图失败"
+            "load_failed": "加载流程图失败",
+            "truncated_hint": "末尾带省略号（…）的文字已截断，悬停可预览，点击查看全文",
+            "full_text": "完整内容",
+            "full_text_desc": "流程图中的标签已截断，以下为完整内容（{{count}} 字符）",
+            "copy_full": "复制全文"
         },
         "carried": "折叠了 {{count}} 条历史消息（与上文重复）",
         "truncated": "内容被截断",
+        "click_load_full": "点击加载完整内容",
+        "loading_full": "正在加载完整内容…",
+        "full_load_failed": "加载完整内容失败",
         "expand": "展开",
         "collapse": "收起",
         "open_log": "查看原始日志",

@@ -305,10 +305,17 @@
             "copy_source": "Copy Source",
             "copy_failed": "Copy failed",
             "render_failed": "Diagram render failed, showing source",
-            "load_failed": "Failed to load diagram"
+            "load_failed": "Failed to load diagram",
+            "truncated_hint": "Labels ending with an ellipsis (…) are truncated — hover to preview, click for full text",
+            "full_text": "Full Text",
+            "full_text_desc": "The label is truncated in the diagram. Full content below ({{count}} chars)",
+            "copy_full": "Copy Full Text"
         },
         "carried": "{{count}} history messages collapsed (duplicated above)",
         "truncated": "content truncated",
+        "click_load_full": "Click to load full content",
+        "loading_full": "Loading full content…",
+        "full_load_failed": "Failed to load full content",
         "expand": "Expand",
         "collapse": "Collapse",
         "open_log": "Open raw log",

@@ -2,6 +2,7 @@ package timeline
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 )
@@ -180,6 +181,58 @@ func TestTruncation(t *testing.T) {
 	}
 	if n := len([]rune(ev.Content)); n > 101 { // 100 + "…"
 		t.Fatalf("content should be ~100 runes, got %d", n)
+	}
+}
+
+// full_log 按需调取用的构建方式：与默认构建共享逻辑，
+// 事件数量、顺序、carried 完全一致，仅内容不截断。
+func TestBuildUnlimitedAlignsWithDefault(t *testing.T) {
+	long := strings.Repeat("好", 5000)
+	req1 := `{"model":"m","messages":[{"role":"user","content":"` + long + `"}]}`
+	resp1 := `{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`
+	req2 := `{"model":"m","messages":[{"role":"user","content":"` + long + `"},{"role":"assistant","content":"ok"}]}`
+	resp2 := `{"choices":[{"message":{"role":"assistant","content":"` + long + `"}}]}`
+
+	items := []Input{
+		{LogID: "1", Seq: 1, Path: "/v1/chat/completions", RequestBody: req1, ResponseBody: resp1},
+		{LogID: "2", Seq: 2, Path: "/v1/chat/completions", RequestBody: req2, ResponseBody: resp2},
+	}
+	def := Build("t", items, Options{})
+	full := Build("t", items, Options{MaxEventChars: math.MaxInt})
+
+	if len(def.Requests) != len(full.Requests) {
+		t.Fatalf("request count mismatch: %d vs %d", len(def.Requests), len(full.Requests))
+	}
+	for i := range full.Requests {
+		d, f := def.Requests[i], full.Requests[i]
+		if d.Carried != f.Carried ||
+			len(d.NewEvents) != len(f.NewEvents) ||
+			len(d.ResponseEvents) != len(f.ResponseEvents) {
+			t.Fatalf("entry %d structure mismatch: %+v vs %+v", i, d, f)
+		}
+	}
+
+	dEv, fEv := def.Requests[0].NewEvents[0], full.Requests[0].NewEvents[0]
+	if !dEv.Truncated {
+		t.Fatal("default build should truncate long content")
+	}
+	if len([]rune(dEv.Content)) != 2001 { // 2000 + "…"
+		t.Fatalf("default build should truncate at 2000 runes, got %d", len([]rune(dEv.Content)))
+	}
+	if fEv.Truncated || fEv.Content != long {
+		t.Fatalf("full build should carry original content: %+v", fEv)
+	}
+
+	// 第二个请求：长消息被前缀去重折叠，仅响应事件为长文本
+	if full.Requests[1].Carried != 2 || len(full.Requests[1].NewEvents) != 0 {
+		t.Fatalf("full build carried mismatch: %+v", full.Requests[1])
+	}
+	fResp := full.Requests[1].ResponseEvents[0]
+	if fResp.Truncated || fResp.Content != long {
+		t.Fatalf("full build should carry full response: %+v", fResp)
+	}
+	if !def.Requests[1].ResponseEvents[0].Truncated {
+		t.Fatal("default build should truncate long response")
 	}
 }
 

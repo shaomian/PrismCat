@@ -5,7 +5,7 @@ import {
   Network, ArrowLeft, Clock, AlertCircle, Layers, Activity,
   ChevronRight, MessagesSquare, ListTree, GitBranch, FileDown, Sparkles,
 } from 'lucide-react'
-import { fetchTraceDetail, fetchTraceTimeline, fetchTraceDiagram, traceExportUrl, type TraceDetail as TraceDetailType, type TraceTimeline, type RequestLog } from '@/lib/api'
+import { fetchTraceDetail, fetchTraceTimeline, fetchTraceTimelineEntry, fetchTraceDiagram, traceExportUrl, type TraceDetail as TraceDetailType, type TraceTimeline, type RequestLog, type TraceDiagram as TraceDiagramData } from '@/lib/api'
 import { cn, formatLatency, formatDate, getStatusColor, METHOD_CLASS } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -23,10 +23,11 @@ export function TraceDetail() {
 
   const [detail, setDetail] = useState<TraceDetailType | null>(null)
   const [timeline, setTimeline] = useState<TraceTimeline | null>(null)
-  const [diagram, setDiagram] = useState<string | null>(null)
+  const [diagram, setDiagram] = useState<TraceDiagramData | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null)
   const [analysisOpen, setAnalysisOpen] = useState(false)
+  const [loadingFullLogIds, setLoadingFullLogIds] = useState<Set<string>>(new Set())
 
   const loadDetail = useCallback(async () => {
     if (!traceId) return
@@ -55,11 +56,32 @@ export function TraceDetail() {
     if (!traceId) return
     try {
       const res = await fetchTraceDiagram(traceId)
-      setDiagram(res.mermaid)
+      setDiagram(res)
     } catch {
       toast.error(t('timeline.diagram.load_failed'))
     }
   }, [traceId, t])
+
+  // 按需加载单个请求的完整（未截断）事件，原位替换列表中的对应条目
+  const handleLoadFullEvents = useCallback(async (logId: string) => {
+    if (!traceId || loadingFullLogIds.has(logId)) return
+    setLoadingFullLogIds(prev => new Set(prev).add(logId))
+    try {
+      const entry = await fetchTraceTimelineEntry(traceId, logId)
+      setTimeline(prev => prev ? {
+        ...prev,
+        requests: prev.requests.map(req => (req.log_id === logId ? entry : req)),
+      } : prev)
+    } catch {
+      toast.error(t('timeline.full_load_failed'))
+    } finally {
+      setLoadingFullLogIds(prev => {
+        const next = new Set(prev)
+        next.delete(logId)
+        return next
+      })
+    }
+  }, [traceId, loadingFullLogIds, t])
 
   useEffect(() => {
     loadDetail()
@@ -218,7 +240,12 @@ export function TraceDetail() {
               <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             </div>
           ) : (
-            <TraceTimelineView requests={timeline.requests} onOpenLog={handleOpenLog} />
+            <TraceTimelineView
+              requests={timeline.requests}
+              onOpenLog={handleOpenLog}
+              onLoadFull={handleLoadFullEvents}
+              loadingFullLogIds={loadingFullLogIds}
+            />
           )}
         </TabsContent>
 
@@ -228,7 +255,7 @@ export function TraceDetail() {
               <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             </div>
           ) : (
-            <TraceDiagram code={diagram} />
+            <TraceDiagram code={diagram.mermaid} labels={diagram.labels} onOpenLog={handleOpenLog} />
           )}
         </TabsContent>
 

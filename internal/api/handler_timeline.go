@@ -2,16 +2,38 @@ package api
 
 import (
 	"context"
+	"math"
 	"net/http"
 
 	"github.com/paopaoandlingyia/PrismCat/internal/httpbody"
 	"github.com/paopaoandlingyia/PrismCat/internal/storage"
+	"github.com/paopaoandlingyia/PrismCat/internal/timeline"
 )
 
 // handleTraceTimeline 构建调用链的对话时间线: GET /api/traces/{id}/timeline
+//
+// ?full_log=LOGID 变体：不返回整条时间线，而是返回该请求的单个条目，
+// 且事件内容不做截断（默认为控制响应体量按 2000 字符截断）。
+// 前端展开被截断的内容时按需调取；与列表构建走同一 Build 逻辑，
+// 保证事件数量、顺序与列表完全一致，客户端可按 log_id 原位替换。
 func (h *Handler) handleTraceTimeline(w http.ResponseWriter, r *http.Request, traceID string) {
 	if r.Method != http.MethodGet {
 		h.jsonError(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if fullLog := r.URL.Query().Get("full_log"); fullLog != "" {
+		tl := h.buildTraceTimelineOpts(w, r, traceID, timeline.Options{MaxEventChars: math.MaxInt})
+		if tl == nil {
+			return
+		}
+		for i := range tl.Requests {
+			if tl.Requests[i].LogID == fullLog {
+				h.jsonResponse(w, tl.Requests[i])
+				return
+			}
+		}
+		h.jsonError(w, "请求不存在", http.StatusNotFound)
 		return
 	}
 

@@ -7,7 +7,7 @@ import (
 
 func TestDiagram(t *testing.T) {
 	tl := Build("trace-1", openAIChain(), Options{})
-	src := Diagram(tl, DiagramOptions{})
+	src, labels := Diagram(tl, DiagramOptions{})
 
 	mustContain := []string{
 		"sequenceDiagram",
@@ -34,6 +34,22 @@ func TestDiagram(t *testing.T) {
 		}
 		checkNoMermaidBreakers(t, line)
 	}
+
+	// labels 与源码中的消息顺序一致（Text 为 esc 前的原文）：
+	// U->>A(user), A->>L(#1), L-->>A(tool), A->>T(args),
+	// T-->>A(result), A->>L(#2), L-->>A(message)
+	if len(labels) != 7 {
+		t.Fatalf("expected 7 labels, got %d: %+v", len(labels), labels)
+	}
+	if labels[0].Text != "fix the bug" || labels[0].LogID != "1" || labels[0].Truncated {
+		t.Errorf("label[0] mismatch: %+v", labels[0])
+	}
+	if labels[1].Text != "#1 请求" {
+		t.Errorf("label[1] mismatch: %+v", labels[1])
+	}
+	if labels[6].Text != "Bug fixed." || labels[6].LogID != "2" {
+		t.Errorf("label[6] mismatch: %+v", labels[6])
+	}
 }
 
 func TestDiagramLabelTruncation(t *testing.T) {
@@ -44,11 +60,27 @@ func TestDiagramLabelTruncation(t *testing.T) {
 		ResponseBody: `{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`,
 	}}
 	tl := Build("t", items, Options{})
-	src := Diagram(tl, DiagramOptions{LabelChars: 40})
+	src, labels := Diagram(tl, DiagramOptions{LabelChars: 40})
 	for _, line := range strings.Split(src, "\n") {
 		if len([]rune(line)) > 150 { // 前缀 + 40 + 省略号
 			t.Errorf("line too long (%d runes): %q", len([]rune(line)), line)
 		}
+	}
+
+	// 被截断的标签必须携带完整原文，否则前端无从展开
+	if len(labels) != 3 {
+		t.Fatalf("expected 3 labels, got %d: %+v", len(labels), labels)
+	}
+	truncatedLabel := labels[0]
+	if !truncatedLabel.Truncated {
+		t.Fatalf("user message label should be truncated: %+v", truncatedLabel)
+	}
+	if truncatedLabel.Text != long || truncatedLabel.LogID != "1" {
+		t.Errorf("truncated label should carry full text: %+v", truncatedLabel)
+	}
+	respLabel := labels[2]
+	if respLabel.Truncated || respLabel.Text != "ok" {
+		t.Errorf("short label should not be truncated: %+v", respLabel)
 	}
 }
 
@@ -69,11 +101,11 @@ func TestDiagramEscapesMermaidSyntax(t *testing.T) {
 			RequestBody: `{"model":"m","messages":[` + sys + `,` + user + `,` + assistantCall + `,` + toolResult + `]}`, ResponseBody: resp2},
 	}
 
-	src := Diagram(Build("t", items, Options{}), DiagramOptions{})
+	src, _ := Diagram(Build("t", items, Options{}), DiagramOptions{})
 
 	for _, want := range []string{
-		"＃define",   // 用户消息中的 # 被转义
-		"；",          // 分号被转义
+		"＃define",         // 用户消息中的 # 被转义
+		"；",               // 分号被转义
 		"echo '=== v ===", // 工具参数中的引号、=、> 均安全，保留原样
 	} {
 		if !strings.Contains(src, want) {

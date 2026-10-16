@@ -30,7 +30,8 @@ func (h *Handler) handleTraceDiagram(w http.ResponseWriter, r *http.Request, tra
 			opts.LabelChars = n
 		}
 	}
-	h.jsonResponse(w, map[string]string{"mermaid": timeline.Diagram(tl, opts)})
+	src, labels := timeline.Diagram(tl, opts)
+	h.jsonResponse(w, map[string]interface{}{"mermaid": src, "labels": labels})
 }
 
 // handleTraceExport 导出调用链 JSONL: GET /api/traces/{id}/export?mode=events|raw
@@ -94,6 +95,11 @@ func (h *Handler) handleTraceExport(w http.ResponseWriter, r *http.Request, trac
 
 // buildTraceTimeline 拉取调用链并构建时间线；出错时已写响应，返回 nil
 func (h *Handler) buildTraceTimeline(w http.ResponseWriter, r *http.Request, traceID string) *timeline.Timeline {
+	return h.buildTraceTimelineOpts(w, r, traceID, timeline.Options{})
+}
+
+// buildTraceTimelineOpts 同 buildTraceTimeline，但允许自定义构建选项
+func (h *Handler) buildTraceTimelineOpts(w http.ResponseWriter, r *http.Request, traceID string, opts timeline.Options) *timeline.Timeline {
 	if traceID == "" {
 		h.jsonError(w, "缺少 trace ID", http.StatusBadRequest)
 		return nil
@@ -107,7 +113,7 @@ func (h *Handler) buildTraceTimeline(w http.ResponseWriter, r *http.Request, tra
 		h.jsonError(w, "trace 不存在", http.StatusNotFound)
 		return nil
 	}
-	return timeline.Build(traceID, h.traceTimelineInputs(r, requests), timeline.Options{})
+	return timeline.Build(traceID, h.traceTimelineInputs(r, requests), opts)
 }
 
 // traceTimelineInputs 将存储层日志转换为时间线输入（含 blob 还原）

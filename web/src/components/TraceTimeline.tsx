@@ -18,7 +18,17 @@ const ROLE_STYLE: Record<string, { icon: typeof User; badge: string; accent: str
 
 const FALLBACK_STYLE = { icon: User, badge: 'bg-muted text-muted-foreground', accent: 'border-l-border' }
 
-function EventCard({ event, defaultExpanded }: { event: TimelineEvent; defaultExpanded?: boolean }) {
+function EventCard({
+  event,
+  defaultExpanded,
+  onNeedFull,
+  loadingFull,
+}: {
+  event: TimelineEvent
+  defaultExpanded?: boolean
+  onNeedFull?: () => void
+  loadingFull?: boolean
+}) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(defaultExpanded ?? event.kind === 'message')
   const style = ROLE_STYLE[event.role] ?? FALLBACK_STYLE
@@ -31,6 +41,16 @@ function EventCard({ event, defaultExpanded }: { event: TimelineEvent; defaultEx
   const rawText = event.kind === 'tool_call' ? (event.tool_args ?? '') : (event.content ?? '')
   const isLong = rawText.length > PREVIEW_CHARS
   const text = expanded || !isLong ? rawText : rawText.slice(0, PREVIEW_CHARS) + '…'
+
+  // 展开被截断的内容时按需拉取完整条目（由父组件合并进列表状态）
+  const handleToggle = () => {
+    if (!expanded && event.truncated) onNeedFull?.()
+    setExpanded(v => !v)
+  }
+  const handleLoadFull = () => {
+    onNeedFull?.()
+    setExpanded(true)
+  }
 
   return (
     <div className={cn('rounded-md border border-border border-l-2 bg-card p-2.5', style.accent)}>
@@ -50,12 +70,20 @@ function EventCard({ event, defaultExpanded }: { event: TimelineEvent; defaultEx
           </span>
         )}
         {event.truncated && (
-          <span className="text-[11px] text-muted-foreground/70">({t('timeline.truncated')})</span>
+          <button
+            type="button"
+            onClick={handleLoadFull}
+            disabled={loadingFull}
+            className="text-[11px] text-muted-foreground/70 hover:text-foreground underline decoration-dashed underline-offset-2 transition-colors disabled:opacity-60"
+            title={t('timeline.click_load_full')}
+          >
+            ({loadingFull ? t('timeline.loading_full') : t('timeline.truncated')})
+          </button>
         )}
         {(isLong || event.kind === 'thinking') && (
           <button
             type="button"
-            onClick={() => setExpanded(v => !v)}
+            onClick={handleToggle}
             className="ml-auto inline-flex items-center gap-0.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
           >
             {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -72,7 +100,17 @@ function EventCard({ event, defaultExpanded }: { event: TimelineEvent; defaultEx
   )
 }
 
-function RequestGroup({ request, onOpenLog }: { request: TimelineRequest; onOpenLog?: (logId: string) => void }) {
+function RequestGroup({
+  request,
+  onOpenLog,
+  onLoadFull,
+  loadingFullLogIds,
+}: {
+  request: TimelineRequest
+  onOpenLog?: (logId: string) => void
+  onLoadFull?: (logId: string) => void
+  loadingFullLogIds?: Set<string>
+}) {
   const { t } = useTranslation()
   const newEvents = request.new_events ?? []
   const responseEvents = request.response_events ?? []
@@ -117,19 +155,43 @@ function RequestGroup({ request, onOpenLog }: { request: TimelineRequest; onOpen
       )}
 
       {/* 新增消息 */}
-      {newEvents.map((ev, i) => <EventCard key={`n-${i}`} event={ev} />)}
+      {newEvents.map((ev, i) => (
+        <EventCard
+          key={`n-${i}`}
+          event={ev}
+          onNeedFull={onLoadFull ? () => onLoadFull(request.log_id) : undefined}
+          loadingFull={loadingFullLogIds?.has(request.log_id)}
+        />
+      ))}
 
       {/* 响应事件 */}
       {responseEvents.length > 0 && (
         <div className="ml-4 space-y-2 pt-1">
-          {responseEvents.map((ev, i) => <EventCard key={`r-${i}`} event={ev} />)}
+          {responseEvents.map((ev, i) => (
+            <EventCard
+              key={`r-${i}`}
+              event={ev}
+              onNeedFull={onLoadFull ? () => onLoadFull(request.log_id) : undefined}
+              loadingFull={loadingFullLogIds?.has(request.log_id)}
+            />
+          ))}
         </div>
       )}
     </div>
   )
 }
 
-export function TraceTimelineView({ requests, onOpenLog }: { requests: TimelineRequest[]; onOpenLog?: (logId: string) => void }) {
+export function TraceTimelineView({
+  requests,
+  onOpenLog,
+  onLoadFull,
+  loadingFullLogIds,
+}: {
+  requests: TimelineRequest[]
+  onOpenLog?: (logId: string) => void
+  onLoadFull?: (logId: string) => void
+  loadingFullLogIds?: Set<string>
+}) {
   const { t } = useTranslation()
   if (requests.length === 0) {
     return <div className="py-12 text-center text-sm text-muted-foreground">{t('timeline.empty')}</div>
@@ -138,7 +200,12 @@ export function TraceTimelineView({ requests, onOpenLog }: { requests: TimelineR
     <div className="space-y-6">
       {requests.map(req => (
         <div key={req.log_id} className="relative">
-          <RequestGroup request={req} onOpenLog={onOpenLog} />
+          <RequestGroup
+            request={req}
+            onOpenLog={onOpenLog}
+            onLoadFull={onLoadFull}
+            loadingFullLogIds={loadingFullLogIds}
+          />
         </div>
       ))}
     </div>

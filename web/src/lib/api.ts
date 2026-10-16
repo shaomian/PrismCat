@@ -415,7 +415,28 @@ export async function fetchTraceTimeline(traceId: string): Promise<TraceTimeline
     return response.json()
 }
 
-export async function fetchTraceDiagram(traceId: string): Promise<{ mermaid: string }> {
+// 按需获取单个请求的完整（未截断）时间线条目。
+// 事件数量与顺序和列表构建一致，可按 log_id 原位替换列表中的条目。
+export async function fetchTraceTimelineEntry(traceId: string, logId: string): Promise<TimelineRequest> {
+    const response = await fetch(
+        `${API_BASE}/traces/${encodeURIComponent(traceId)}/timeline?full_log=${encodeURIComponent(logId)}`,
+    )
+    if (!response.ok) throw new Error('获取完整事件内容失败')
+    return response.json()
+}
+
+export interface DiagramLabel {
+    text: string
+    log_id?: string
+    truncated: boolean
+}
+
+export interface TraceDiagram {
+    mermaid: string
+    labels: DiagramLabel[] | null
+}
+
+export async function fetchTraceDiagram(traceId: string): Promise<TraceDiagram> {
     const response = await fetch(`${API_BASE}/traces/${encodeURIComponent(traceId)}/diagram`)
     if (!response.ok) throw new Error('获取流程图失败')
     return response.json()

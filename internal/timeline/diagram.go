@@ -10,9 +10,23 @@ type DiagramOptions struct {
 	LabelChars int // 箭头标签最大字符数，0 使用默认值 40
 }
 
+// DiagramLabel 流程图中一条消息/注释标签的完整内容。
+// Mermaid 源码中的标签会被截断以保证图形紧凑，此结构把未截断的
+// 原文一并返回，供前端做「悬停预览 / 点击查看全文」等渐进式披露交互。
+//
+//   - Text: 未截断的完整单行文本
+//   - LogID: 标签所属请求的日志 ID
+//   - Truncated: 图中展示的文本是否被截断
+type DiagramLabel struct {
+	Text      string `json:"text"`
+	LogID     string `json:"log_id,omitempty"`
+	Truncated bool   `json:"truncated"`
+}
+
 const defaultLabelChars = 40
 
-// Diagram 从时间线生成 Mermaid sequenceDiagram 源码。
+// Diagram 从时间线生成 Mermaid sequenceDiagram 源码，
+// 并同步返回每条消息标签的完整内容（与源码中消息的出现顺序一致）。
 //
 // 参与者固定为 User / Agent / LLM / Tools 四个泳道：
 //   - 第一条 user 消息画为 User ->> Agent
@@ -20,13 +34,21 @@ const defaultLabelChars = 40
 //   - LLM 响应画为 LLM -->> Agent
 //
 // Agent 循环里的往返（Agent ->> LLM）按请求 #seq 依次展开。
-func Diagram(tl *Timeline, opts DiagramOptions) string {
+func Diagram(tl *Timeline, opts DiagramOptions) (string, []DiagramLabel) {
 	labelChars := opts.LabelChars
 	if labelChars <= 0 {
 		labelChars = defaultLabelChars
 	}
 
 	var b strings.Builder
+	labels := make([]DiagramLabel, 0)
+	// label 记录标签全文（供前端展示），返回截断后的展示文本（写入源码）
+	label := func(full, logID string) string {
+		flat := strings.Join(strings.Fields(full), " ")
+		displayed := truncateLabel(full, labelChars)
+		labels = append(labels, DiagramLabel{Text: flat, LogID: logID, Truncated: displayed != flat})
+		return displayed
+	}
 	b.WriteString("sequenceDiagram\n")
 	b.WriteString("    autonumber\n")
 	b.WriteString("    actor U as User\n")
@@ -53,28 +75,28 @@ func Diagram(tl *Timeline, opts DiagramOptions) string {
 		for _, ev := range req.NewEvents {
 			switch ev.Kind {
 			case "tool_result":
-				fmt.Fprintf(&b, "    T-->>A: %s\n", esc(truncateLabel(eventSummary(ev), labelChars)))
+				fmt.Fprintf(&b, "    T-->>A: %s\n", esc(label(eventSummary(ev), req.LogID)))
 			case "message":
 				if ev.Role == "user" {
-					fmt.Fprintf(&b, "    U->>A: %s\n", esc(truncateLabel(ev.Content, labelChars)))
+					fmt.Fprintf(&b, "    U->>A: %s\n", esc(label(ev.Content, req.LogID)))
 				}
 			}
 		}
 
 		// 请求箭头：Agent ->> LLM
-		label := fmt.Sprintf("#%d 请求", req.Seq)
+		reqLabel := fmt.Sprintf("#%d 请求", req.Seq)
 		if req.Carried > 0 {
-			label += fmt.Sprintf("（携带 %d 条历史）", req.Carried)
+			reqLabel += fmt.Sprintf("（携带 %d 条历史）", req.Carried)
 		}
-		fmt.Fprintf(&b, "    A->>L: %s\n", esc(label))
+		fmt.Fprintf(&b, "    A->>L: %s\n", esc(label(reqLabel, req.LogID)))
 
 		// 响应事件
 		var respTexts []string
 		for _, ev := range req.ResponseEvents {
 			switch ev.Kind {
 			case "tool_call":
-				fmt.Fprintf(&b, "    L-->>A: 调用工具 %s\n", esc(ev.ToolName))
-				fmt.Fprintf(&b, "    A->>T: %s(%s)\n", esc(ev.ToolName), esc(truncateLabel(ev.ToolArgs, labelChars)))
+				fmt.Fprintf(&b, "    L-->>A: %s\n", esc(label("调用工具 "+ev.ToolName, req.LogID)))
+				fmt.Fprintf(&b, "    A->>T: %s\n", esc(label(ev.ToolName+"("+ev.ToolArgs+")", req.LogID)))
 			case "message":
 				respTexts = append(respTexts, ev.Content)
 			case "thinking":
@@ -82,15 +104,15 @@ func Diagram(tl *Timeline, opts DiagramOptions) string {
 			}
 		}
 		if len(respTexts) > 0 {
-			fmt.Fprintf(&b, "    L-->>A: %s\n", esc(truncateLabel(strings.Join(respTexts, " "), labelChars)))
+			fmt.Fprintf(&b, "    L-->>A: %s\n", esc(label(strings.Join(respTexts, " "), req.LogID)))
 		}
 
 		// 错误标注
 		if req.Error != "" || req.StatusCode >= 400 {
-			fmt.Fprintf(&b, "    Note over L: 请求失败 (%d) %s\n", req.StatusCode, esc(truncateLabel(req.Error, labelChars)))
+			fmt.Fprintf(&b, "    Note over L: %s\n", esc(label(fmt.Sprintf("请求失败 (%d) %s", req.StatusCode, req.Error), req.LogID)))
 		}
 	}
-	return b.String()
+	return b.String(), labels
 }
 
 // eventSummary 事件的单行摘要
