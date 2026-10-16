@@ -97,6 +97,42 @@ func Build(traceID string, items []Input, opts Options) *Timeline {
 	return tl
 }
 
+// TruncateEvents 返回按 maxChars 截断事件内容的深拷贝时间线。
+//
+// 用于缓存场景：一次完整构建（MaxEventChars 不限制）后按需派生各种
+// 截断级别，与 Build(items, Options{MaxEventChars: maxChars}) 的输出
+// 完全一致——指纹与 carried 在解析阶段确定，与截断无关。
+func TruncateEvents(tl *Timeline, maxChars int) *Timeline {
+	if tl == nil {
+		return nil
+	}
+	out := &Timeline{
+		TraceID: tl.TraceID,
+		Summary: tl.Summary,
+	}
+	if len(tl.Requests) > 0 {
+		out.Requests = make([]RequestEntry, len(tl.Requests))
+		for i, req := range tl.Requests {
+			entry := req
+			entry.NewEvents = truncateEvents(req.NewEvents, maxChars)
+			entry.ResponseEvents = truncateEvents(req.ResponseEvents, maxChars)
+			out.Requests[i] = entry
+		}
+	}
+	return out
+}
+
+func truncateEvents(events []Event, maxChars int) []Event {
+	if events == nil {
+		return nil
+	}
+	out := make([]Event, len(events))
+	for i, ev := range events {
+		out[i] = truncateEvent(ev, maxChars)
+	}
+	return out
+}
+
 // truncateEvent 按字符数截断事件内容（按 rune 截断，保证中文不断码）
 func truncateEvent(ev Event, maxChars int) Event {
 	ev.Content, ev.Truncated = truncateRunes(ev.Content, maxChars)

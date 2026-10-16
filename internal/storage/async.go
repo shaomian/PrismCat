@@ -197,6 +197,10 @@ func (a *AsyncRepository) GetTraceRequests(traceID string) ([]*RequestLog, error
 	return a.inner.GetTraceRequests(traceID)
 }
 
+func (a *AsyncRepository) GetTraceFingerprint(traceID string) (TraceFingerprint, error) {
+	return a.inner.GetTraceFingerprint(traceID)
+}
+
 func (a *AsyncRepository) GetStats(since *time.Time) (*LogStats, error) {
 	return a.inner.GetStats(since)
 }

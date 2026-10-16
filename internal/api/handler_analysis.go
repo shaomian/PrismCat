@@ -80,19 +80,12 @@ func (h *Handler) handleAnalysisChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	requests, err := h.repo.GetTraceRequests(req.TraceID)
-	if err != nil {
-		h.jsonError(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if len(requests) == 0 {
-		h.jsonError(w, "trace 不存在", http.StatusNotFound)
-		return
-	}
-
-	// 构建压缩时间线上下文（确定性压缩，无需 LLM）
-	tl := timeline.Build(req.TraceID, h.traceTimelineInputs(r, requests),
+	// 构建压缩时间线上下文（确定性压缩，无需 LLM；走调用链级缓存）
+	tl := h.buildTraceTimelineOpts(w, r, req.TraceID,
 		timeline.Options{MaxEventChars: analysisContextEventChars})
+	if tl == nil {
+		return
+	}
 	contextText := timeline.FormatText(tl, timeline.FormatOptions{
 		MaxEventChars: analysisContextEventChars,
 		MaxTotalChars: 60000,

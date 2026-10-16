@@ -79,6 +79,10 @@ func (r *proxyTestRepo) GetTraceRequests(traceID string) ([]*storage.RequestLog,
 	return nil, errors.New("not implemented")
 }
 
+func (r *proxyTestRepo) GetTraceFingerprint(traceID string) (storage.TraceFingerprint, error) {
+	return storage.TraceFingerprint{}, errors.New("not implemented")
+}
+
 func (r *proxyTestRepo) Close() error {
 	return nil
 }

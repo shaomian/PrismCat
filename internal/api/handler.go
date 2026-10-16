@@ -33,6 +33,7 @@ type Handler struct {
 	clients *outbound.ClientCache
 	metrics *systemmetrics.Collector
 	updates *updatecheck.Checker
+	tlCache *traceTimelineCache
 }
 
 // New 创建 API 处理器
@@ -45,6 +46,7 @@ func New(cfg *config.Config, repo storage.Repository, blobs storage.BlobStore, l
 		clients: outbound.NewClientCache(50, 10),
 		metrics: systemmetrics.NewCollector(),
 		updates: updatecheck.NewChecker(),
+		tlCache: newTraceTimelineCache(),
 	}
 }
 

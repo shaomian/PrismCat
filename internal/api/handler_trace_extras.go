@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -84,9 +85,11 @@ func (h *Handler) handleTraceExport(w http.ResponseWriter, r *http.Request, trac
 		return
 	}
 
-	// events 模式：复用时间线构建（含前缀去重、SSE 合并）
-	inputs := h.traceTimelineInputs(r, requests)
-	tl := timeline.Build(traceID, inputs, timeline.Options{})
+	// events 模式：复用时间线构建（含前缀去重、SSE 合并；走缓存）
+	tl := h.buildTraceTimeline(w, r, traceID)
+	if tl == nil {
+		return
+	}
 	writeLine(map[string]interface{}{"type": "summary", "trace_id": traceID, "summary": tl.Summary})
 	for _, entry := range tl.Requests {
 		writeLine(map[string]interface{}{"type": "request", "request": entry})
@@ -98,22 +101,42 @@ func (h *Handler) buildTraceTimeline(w http.ResponseWriter, r *http.Request, tra
 	return h.buildTraceTimelineOpts(w, r, traceID, timeline.Options{})
 }
 
-// buildTraceTimelineOpts 同 buildTraceTimeline，但允许自定义构建选项
+// buildTraceTimelineOpts 同 buildTraceTimeline，但允许自定义构建选项。
+//
+// 实际构建带缓存：每次读取前用 GetTraceFingerprint（条数 + 最新创建
+// 时间，走索引）判断失效；完整构建（不截断）按 traceID 缓存（LRU），
+// 各种截断级别用 timeline.TruncateEvents 派生。此前每次查看时间线/
+// 流程图/分析对话都会对每条日志做全量 blob 恢复 + 解压 + JSON 解析，
+// 大调用链上一次点击可达 GB 级 IO。
 func (h *Handler) buildTraceTimelineOpts(w http.ResponseWriter, r *http.Request, traceID string, opts timeline.Options) *timeline.Timeline {
 	if traceID == "" {
 		h.jsonError(w, "缺少 trace ID", http.StatusBadRequest)
 		return nil
 	}
+	fp, err := h.repo.GetTraceFingerprint(traceID)
+	if err != nil {
+		h.jsonError(w, err.Error(), http.StatusInternalServerError)
+		return nil
+	}
+	if fp.Count == 0 {
+		h.jsonError(w, "trace 不存在", http.StatusNotFound)
+		return nil
+	}
+
+	if cached := h.tlCache.get(traceID, fp); cached != nil {
+		return deriveTimeline(cached, opts)
+	}
+
 	requests, err := h.repo.GetTraceRequests(traceID)
 	if err != nil {
 		h.jsonError(w, err.Error(), http.StatusInternalServerError)
 		return nil
 	}
-	if len(requests) == 0 {
-		h.jsonError(w, "trace 不存在", http.StatusNotFound)
-		return nil
-	}
-	return timeline.Build(traceID, h.traceTimelineInputs(r, requests), opts)
+	// 完整构建一次，截断级别由派生产出
+	full := timeline.Build(traceID, h.traceTimelineInputs(r, requests),
+		timeline.Options{MaxEventChars: math.MaxInt})
+	h.tlCache.put(traceID, fp, full)
+	return deriveTimeline(full, opts)
 }
 
 // traceTimelineInputs 将存储层日志转换为时间线输入（含 blob 还原）

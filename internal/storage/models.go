@@ -135,6 +135,12 @@ type TraceFilter struct {
 	Limit  int
 }
 
+// TraceFingerprint 调用链的低成本变更信号，用于缓存失效判断。
+type TraceFingerprint struct {
+	Count  int64 // 调用链中的日志条数
+	LastMs int64 // 最新日志的创建时间（unix 毫秒），无日志时为 0
+}
+
 // Repository 存储接口
 type Repository interface {
 	// 日志操作
@@ -153,6 +159,10 @@ type Repository interface {
 	// Trace 操作
 	ListTraces(filter TraceFilter) ([]TraceSummary, int64, error)
 	GetTraceRequests(traceID string) ([]*RequestLog, error)
+	// GetTraceFingerprint 返回调用链的低成本变更信号（日志条数 + 最新
+	// 创建时间毫秒），用于调用链级缓存的失效判断。request_logs 只有
+	// 插入没有在位内容更新，因此该信号足以覆盖所有内容变化。
+	GetTraceFingerprint(traceID string) (TraceFingerprint, error)
 
 	// 统计
 	GetStats(since *time.Time) (*LogStats, error)

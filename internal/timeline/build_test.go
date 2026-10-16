@@ -3,6 +3,7 @@ package timeline
 import (
 	"encoding/json"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -233,6 +234,36 @@ func TestBuildUnlimitedAlignsWithDefault(t *testing.T) {
 	}
 	if !def.Requests[1].ResponseEvents[0].Truncated {
 		t.Fatal("default build should truncate long response")
+	}
+}
+
+// TruncateEvents(完整构建, N) 必须与 Build(Options{MaxEventChars: N}) 完全一致，
+// 缓存派生路径才能安全替换直接构建。
+func TestTruncateEventsParity(t *testing.T) {
+	long := strings.Repeat("好", 5000)
+	req1 := `{"model":"m","messages":[{"role":"user","content":"` + long + `"},{"role":"system","content":"sys"}]}`
+	resp1 := `{"choices":[{"message":{"role":"assistant","content":"ok","tool_calls":[{"id":"c1","type":"function","function":{"name":"bash","arguments":"{\"cmd\":\"` + long + `\"}"}}]}}]}`
+	req2 := `{"model":"m","messages":[{"role":"system","content":"sys"},{"role":"user","content":"` + long + `"}]}`
+	resp2 := `{"choices":[{"message":{"role":"assistant","content":"` + long + `"}}]}`
+
+	items := []Input{
+		{LogID: "1", Seq: 1, Path: "/v1/chat/completions", RequestBody: req1, ResponseBody: resp1},
+		{LogID: "2", Seq: 2, Path: "/v1/chat/completions", RequestBody: req2, ResponseBody: resp2},
+	}
+	full := Build("t", items, Options{MaxEventChars: math.MaxInt})
+
+	for _, maxChars := range []int{40, 200, 2000} {
+		direct := Build("t", items, Options{MaxEventChars: maxChars})
+		derived := TruncateEvents(full, maxChars)
+		if !reflect.DeepEqual(direct, derived) {
+			t.Fatalf("maxChars=%d: derived timeline differs from direct build\n--direct--\n%+v\n--derived--\n%+v", maxChars, direct, derived)
+		}
+	}
+
+	// 无需截断的级别：完整内容原样保留
+	same := TruncateEvents(full, math.MaxInt)
+	if !reflect.DeepEqual(full, same) {
+		t.Fatal("TruncateEvents with unlimited maxChars should be an equal copy")
 	}
 }
 

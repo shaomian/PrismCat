@@ -83,6 +83,10 @@ type Options struct {
 
 const defaultMaxEventChars = 2000
 
+// DefaultEventChars 单个事件内容的默认最大字符数（Options.MaxEventChars <= 0 时生效）。
+// 供缓存派生等场景引用。
+const DefaultEventChars = defaultMaxEventChars
+
 func (o Options) maxEventChars() int {
 	if o.MaxEventChars > 0 {
 		return o.MaxEventChars

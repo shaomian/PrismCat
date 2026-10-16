@@ -55,6 +55,9 @@ func (m *memRepo) ListTraces(filter TraceFilter) ([]TraceSummary, int64, error) 
 func (m *memRepo) GetTraceRequests(traceID string) ([]*RequestLog, error) {
 	return nil, errors.New("not implemented")
 }
+func (m *memRepo) GetTraceFingerprint(traceID string) (TraceFingerprint, error) {
+	return TraceFingerprint{}, errors.New("not implemented")
+}
 func (m *memRepo) Close() error { m.mu.Lock(); m.closed = true; m.mu.Unlock(); return nil }
 
 type memBlobStore struct {

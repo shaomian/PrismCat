@@ -1023,18 +1023,22 @@ func (r *SQLiteRepository) ListTraces(filter TraceFilter) ([]TraceSummary, int64
 }
 
 func (r *SQLiteRepository) GetTraceRequests(traceID string) ([]*RequestLog, error) {
+	// 注解用 LEFT JOIN 一次取回，避免每行一次 GetLogAnnotation 的 N+1 查询
 	query := `
-	SELECT id, created_at, upstream, upstream_target, target_url, method, path, query,
-		request_headers, request_body, request_body_original, request_body_final, request_body_ref, request_body_size,
-		status_code, response_headers, response_body, response_body_ref, response_body_size,
-		streaming, latency_ms, error, truncated, tag,
-		request_override_applied, request_override_rules, request_override_error,
-		request_header_override_applied, request_header_override_changes, request_headers_original,
-		trace_id, parent_log_id, trace_seq,
-		usage_input_tokens, usage_output_tokens, usage_total_tokens, usage_raw, usage_source
-	FROM request_logs
-	WHERE trace_id = ?
-	ORDER BY trace_seq, created_at_unix_ms
+	SELECT l.id, l.created_at, l.upstream, l.upstream_target, l.target_url, l.method, l.path, l.query,
+		l.request_headers, l.request_body, l.request_body_original, l.request_body_final, l.request_body_ref, l.request_body_size,
+		l.status_code, l.response_headers, l.response_body, l.response_body_ref, l.response_body_size,
+		l.streaming, l.latency_ms, l.error, l.truncated, l.tag,
+		l.request_override_applied, l.request_override_rules, l.request_override_error,
+		l.request_header_override_applied, l.request_header_override_changes, l.request_headers_original,
+		l.trace_id, l.parent_log_id, l.trace_seq,
+		l.usage_input_tokens, l.usage_output_tokens, l.usage_total_tokens, l.usage_raw, l.usage_source,
+		COALESCE(a.saved, 0), COALESCE(a.status, 'none'), COALESCE(a.note, ''), COALESCE(a.labels, '[]'),
+		COALESCE(a.created_at_unix_ms, 0), COALESCE(a.updated_at_unix_ms, 0)
+	FROM request_logs l
+	LEFT JOIN log_annotations a ON a.log_id = l.id
+	WHERE l.trace_id = ?
+	ORDER BY l.trace_seq, l.created_at_unix_ms
 	`
 	rows, err := r.db.Query(query, traceID)
 	if err != nil {
@@ -1044,12 +1048,9 @@ func (r *SQLiteRepository) GetTraceRequests(traceID string) ([]*RequestLog, erro
 
 	var logs []*RequestLog
 	for rows.Next() {
-		log, err := r.scanLog(rows)
+		log, err := r.scanLogWithAnnotation(rows)
 		if err != nil {
 			return nil, err
-		}
-		if annotation, aErr := r.GetLogAnnotation(log.ID); aErr == nil {
-			log.Annotation = annotation
 		}
 		logs = append(logs, log)
 	}
@@ -1057,6 +1058,22 @@ func (r *SQLiteRepository) GetTraceRequests(traceID string) ([]*RequestLog, erro
 		return nil, err
 	}
 	return logs, nil
+}
+
+// GetTraceFingerprint 返回调用链的低成本变更信号（条数 + 最新创建时间），
+// 走 idx_logs_trace_id 索引，用于调用链级缓存的失效判断。
+func (r *SQLiteRepository) GetTraceFingerprint(traceID string) (TraceFingerprint, error) {
+	const query = `
+	SELECT COUNT(*), COALESCE(MAX(created_at_unix_ms), 0)
+	FROM request_logs
+	WHERE trace_id = ?
+	`
+	var fp TraceFingerprint
+	err := r.db.QueryRow(query, traceID).Scan(&fp.Count, &fp.LastMs)
+	if err != nil {
+		return TraceFingerprint{}, err
+	}
+	return fp, nil
 }
 
 func (r *SQLiteRepository) Close() error {

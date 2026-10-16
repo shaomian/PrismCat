@@ -96,6 +96,91 @@ func TestDeleteLogsBeforeKeepsSavedLogs(t *testing.T) {
 	}
 }
 
+func TestGetTraceRequestsJoinsAnnotationsAndFingerprint(t *testing.T) {
+	repo, err := NewSQLiteRepository(filepath.Join(t.TempDir(), "trace.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository returned error: %v", err)
+	}
+	defer repo.Close()
+
+	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+	for i, id := range []string{"a", "b"} {
+		log := &RequestLog{
+			ID:        id,
+			CreatedAt: now.Add(time.Duration(i) * time.Second),
+			Upstream:  "openai",
+			TargetURL: "https://api.openai.com/v1/responses",
+			Method:    "POST",
+			Path:      "/v1/responses",
+			TraceID:   "trace-1",
+			TraceSeq:  i + 1,
+		}
+		if err := repo.SaveLog(log); err != nil {
+			t.Fatalf("SaveLog returned error: %v", err)
+		}
+	}
+	if _, err := repo.SaveLogAnnotation("a", LogAnnotation{Saved: true, Status: "done"}); err != nil {
+		t.Fatalf("SaveLogAnnotation returned error: %v", err)
+	}
+
+	requests, err := repo.GetTraceRequests("trace-1")
+	if err != nil {
+		t.Fatalf("GetTraceRequests returned error: %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("len(requests) = %d, want 2", len(requests))
+	}
+	// 注解由 LEFT JOIN 带回，而非逐行 GetLogAnnotation
+	if !requests[0].Annotation.Saved || requests[0].Annotation.Status != "done" {
+		t.Fatalf("requests[0].Annotation = %#v, want saved done", requests[0].Annotation)
+	}
+	if requests[1].Annotation.Saved || requests[1].Annotation.Status != "none" {
+		t.Fatalf("requests[1].Annotation = %#v, want unsaved none", requests[1].Annotation)
+	}
+
+	fp, err := repo.GetTraceFingerprint("trace-1")
+	if err != nil {
+		t.Fatalf("GetTraceFingerprint returned error: %v", err)
+	}
+	if fp.Count != 2 {
+		t.Fatalf("fp.Count = %d, want 2", fp.Count)
+	}
+	if fp.LastMs != requests[1].CreatedAt.UnixMilli() {
+		t.Fatalf("fp.LastMs = %d, want %d", fp.LastMs, requests[1].CreatedAt.UnixMilli())
+	}
+
+	// 追加新日志后指纹必须变化（缓存失效信号）
+	third := &RequestLog{
+		ID:        "c",
+		CreatedAt: now.Add(10 * time.Second),
+		Upstream:  "openai",
+		TargetURL: "https://api.openai.com/v1/responses",
+		Method:    "POST",
+		Path:      "/v1/responses",
+		TraceID:   "trace-1",
+		TraceSeq:  3,
+	}
+	if err := repo.SaveLog(third); err != nil {
+		t.Fatalf("SaveLog returned error: %v", err)
+	}
+	next, err := repo.GetTraceFingerprint("trace-1")
+	if err != nil {
+		t.Fatalf("GetTraceFingerprint returned error: %v", err)
+	}
+	if next == fp {
+		t.Fatalf("fingerprint did not change after append: %+v", next)
+	}
+
+	// 不存在的调用链
+	missing, err := repo.GetTraceFingerprint("no-such-trace")
+	if err != nil {
+		t.Fatalf("GetTraceFingerprint returned error: %v", err)
+	}
+	if missing.Count != 0 || missing.LastMs != 0 {
+		t.Fatalf("missing fingerprint = %+v, want zero value", missing)
+	}
+}
+
 func TestDeleteOldestLogsKeepsSavedLogsAndDeletesOldestUnsaved(t *testing.T) {
 	repo, err := NewSQLiteRepository(filepath.Join(t.TempDir(), "logs.db"))
 	if err != nil {
