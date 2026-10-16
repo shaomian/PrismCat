@@ -5,20 +5,20 @@ cd /d "%~dp0"
 
 rem ---------------------------------------------------------------------------
 rem  Restart the local PrismCat server (stop old instance, start a new one).
-rem    - Kills only prismcat.exe located in this repo's .tools\ folder
+rem    - Kills only prismcat.exe located in the project root
 rem    - Closes the leftover "start-prismcat.bat" console window (if any)
 rem    - Relaunches via start-prismcat.bat in a fresh console window
 rem
 rem  Note: this does NOT rebuild. To pick up code changes, build first:
-rem    .tools\go\bin\go.exe build -o .tools\prismcat.exe ./cmd/prismcat/
+rem    go build -o prismcat.exe ./cmd/prismcat/
 rem ---------------------------------------------------------------------------
-set "PRISMCAT_EXE=%~dp0.tools\prismcat.exe"
+set "PRISMCAT_EXE=%~dp0prismcat.exe"
 set "PRISMCAT_LAUNCHER=\start-prismcat.bat"
 set "PORT=8711"
 
 if not exist "%PRISMCAT_EXE%" (
-    echo [ERROR] .tools\prismcat.exe not found. Build it first:
-    echo         go build -o .tools\prismcat.exe ./cmd/prismcat/
+    echo [ERROR] prismcat.exe not found in the project root. Build it first:
+    echo         go build -o prismcat.exe ./cmd/prismcat/
     timeout /t 8 >nul
     exit /b 1
 )
