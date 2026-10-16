@@ -444,7 +444,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if earlyResult.err != nil {
 		logMu.Lock()
 		logEntry.StatusCode = resp.StatusCode
-		logEntry.ResponseHeaders = p.headerToMap(resp.Header)
+		logEntry.ResponseHeaders = p.sanitizeHeaders(resp.Header, loggingCfg.SensitiveHeaders)
 		logEntry.Error = fmt.Sprintf("downstream SSE keepalive failed: %v", earlyResult.err)
 		if loggingEnabled {
 			p.finalizeAndSaveLog(logEntry, startTime, reqCapture, nil)
@@ -465,7 +465,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		onUpgraded := func() {
 			logMu.Lock()
 			logEntry.StatusCode = resp.StatusCode
-			logEntry.ResponseHeaders = p.headerToMap(resp.Header)
+			logEntry.ResponseHeaders = p.sanitizeHeaders(resp.Header, loggingCfg.SensitiveHeaders)
 			logEntry.Streaming = true
 			if loggingEnabled {
 				p.publishHeaders(logEntry)
@@ -480,7 +480,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if !hijacked {
 			logEntry.StatusCode = http.StatusBadGateway
-			logEntry.ResponseHeaders = p.headerToMap(resp.Header)
+			logEntry.ResponseHeaders = p.sanitizeHeaders(resp.Header, loggingCfg.SensitiveHeaders)
 		}
 		if loggingEnabled {
 			p.finalizeAndSaveLog(logEntry, startTime, reqCapture, nil)
@@ -499,7 +499,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if earlyResult.committed && !sseKeepaliveEnabled {
 		logMu.Lock()
 		logEntry.StatusCode = resp.StatusCode
-		logEntry.ResponseHeaders = p.headerToMap(resp.Header)
+		logEntry.ResponseHeaders = p.sanitizeHeaders(resp.Header, loggingCfg.SensitiveHeaders)
 		logEntry.Streaming = streaming
 		logEntry.Error = fmt.Sprintf(
 			"upstream returned status %d with content-type %q and content-encoding %q after early SSE keepalive committed",
@@ -523,7 +523,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			logMu.Lock()
 			logEntry.StatusCode = resp.StatusCode
-			logEntry.ResponseHeaders = p.headerToMap(resp.Header)
+			logEntry.ResponseHeaders = p.sanitizeHeaders(resp.Header, loggingCfg.SensitiveHeaders)
 			logEntry.Streaming = streaming
 			if isResponseBodyFirstByteTimeout(err) {
 				logEntry.Error = err.Error()
@@ -542,7 +542,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	logMu.Lock()
 	logEntry.StatusCode = resp.StatusCode
-	logEntry.ResponseHeaders = p.headerToMap(resp.Header)
+	logEntry.ResponseHeaders = p.sanitizeHeaders(resp.Header, loggingCfg.SensitiveHeaders)
 	logEntry.Streaming = streaming
 	if loggingEnabled {
 		p.publishHeaders(logEntry)
@@ -954,9 +954,28 @@ func isAccessControlHeader(header string) bool {
 	return strings.HasPrefix(strings.ToLower(header), "access-control-")
 }
 
+// builtInSensitiveHeaderFragments 内置敏感头名称片段（不依赖配置）。
+// 不同厂商的 API key 头名各异（如 Gemini 的 x-goog-api-key），
+// 配置列表容易遗漏；按名称片段匹配可兜底防止密钥明文落库/入 UI。
+var builtInSensitiveHeaderFragments = []string{
+	"api-key", "apikey", "api_key",
+	"authorization",
+	"secret",
+	"token",
+	"password",
+	"credential",
+	"cookie",
+}
+
 func isSensitiveHeader(name string, sensitiveHeaders []string) bool {
 	for _, sensitive := range sensitiveHeaders {
 		if strings.EqualFold(name, sensitive) {
+			return true
+		}
+	}
+	lower := strings.ToLower(name)
+	for _, fragment := range builtInSensitiveHeaderFragments {
+		if strings.Contains(lower, fragment) {
 			return true
 		}
 	}
@@ -964,7 +983,8 @@ func isSensitiveHeader(name string, sensitiveHeaders []string) bool {
 }
 
 func maskSensitiveHeaderValue(value string) string {
-	if len(value) > 10 {
+	// 短值（≤20 字符）可能是完整密钥，全部遮蔽；长值保留首尾少量字符用于肉眼区分
+	if len(value) > 20 {
 		return value[:5] + "***" + value[len(value)-3:]
 	}
 	return "***"
@@ -1004,16 +1024,6 @@ func (p *Proxy) sanitizeHeaders(headers http.Header, sensitiveHeaders []string) 
 			}
 		}
 		result[k] = newValues
-	}
-	return result
-}
-
-func (p *Proxy) headerToMap(headers http.Header) map[string][]string {
-	result := make(map[string][]string)
-	for k, vv := range headers {
-		if len(vv) > 0 {
-			result[k] = vv
-		}
 	}
 	return result
 }

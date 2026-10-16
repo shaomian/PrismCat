@@ -173,6 +173,9 @@ func RunChat(ctx context.Context, cfg config.AnalysisConfig, messages []Message,
 		}
 
 		round, err := consumeStream(resp.Body, cb)
+		// 无论成功、客户端中断还是流错误都必须关闭连接，
+		// 否则中途放弃的 SSE 流会泄漏 keep-alive 连接
+		resp.Body.Close()
 		if err != nil {
 			return result, err
 		}

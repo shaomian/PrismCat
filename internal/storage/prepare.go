@@ -49,7 +49,7 @@ func PrepareLogForPersistence(logEntry *RequestLog, cfg *config.Config, blobs ..
 		)
 		logEntry.RequestBody = formatted.Text
 		requestUnrecoverablyTruncated = formatted.Truncated
-		if shouldStoreRawBody(logEntry.RequestBodyRaw, formatted.Truncated, formatted.Binary, logEntry.RequestBodyRef, loggingCfg.DetachBodyOverBytes) {
+		if shouldStoreRawBody(logEntry.RequestBodyRaw, formatted.Truncated, formatted.Binary, logEntry.RequestBodyRef, loggingCfg.DetachBodyOverBytes, loggingCfg.BodyPreviewBytes) {
 			logEntry.RequestBodyRef = putBodyBlob(blobStore, "request", logEntry.RequestBodyRaw)
 		}
 		if logEntry.RequestBodyRef != "" {
@@ -98,7 +98,7 @@ func PrepareLogForPersistence(logEntry *RequestLog, cfg *config.Config, blobs ..
 		)
 		logEntry.ResponseBody = formatted.Text
 		responseUnrecoverablyTruncated = formatted.Truncated
-		if shouldStoreRawBody(logEntry.ResponseBodyRaw, formatted.Truncated, formatted.Binary, logEntry.ResponseBodyRef, loggingCfg.DetachBodyOverBytes) {
+		if shouldStoreRawBody(logEntry.ResponseBodyRaw, formatted.Truncated, formatted.Binary, logEntry.ResponseBodyRef, loggingCfg.DetachBodyOverBytes, loggingCfg.BodyPreviewBytes) {
 			logEntry.ResponseBodyRef = putBodyBlob(blobStore, "response", logEntry.ResponseBodyRaw)
 		}
 		if logEntry.ResponseBodyRef != "" {
@@ -138,7 +138,10 @@ func formatCapturedBodyForPersistence(body []byte, contentType string, contentEn
 	})
 }
 
-func shouldStoreRawBody(body []byte, previewTruncated bool, binary bool, existingRef string, detachOverBytes int64) bool {
+// shouldStoreRawBody 判断是否需要把原始 body 落入 blob 存储。
+// previewBytes <= 0 表示内联预览被禁用，此时没有可回退的内联内容，
+// 必须落 blob，否则 detach 模式下的文本 body 会静默丢失。
+func shouldStoreRawBody(body []byte, previewTruncated bool, binary bool, existingRef string, detachOverBytes int64, previewBytes int64) bool {
 	if len(body) == 0 || existingRef != "" {
 		return false
 	}
@@ -147,6 +150,9 @@ func shouldStoreRawBody(body []byte, previewTruncated bool, binary bool, existin
 	}
 	if detachOverBytes <= 0 {
 		return false
+	}
+	if previewBytes <= 0 {
+		return true
 	}
 	return previewTruncated || int64(len(body)) > detachOverBytes
 }

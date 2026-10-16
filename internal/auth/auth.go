@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/paopaoandlingyia/PrismCat/internal/config"
@@ -38,6 +39,10 @@ var (
 type Manager struct {
 	cfg *config.Config
 	now func() time.Time
+
+	// setupMu 串行化首次设置：hasPassword 检查与保存之间存在窗口，
+	// 并发的 setup 请求可能都通过检查并互相覆盖密码（TOCTOU）
+	setupMu sync.Mutex
 }
 
 type Status struct {
@@ -105,6 +110,9 @@ func (m *Manager) Setup(w http.ResponseWriter, r *http.Request, password string)
 	if strings.TrimSpace(password) == "" {
 		return m.Status(r), ErrPasswordRequired
 	}
+
+	m.setupMu.Lock()
+	defer m.setupMu.Unlock()
 	if m.hasPassword() {
 		return m.Status(r), ErrAlreadySetup
 	}
@@ -140,6 +148,11 @@ func (m *Manager) Logout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		Secure:   isSecureRequest(r),
 	})
+}
+
+// HasPassword 是否已设置控制台密码（供启动时的安全警告判断）
+func (m *Manager) HasPassword() bool {
+	return m.hasPassword()
 }
 
 func (m *Manager) hasPassword() bool {

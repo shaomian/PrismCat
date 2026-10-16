@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"sort"
@@ -1085,13 +1086,41 @@ func (h *Handler) handleBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	disposition := "inline"
-	if r.URL.Query().Get("download") == "1" {
-		disposition = "attachment"
+	// 安全策略：blob 内容来自被代理的上游响应（可能含攻击者可控的 HTML），
+	// 只有明确安全的类型允许 inline（否则 HTML 会在 UI 同源执行，窃取会话）。
+	// 其余一律 attachment；nosniff + CSP sandbox 作为纵深防御。
+	contentType := http.DetectContentType(data)
+	disposition := "attachment"
+	if r.URL.Query().Get("download") != "1" && isSafeInlineBlobType(contentType) {
+		disposition = "inline"
 	}
-	w.Header().Set("Content-Type", http.DetectContentType(data))
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "sandbox")
 	w.Header().Set("Content-Disposition", disposition+"; filename=\""+blobFilename(ref, data)+"\"")
 	_, _ = w.Write(data)
+}
+
+// isSafeInlineBlobType 判断嗅探出的类型是否可以 inline 展示。
+// 仅放行浏览器不会执行脚本的类型；text/html、application/xml（可携带
+// XSLT）、application/pdf（内嵌 JS）、image/svg+xml（可内嵌 <script>）
+// 等一律不放行。
+func isSafeInlineBlobType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = strings.TrimSpace(strings.Split(contentType, ";")[0])
+	}
+	mediaType = strings.ToLower(mediaType)
+	switch {
+	case mediaType == "text/plain", mediaType == "application/json":
+		return true
+	case strings.HasPrefix(mediaType, "image/"):
+		return mediaType != "image/svg+xml" // SVG 可内嵌脚本，必须 attachment
+	case strings.HasPrefix(mediaType, "audio/"),
+		strings.HasPrefix(mediaType, "video/"):
+		return true
+	}
+	return false
 }
 
 func blobFilename(ref string, data []byte) string {

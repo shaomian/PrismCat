@@ -8,11 +8,13 @@ import (
 	"io/fs"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -188,25 +190,39 @@ type Server struct {
 	api    *api.Handler
 	auth   *auth.Manager
 	server *http.Server
+
+	stopTraceCleanupOnce sync.Once
+	stopTraceCleanup     chan struct{}
 }
 
 // New 创建服务器实例
 func New(cfg *config.Config, repo storage.Repository, blobs storage.BlobStore) *Server {
 	liveRegistry := live.NewRegistry(cfg.LoggingSnapshot().BodyPreviewBytes)
 	traceSeq := trace.NewSequencer()
+	stopTraceCleanup := make(chan struct{})
+	// trace ID 由客户端通过 X-PrismCat-Trace-ID 控制，条目必须定期清理，
+	// 否则长期运行的进程会因不同 trace ID 的持续流入而内存无界增长。
+	traceSeq.StartCleanup(10*time.Minute, time.Hour, stopTraceCleanup)
 	return &Server{
-		cfg:   cfg,
-		repo:  repo,
-		blobs: blobs,
-		live:  liveRegistry,
-		proxy: proxy.New(cfg, repo, liveRegistry, traceSeq),
-		api:   api.New(cfg, repo, blobs, liveRegistry),
-		auth:  auth.NewManager(cfg),
+		cfg:              cfg,
+		repo:             repo,
+		blobs:            blobs,
+		live:             liveRegistry,
+		proxy:            proxy.New(cfg, repo, liveRegistry, traceSeq),
+		api:              api.New(cfg, repo, blobs, liveRegistry),
+		auth:             auth.NewManager(cfg),
+		stopTraceCleanup: stopTraceCleanup,
 	}
+}
+
+// stopBackground 结束后台清理协程
+func (s *Server) stopBackground() {
+	s.stopTraceCleanupOnce.Do(func() { close(s.stopTraceCleanup) })
 }
 
 // Start 启动服务器
 func (s *Server) Start() error {
+	defer s.stopBackground()
 	mux := http.NewServeMux()
 	serverCfg := s.cfg.ServerSnapshot()
 
@@ -277,6 +293,15 @@ func (s *Server) Start() error {
 	})
 
 	addr := fmt.Sprintf("%s:%d", serverCfg.Addr, serverCfg.Port)
+
+	// 安全警告：绑定非回环地址且未设置密码时，能访问该端口的任何人都
+	// 可以完成首次设置（/api/auth/setup 免认证）并接管整个网关。
+	if !isLoopbackAddr(serverCfg.Addr) && !s.auth.HasPassword() {
+		log.Println("⚠️  [安全警告] 服务监听在非回环地址且未设置控制台密码！")
+		log.Printf("⚠️  局域网内任何访问 %s 的人都可以调用 /api/auth/setup 接管控制台并读取所有请求日志。", addr)
+		log.Println("⚠️  请立即设置密码，或将 server.addr 改为 127.0.0.1 后重启。")
+	}
+
 	s.server = &http.Server{
 		Addr:         addr,
 		Handler:      mainHandler,
@@ -339,6 +364,19 @@ func (s *Server) Start() error {
 		return fmt.Errorf("服务器启动失败: %w", err)
 	}
 	return nil
+}
+
+// isLoopbackAddr 判断监听地址是否仅本机可达（空串与 0.0.0.0 均为全网卡）
+func isLoopbackAddr(addr string) bool {
+	trimmed := strings.TrimSpace(addr)
+	if trimmed == "" || trimmed == "0.0.0.0" || trimmed == "::" || trimmed == "[::]" {
+		return false
+	}
+	host := trimmed
+	if h, _, err := net.SplitHostPort(trimmed); err == nil {
+		host = h
+	}
+	return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
 }
 
 // placeholderUI 占位 UI（在没有前端构建时使用）

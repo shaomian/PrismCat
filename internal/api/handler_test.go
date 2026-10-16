@@ -7,6 +7,31 @@ import (
 	"github.com/paopaoandlingyia/PrismCat/internal/config"
 )
 
+func TestIsSafeInlineBlobType(t *testing.T) {
+	cases := []struct {
+		contentType string
+		safe        bool
+	}{
+		{"text/plain; charset=utf-8", true},
+		{"application/json", true},
+		{"image/png", true},
+		{"audio/mpeg", true},
+		{"video/mp4", true},
+		// 能执行脚本的类型必须强制 attachment，否则存储型 XSS
+		{"text/html; charset=utf-8", false},
+		{"application/xhtml+xml", false},
+		{"application/xml", false},
+		{"application/pdf", false},
+		{"image/svg+xml", false}, // SVG 可内嵌 <script>
+		{"application/octet-stream", false},
+	}
+	for _, tc := range cases {
+		if got := isSafeInlineBlobType(tc.contentType); got != tc.safe {
+			t.Errorf("isSafeInlineBlobType(%q) = %v, want %v", tc.contentType, got, tc.safe)
+		}
+	}
+}
+
 func TestResolveReplayTargetFromUpstream(t *testing.T) {
 	h := &Handler{
 		cfg: &config.Config{

@@ -20,6 +20,9 @@ type Result struct {
 	Source       string
 }
 
+// maxUsageDecompressBytes 解压用量提取响应体的绝对上限（64MB）
+const maxUsageDecompressBytes = 64 << 20
+
 func Extract(cfg config.UsageExtractionConfig, upstream string, contentType string, contentEncoding string, body []byte) Result {
 	if len(body) == 0 {
 		return Result{}
@@ -41,8 +44,14 @@ func Extract(cfg config.UsageExtractionConfig, upstream string, contentType stri
 
 	data := body
 	if hasContentEncoding(contentEncoding) {
+		// 解压上限取「原始大小×32」与绝对上限的较小者：
+		// 响应体捕获上限（默认 32MB）×32 放大可达 ~1GB，几个并发就能 OOM
+		maxDecompressed := int64(len(body)) * 32
+		if maxDecompressed > maxUsageDecompressBytes {
+			maxDecompressed = maxUsageDecompressBytes
+		}
 		formatted := httpbody.FormatForDisplay(contentType, contentEncoding, body, httpbody.FormatOptions{
-			MaxOutputBytes: int64(len(body)) * 32,
+			MaxOutputBytes: maxDecompressed,
 		})
 		if formatted.Text == "" || formatted.Binary {
 			return Result{}

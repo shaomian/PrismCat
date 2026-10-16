@@ -17,7 +17,7 @@ import (
 
 const defaultYAML = `
 server:
-  addr: 0.0.0.0
+  addr: 127.0.0.1
   port: 8711
   ui_hosts:
     - localhost
