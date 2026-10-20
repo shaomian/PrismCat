@@ -1,10 +1,15 @@
 package api
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paopaoandlingyia/PrismCat/internal/config"
+	"github.com/paopaoandlingyia/PrismCat/internal/storage"
 )
 
 func TestIsSafeInlineBlobType(t *testing.T) {
@@ -93,5 +98,65 @@ func TestResolveReplayTargetRejectsUnsupportedCustomURL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "http 或 https") {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+// traceDetailRepo 只实现 handleTraceDetail 用到的 Repository 方法
+type traceDetailRepo struct {
+	storage.Repository
+}
+
+func (r *traceDetailRepo) GetTraceRequests(traceID string) ([]*storage.RequestLog, error) {
+	return []*storage.RequestLog{{
+		ID:        "l1",
+		TraceID:   traceID,
+		Method:    "POST",
+		Path:      "/v1/messages",
+		Latency:   42,
+		Upstream:  "test",
+		CreatedAt: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC),
+
+		RequestBody:         "REQ-BODY",
+		RequestBodyOriginal: "REQ-ORIGINAL",
+		RequestBodyFinal:    "REQ-FINAL",
+		RequestBodySize:     100,
+		ResponseBody:        "RESP-BODY",
+		ResponseBodySize:    200,
+	}}, nil
+}
+
+// 详情接口必须瘦身（不含 body 全文）：请求视图卡片只用元数据，body 由
+// 前端在点开 LogDetail 时按需拉取单条完整日志。重链的 body 可达数十 MB。
+func TestHandleTraceDetailOmitsBodies(t *testing.T) {
+	h := &Handler{repo: &traceDetailRepo{}}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/traces/t1", nil)
+
+	h.handleTraceDetail(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	var payload struct {
+		Requests []map[string]interface{} `json:"requests"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(payload.Requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(payload.Requests))
+	}
+	row := payload.Requests[0]
+	for _, field := range []string{"request_body", "request_body_original", "request_body_final", "response_body"} {
+		if _, ok := row[field]; ok {
+			t.Errorf("detail response should omit %q, got %v", field, row[field])
+		}
+	}
+	// 元数据保留：卡片大小展示与 blob 附件判断依赖
+	if row["request_body_size"] != float64(100) || row["response_body_size"] != float64(200) {
+		t.Fatalf("body sizes missing from slim response: %v", row)
+	}
+	if row["method"] != "POST" {
+		t.Fatalf("method missing from slim response: %v", row)
 	}
 }

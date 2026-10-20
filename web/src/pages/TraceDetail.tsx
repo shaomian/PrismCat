@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, startTransition } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   Network, ArrowLeft, Clock, AlertCircle, Layers, Activity,
   ChevronRight, MessagesSquare, ListTree, GitBranch, FileDown, Sparkles,
 } from 'lucide-react'
-import { fetchTraceDetail, fetchTraceTimeline, fetchTraceTimelineEntry, fetchTraceDiagram, traceExportUrl, type TraceDetail as TraceDetailType, type TraceTimeline, type RequestLog, type TraceDiagram as TraceDiagramData } from '@/lib/api'
+import { fetchTraceDetail, fetchTraceTimeline, fetchTraceTimelineEntry, fetchTraceDiagram, fetchLog, traceExportUrl, type TraceDetail as TraceDetailType, type TraceTimeline, type RequestLog, type TraceDiagram as TraceDiagramData } from '@/lib/api'
 import { cn, formatLatency, formatDate, getStatusColor, METHOD_CLASS } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -102,13 +102,48 @@ export function TraceDetail() {
     return requests.findIndex(req => req.id === selectedLog.id)
   }, [requests, selectedLog])
 
+  // 列表行是瘦身数据（详情接口不再携带 body 全文，重链可达数十 MB）。
+  // 打开/切换日志时先用元数据即时展示 Sheet，同时按需拉取该条完整日志。
+  // 序号守卫：快速点开/切上一条下一条时丢弃过期响应。
+  const selectSeq = useRef(0)
+  const [selectedLogLoading, setSelectedLogLoading] = useState(false)
+  const openLog = useCallback(async (log: RequestLog) => {
+    const seq = ++selectSeq.current
+    setSelectedLog(log)
+    setSelectedLogLoading(false)
+    // body 已就位（fetchLog 回填或注解更新写回的完整对象）则无需再拉
+    if (log.request_body !== undefined || log.response_body !== undefined) return
+    setSelectedLogLoading(true)
+    try {
+      const full = await fetchLog(log.id)
+      if (selectSeq.current !== seq) return
+      startTransition(() => {
+        setSelectedLog(full)
+      })
+    } catch (err) {
+      if (selectSeq.current !== seq) return
+      // 保留元数据展示（头部/状态等仍可见），body 区块维持加载占位
+      toast.error((err as Error).message)
+    } finally {
+      if (selectSeq.current === seq) {
+        setSelectedLogLoading(false)
+      }
+    }
+  }, [])
+
+  const handleCloseLog = useCallback(() => {
+    selectSeq.current++
+    setSelectedLog(null)
+    setSelectedLogLoading(false)
+  }, [])
+
   const handleNavigateLog = useCallback((direction: 'previous' | 'next') => {
     if (selectedLogIndex < 0) return
     const nextIndex = direction === 'previous' ? selectedLogIndex - 1 : selectedLogIndex + 1
     const nextLog = requests[nextIndex]
     if (!nextLog) return
-    setSelectedLog(nextLog)
-  }, [requests, selectedLogIndex])
+    void openLog(nextLog)
+  }, [requests, selectedLogIndex, openLog])
 
   const traceSpanMs = useMemo(() => {
     if (!summary) return 1
@@ -117,8 +152,8 @@ export function TraceDetail() {
 
   const handleOpenLog = useCallback((logId: string) => {
     const log = requests.find(r => r.id === logId)
-    if (log) setSelectedLog(log)
-  }, [requests])
+    if (log) void openLog(log)
+  }, [requests, openLog])
 
   if (loading) {
     return (
@@ -290,7 +325,7 @@ export function TraceDetail() {
               {/* Request card */}
               <button
                 type="button"
-                onClick={() => setSelectedLog(req)}
+                onClick={() => void openLog(req)}
                 className={cn(
                   'flex-1 rounded-md p-3 mb-1 text-left transition-all',
                   'bg-card hover:bg-card/50 border border-border hover:border-border',
@@ -383,7 +418,8 @@ export function TraceDetail() {
       {/* Log detail Sheet */}
       <LogDetail
         log={selectedLog}
-        onClose={() => setSelectedLog(null)}
+        loading={selectedLogLoading}
+        onClose={handleCloseLog}
         onNavigateLog={handleNavigateLog}
         canNavigatePreviousLog={selectedLogIndex > 0}
         canNavigateNextLog={selectedLogIndex >= 0 && selectedLogIndex < requests.length - 1}

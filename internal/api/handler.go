@@ -683,6 +683,17 @@ func (h *Handler) handleTraceDetail(w http.ResponseWriter, r *http.Request) {
 		summary["usage_total_tokens"] = usageTotal
 	}
 
+	// 详情列表瘦身：请求视图卡片只用元数据，body 全文在重链上可达数十
+	// MB（agent 历史中的 base64 逐轮累积）。前端点开 LogDetail 时按需调
+	// 用 GET /api/logs/{id} 拉取单条完整日志；*_body_size/_ref 保留用于
+	// 展示大小和 blob 附件判断。四个字段都是 omitempty，清空即从 JSON 移除。
+	for _, req := range requests {
+		req.RequestBody = ""
+		req.RequestBodyOriginal = ""
+		req.RequestBodyFinal = ""
+		req.ResponseBody = ""
+	}
+
 	h.jsonResponse(w, map[string]interface{}{
 		"trace_id": traceID,
 		"requests": requests,
