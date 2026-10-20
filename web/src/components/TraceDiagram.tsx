@@ -16,6 +16,31 @@ let renderSeq = 0
 // 原生 <title> 悬停提示的长度上限（完整内容点击弹窗查看）
 const TOOLTIP_CHARS = 300
 
+// 渲染结果缓存：流程图 tab 每次切入都会重挂载组件并从头执行 mermaid
+// 渲染（大图可能数秒）；缓存 key 含主题（SVG 的配色在渲染时固化）。
+// LRU 上限 8 条，超出后淘汰最旧。
+const SVG_CACHE_LIMIT = 8
+const svgCache = new Map<string, string>()
+
+function getCachedSvg(key: string): string | undefined {
+  const hit = svgCache.get(key)
+  if (hit !== undefined) {
+    svgCache.delete(key)
+    svgCache.set(key, hit)
+  }
+  return hit
+}
+
+function putCachedSvg(key: string, svg: string) {
+  if (svgCache.has(key)) svgCache.delete(key)
+  svgCache.set(key, svg)
+  while (svgCache.size > SVG_CACHE_LIMIT) {
+    const oldest = svgCache.keys().next().value
+    if (oldest === undefined) break
+    svgCache.delete(oldest)
+  }
+}
+
 // 主题变化时重新初始化并触发重渲染，否则首次渲染后主题被冻结，
 // 暗色切换后流程图仍是旧主题（浅色文字在暗色卡片上不可读）
 function ensureMermaid(theme: Theme) {
@@ -88,14 +113,31 @@ export function TraceDiagram({
     ensureMermaid(theme)
     let cancelled = false
     setError(false)
+
+    const applySvg = (svg: string) => {
+      if (cancelled || !containerRef.current) return
+      containerRef.current.innerHTML = svg
+      if (labels?.length) {
+        bindTruncatedLabels(containerRef.current, labels, setDetail)
+      }
+    }
+
+    // 命中缓存时同步应用，tab 切换即时出图
+    const cacheKey = `${theme}\n${code}`
+    const cached = getCachedSvg(cacheKey)
+    if (cached !== undefined) {
+      applySvg(cached)
+      return () => {
+        cancelled = true
+      }
+    }
+
     mermaid
       .render(`trace-diagram-${++renderSeq}`, code)
       .then(({ svg }) => {
-        if (cancelled || !containerRef.current) return
-        containerRef.current.innerHTML = svg
-        if (labels?.length) {
-          bindTruncatedLabels(containerRef.current, labels, setDetail)
-        }
+        if (cancelled) return
+        putCachedSvg(cacheKey, svg)
+        applySvg(svg)
       })
       .catch(() => {
         if (!cancelled) setError(true)

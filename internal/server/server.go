@@ -258,6 +258,15 @@ func (s *Server) Start() error {
 		activeRequests.Add(1)
 		defer activeRequests.Add(-1)
 
+		start := time.Now()
+		// 慢请求日志（>1s）：界面"卡"到底是服务端慢还是浏览器慢，
+		// 看控制台一眼便知；正常量级的请求保持静默
+		defer func() {
+			if elapsed := time.Since(start); elapsed > time.Second {
+				log.Printf("slow request: %s %s took %v", r.Method, r.URL.Path, elapsed)
+			}
+		}()
+
 		currentServerCfg := s.cfg.ServerSnapshot()
 		applyCORS(w, r, currentServerCfg)
 

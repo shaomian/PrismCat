@@ -147,6 +147,12 @@ func truncateRunes(s string, maxChars int) (string, bool) {
 	if maxChars <= 0 {
 		return s, false
 	}
+	// 字节长度 ≥ rune 数：len(s) ≤ maxChars 时必然无需截断，
+	// 跳过 []rune 转换（对不限截断的完整构建，可为每个事件省去
+	// 数倍于内容体积的临时分配）
+	if len(s) <= maxChars {
+		return s, false
+	}
 	runes := []rune(s)
 	if len(runes) <= maxChars {
 		return s, false
