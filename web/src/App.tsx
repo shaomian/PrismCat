@@ -9,7 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Toaster } from '@/components/ui/sonner'
 import { Suspense, lazy, useState, useEffect } from 'react'
-import { fetchAuthStatus, fetchConfig, login, logout as logoutRequest, setupPassword } from '@/lib/api'
+import { fetchAuthStatus, fetchConfig, login, logout as logoutRequest, onAuthExpired, setupPassword } from '@/lib/api'
 import { isSettingsTab, logRequestDiffRoute, settingsTabLabelKeys, settingsTabPath, settingsTabs } from '@/lib/routes'
 import { Login } from '@/pages/Login'
 
@@ -302,6 +302,17 @@ function AppContent() {
 
     return () => {
       cancelled = true
+    }
+  }, [])
+
+  // 数据接口收到 401（会话过期）时统一回到登录界面，
+  // 而不是各页面各自弹一堆"加载失败"而无从得知需要重新登录
+  useEffect(() => {
+    onAuthExpired(() => {
+      setIsAuthenticated(false)
+    })
+    return () => {
+      onAuthExpired(null)
     }
   }, [])
 

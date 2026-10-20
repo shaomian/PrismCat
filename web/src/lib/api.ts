@@ -1,3 +1,5 @@
+import i18n from '../i18n'
+
 // API 响应类型
 export interface RequestLog {
     id: string
@@ -256,6 +258,62 @@ const API_BASE = '/api'
 export const DEFAULT_UPSTREAM_TIMEOUT_SECONDS = 300
 export const DEFAULT_SSE_KEEPALIVE_INTERVAL_SECONDS = 15
 
+// ApiError 携带 HTTP 状态码，调用方可按错误类别决策（展示层仍读 message）
+export class ApiError extends Error {
+    status: number
+
+    constructor(message: string, status: number) {
+        super(message)
+        this.name = 'ApiError'
+        this.status = status
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 全局 401 处理：数据接口收到 401 意味着会话过期，由 App 注册回调统一
+// 回到登录页，而不是每个页面各自弹一堆"加载失败"。
+// 认证流程自身（登录/初始化/状态查询）不触发该事件——登录密码输错
+// 也返回 401，不该被当作会话过期。
+// ---------------------------------------------------------------------------
+type AuthExpiredHandler = () => void
+let authExpiredHandler: AuthExpiredHandler | null = null
+
+export function onAuthExpired(handler: AuthExpiredHandler | null) {
+    authExpiredHandler = handler
+}
+
+function emitAuthExpired() {
+    try {
+        authExpiredHandler?.()
+    } catch {
+        // 回调异常不影响 API 层语义
+    }
+}
+
+interface ErrorBody {
+    error?: string
+}
+
+async function apiRequest(path: string, init: RequestInit, fallbackKey: string): Promise<Response> {
+    const response = await fetch(path, init)
+    if (!response.ok) {
+        if (response.status === 401) {
+            emitAuthExpired()
+        }
+        const error = await response.json().catch(() => ({ error: '' })) as ErrorBody
+        throw new ApiError(error.error || i18n.t(fallbackKey), response.status)
+    }
+    return response
+}
+
+function jsonInit(method: string, body?: unknown): RequestInit {
+    return {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }
+}
+
 export interface AuthStatus {
     authenticated: boolean
     auth_required: boolean
@@ -263,45 +321,36 @@ export interface AuthStatus {
     session_expires_at?: string
 }
 
+// 认证流程函数：不触发全局 401（登录密码错误等业务性 401 不代表会话过期）
 export async function fetchAuthStatus(): Promise<AuthStatus> {
     const response = await fetch(`${API_BASE}/auth/me`)
-    if (!response.ok) throw new Error('获取登录状态失败')
+    if (!response.ok) throw new ApiError(i18n.t('errors.load_auth_status'), response.status)
     return response.json()
 }
 
 export async function login(password: string): Promise<AuthStatus> {
-    const response = await fetch(`${API_BASE}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-    })
+    const response = await fetch(`${API_BASE}/auth/login`, jsonInit('POST', { password }))
     if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '登录失败')
+        const error = await response.json().catch(() => ({ error: '' })) as ErrorBody
+        throw new ApiError(error.error || i18n.t('errors.login'), response.status)
     }
     return response.json()
 }
 
 export async function setupPassword(password: string): Promise<AuthStatus> {
-    const response = await fetch(`${API_BASE}/auth/setup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-    })
+    const response = await fetch(`${API_BASE}/auth/setup`, jsonInit('POST', { password }))
     if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '初始化密码失败')
+        const error = await response.json().catch(() => ({ error: '' })) as ErrorBody
+        throw new ApiError(error.error || i18n.t('errors.setup'), response.status)
     }
     return response.json()
 }
 
 export async function logout(): Promise<void> {
-    const response = await fetch(`${API_BASE}/auth/logout`, {
-        method: 'POST',
-    })
+    const response = await fetch(`${API_BASE}/auth/logout`, { method: 'POST' })
     if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '退出登录失败')
+        const error = await response.json().catch(() => ({ error: '' })) as ErrorBody
+        throw new ApiError(error.error || i18n.t('errors.logout'), response.status)
     }
 }
 
@@ -313,8 +362,7 @@ export async function fetchLogs(filter: LogFilter = {}): Promise<LogListResponse
         }
     })
 
-    const response = await fetch(`${API_BASE}/logs?${params}`)
-    if (!response.ok) throw new Error('获取日志列表失败')
+    const response = await apiRequest(`${API_BASE}/logs?${params}`, {}, 'errors.load_logs')
     return response.json()
 }
 
@@ -332,21 +380,18 @@ export function buildLogsExportUrl(filter: LogFilter = {}, includeBody = true): 
 }
 
 export async function fetchLog(id: string): Promise<RequestLog> {
-    const response = await fetch(`${API_BASE}/logs/${id}`)
-    if (!response.ok) throw new Error('获取日志详情失败')
+    const response = await apiRequest(`${API_BASE}/logs/${encodeURIComponent(id)}`, {}, 'errors.load_log_detail')
     return response.json()
 }
 
 export async function fetchStats(since?: string): Promise<LogStats> {
     const params = since ? `?since=${since}` : ''
-    const response = await fetch(`${API_BASE}/stats${params}`)
-    if (!response.ok) throw new Error('获取统计数据失败')
+    const response = await apiRequest(`${API_BASE}/stats${params}`, {}, 'errors.load_stats')
     return response.json()
 }
 
 export async function fetchUpstreams(): Promise<Upstream[]> {
-    const response = await fetch(`${API_BASE}/upstreams`)
-    if (!response.ok) throw new Error('获取上游配置失败')
+    const response = await apiRequest(`${API_BASE}/upstreams`, {}, 'errors.load_upstreams')
     return response.json()
 }
 
@@ -357,14 +402,12 @@ export async function fetchTraces(filter: TraceFilter = {}): Promise<TraceListRe
             params.append(key, String(value))
         }
     })
-    const response = await fetch(`${API_BASE}/traces?${params}`)
-    if (!response.ok) throw new Error('获取 Trace 列表失败')
+    const response = await apiRequest(`${API_BASE}/traces?${params}`, {}, 'errors.load_traces')
     return response.json()
 }
 
 export async function fetchTraceDetail(traceId: string): Promise<TraceDetail> {
-    const response = await fetch(`${API_BASE}/traces/${encodeURIComponent(traceId)}`)
-    if (!response.ok) throw new Error('获取 Trace 详情失败')
+    const response = await apiRequest(`${API_BASE}/traces/${encodeURIComponent(traceId)}`, {}, 'errors.load_trace_detail')
     return response.json()
 }
 
@@ -410,18 +453,18 @@ export interface TraceTimeline {
 }
 
 export async function fetchTraceTimeline(traceId: string): Promise<TraceTimeline> {
-    const response = await fetch(`${API_BASE}/traces/${encodeURIComponent(traceId)}/timeline`)
-    if (!response.ok) throw new Error('获取对话时间线失败')
+    const response = await apiRequest(`${API_BASE}/traces/${encodeURIComponent(traceId)}/timeline`, {}, 'errors.load_timeline')
     return response.json()
 }
 
 // 按需获取单个请求的完整（未截断）时间线条目。
 // 事件数量与顺序和列表构建一致，可按 log_id 原位替换列表中的条目。
 export async function fetchTraceTimelineEntry(traceId: string, logId: string): Promise<TimelineRequest> {
-    const response = await fetch(
+    const response = await apiRequest(
         `${API_BASE}/traces/${encodeURIComponent(traceId)}/timeline?full_log=${encodeURIComponent(logId)}`,
+        {},
+        'errors.load_trace_entry',
     )
-    if (!response.ok) throw new Error('获取完整事件内容失败')
     return response.json()
 }
 
@@ -437,8 +480,7 @@ export interface TraceDiagram {
 }
 
 export async function fetchTraceDiagram(traceId: string): Promise<TraceDiagram> {
-    const response = await fetch(`${API_BASE}/traces/${encodeURIComponent(traceId)}/diagram`)
-    if (!response.ok) throw new Error('获取流程图失败')
+    const response = await apiRequest(`${API_BASE}/traces/${encodeURIComponent(traceId)}/diagram`, {}, 'errors.load_diagram')
     return response.json()
 }
 
@@ -480,8 +522,11 @@ export async function streamAnalysisChat(
         signal,
     })
     if (!response.ok || !response.body) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || 'AI 分析请求失败')
+        if (response.status === 401) {
+            emitAuthExpired()
+        }
+        const error = await response.json().catch(() => ({ error: '' })) as ErrorBody
+        throw new ApiError(error.error || i18n.t('errors.analysis_request'), response.status)
     }
 
     const reader = response.body.getReader()
@@ -547,35 +592,20 @@ export async function addUpstream(
     logging_path_filter?: LoggingPathFilter,
     sse_keepalive?: SSEKeepaliveConfig,
 ): Promise<void> {
-    const response = await fetch(`${API_BASE}/upstreams`, {
+    await apiRequest(`${API_BASE}/upstreams`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, target, timeout, response_header_timeout, response_body_first_byte_timeout, response_body_idle_timeout, order, outbound_proxy, logging_enabled, active_target, targets, logging_path_filter, sse_keepalive }),
-    })
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '添加上游失败')
-    }
+    }, 'errors.add_upstream')
 }
 
 export async function fetchModelPathTemplates(): Promise<ModelPathTemplatesResponse> {
-    const response = await fetch(`${API_BASE}/logging-rules/model-path-templates`)
-    if (!response.ok) throw new Error('获取模型日志路径模板失败')
+    const response = await apiRequest(`${API_BASE}/logging-rules/model-path-templates`, {}, 'errors.load_model_path_templates')
     return response.json()
 }
 
 export async function saveModelPathTemplates(templates: ModelPathTemplate[]): Promise<void> {
-    const response = await fetch(`${API_BASE}/logging-rules/model-path-templates`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templates }),
-    })
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '保存模型日志路径模板失败')
-    }
+    await apiRequest(`${API_BASE}/logging-rules/model-path-templates`, jsonInit('PUT', { templates }), 'errors.save_model_path_templates')
 }
 
 export async function fetchIgnoredPaths(filter: IgnoredPathFilter = {}): Promise<IgnoredPathListResponse> {
@@ -583,8 +613,7 @@ export async function fetchIgnoredPaths(filter: IgnoredPathFilter = {}): Promise
     Object.entries(filter).forEach(([key, value]) => {
         if (value !== undefined && value !== '') params.set(key, String(value))
     })
-    const response = await fetch(`${API_BASE}/logging-rules/ignored-paths?${params}`)
-    if (!response.ok) throw new Error('获取被忽略路径失败')
+    const response = await apiRequest(`${API_BASE}/logging-rules/ignored-paths?${params}`, {}, 'errors.load_ignored_paths')
     return response.json()
 }
 
@@ -592,35 +621,17 @@ export async function deleteIgnoredPaths(upstream = '', path = ''): Promise<numb
     const params = new URLSearchParams()
     if (upstream) params.set('upstream', upstream)
     if (path) params.set('path', path)
-    const response = await fetch(`${API_BASE}/logging-rules/ignored-paths?${params}`, { method: 'DELETE' })
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '删除被忽略路径失败')
-    }
+    const response = await apiRequest(`${API_BASE}/logging-rules/ignored-paths?${params}`, { method: 'DELETE' }, 'errors.delete_ignored_paths')
     const result = await response.json() as { deleted: number }
     return result.deleted
 }
 
 export async function activateUpstreamTarget(upstream: string, target: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/upstreams/active-target`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upstream, target }),
-    })
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '切换目标失败')
-    }
+    await apiRequest(`${API_BASE}/upstreams/active-target`, jsonInit('PATCH', { upstream, target }), 'errors.switch_target')
 }
 
 export async function removeUpstream(name: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/upstreams?name=${encodeURIComponent(name)}`, {
-        method: 'DELETE',
-    })
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '删除上游失败')
-    }
+    await apiRequest(`${API_BASE}/upstreams?name=${encodeURIComponent(name)}`, { method: 'DELETE' }, 'errors.remove_upstream')
 }
 
 // 应用配置类型
@@ -674,15 +685,11 @@ export async function updateLogAnnotation(
     id: string,
     update: Partial<Pick<LogAnnotation, 'saved' | 'status' | 'note' | 'labels'>>,
 ): Promise<LogAnnotation> {
-    const response = await fetch(`${API_BASE}/logs/${encodeURIComponent(id)}/annotation`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(update),
-    })
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '保存日志标记失败')
-    }
+    const response = await apiRequest(
+        `${API_BASE}/logs/${encodeURIComponent(id)}/annotation`,
+        jsonInit('PATCH', update),
+        'errors.save_annotation',
+    )
     return response.json()
 }
 
@@ -730,8 +737,7 @@ export interface ConfigUpdate {
 }
 
 export async function fetchConfig(): Promise<AppConfig> {
-    const response = await fetch(`${API_BASE}/config`)
-    if (!response.ok) throw new Error('获取配置失败')
+    const response = await apiRequest(`${API_BASE}/config`, {}, 'errors.load_config')
     return response.json()
 }
 
@@ -761,8 +767,7 @@ export interface SystemMetrics {
 }
 
 export async function fetchSystemMetrics(): Promise<SystemMetrics> {
-    const response = await fetch(`${API_BASE}/system/metrics`)
-    if (!response.ok) throw new Error('获取资源占用失败')
+    const response = await apiRequest(`${API_BASE}/system/metrics`, {}, 'errors.load_metrics')
     return response.json()
 }
 
@@ -777,11 +782,7 @@ export interface StorageUsage {
 }
 
 export async function fetchStorageUsage(): Promise<StorageUsage> {
-    const response = await fetch(`${API_BASE}/system/storage`)
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '计算存储占用失败')
-    }
+    const response = await apiRequest(`${API_BASE}/system/storage`, {}, 'errors.load_storage')
     return response.json()
 }
 
@@ -805,31 +806,16 @@ export interface UpdateInfo {
 }
 
 export async function fetchUpdateInfo(): Promise<UpdateInfo> {
-    const response = await fetch(`${API_BASE}/system/update`)
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '检查更新失败')
-    }
+    const response = await apiRequest(`${API_BASE}/system/update`, {}, 'errors.check_update')
     return response.json()
 }
 
 export async function updateConfig(update: ConfigUpdate): Promise<void> {
-    const response = await fetch(`${API_BASE}/config`, {
-        method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(update),
-    })
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '更新配置失败')
-    }
+    await apiRequest(`${API_BASE}/config`, jsonInit('PUT', update), 'errors.update_config')
 }
 
 export async function fetchBlob(ref: string): Promise<string> {
-    const response = await fetch(`${API_BASE}/blobs/${encodeURIComponent(ref)}`)
-    if (!response.ok) throw new Error('获取 Blob 失败')
+    const response = await apiRequest(`${API_BASE}/blobs/${encodeURIComponent(ref)}`, {}, 'errors.load_blob')
     return response.text()
 }
 
@@ -843,8 +829,7 @@ export interface LogBodyResponse {
 
 export async function fetchLogBody(id: string, part: 'request' | 'response'): Promise<LogBodyResponse> {
     const params = new URLSearchParams({ part })
-    const response = await fetch(`${API_BASE}/logs/${encodeURIComponent(id)}/body?${params}`)
-    if (!response.ok) throw new Error('获取 Body 失败')
+    const response = await apiRequest(`${API_BASE}/logs/${encodeURIComponent(id)}/body?${params}`, {}, 'errors.load_body')
     return response.json()
 }
 
@@ -868,14 +853,6 @@ export interface ReplayResponse {
 }
 
 export async function sendReplay(req: ReplayRequest): Promise<ReplayResponse> {
-    const response = await fetch(`${API_BASE}/replay`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req),
-    })
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: '请求失败' }))
-        throw new Error(error.error || '重放请求失败')
-    }
+    const response = await apiRequest(`${API_BASE}/replay`, jsonInit('POST', req), 'errors.send_replay')
     return response.json()
 }

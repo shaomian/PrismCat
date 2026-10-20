@@ -54,7 +54,7 @@ export function LogDiff() {
                         id,
                         log: null,
                         loading: false,
-                        error: err instanceof Error ? err.message : t('common.error'),
+                        error: err instanceof Error ? err.message : i18n.t('common.error'),
                     })
                 }
             })
@@ -62,7 +62,7 @@ export function LogDiff() {
         return () => {
             cancelled = true
         }
-    }, [id, t])
+    }, [id, i18n])
 
     const { log, loading } = currentState
     const error = currentState.error === 'missing-id'

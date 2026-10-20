@@ -50,7 +50,7 @@ function rowKey(record: IgnoredPathRecord) {
 }
 
 export function LoggingRules({ tab = 'models', embedded = false }: LoggingRulesProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const activeTab = tab
 
@@ -82,11 +82,11 @@ export function LoggingRules({ tab = 'models', embedded = false }: LoggingRulesP
       setSystemTag(current => current || library.system_defaults?.[0]?.tag || '')
       setIgnoredTemplateTag(current => current || library.templates?.[0]?.tag || '')
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('common.error'))
+      toast.error(error instanceof Error ? error.message : i18n.t('common.error'))
     } finally {
       setLoading(false)
     }
-  }, [t])
+  }, [i18n])
 
   const loadIgnored = useCallback(async () => {
     setIgnoredLoading(true)
@@ -97,11 +97,11 @@ export function LoggingRules({ tab = 'models', embedded = false }: LoggingRulesP
       setIgnoredRequests(result.total_requests || 0)
       setSelectedIgnored(new Set())
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('common.error'))
+      toast.error(error instanceof Error ? error.message : i18n.t('common.error'))
     } finally {
       setIgnoredLoading(false)
     }
-  }, [ignoredFilter, t])
+  }, [ignoredFilter, i18n])
 
   useEffect(() => { void loadLibraries() }, [loadLibraries])
   useEffect(() => {

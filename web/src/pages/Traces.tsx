@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner'
 
 export function Traces() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
@@ -36,7 +36,7 @@ export function Traces() {
         setTraces(res.traces || [])
         setTotal(res.total)
       } catch {
-        if (!cancelled) toast.error(t('traces.load_failed'))
+        if (!cancelled) toast.error(i18n.t('traces.load_failed'))
       }
     }
 
@@ -45,7 +45,7 @@ export function Traces() {
     return () => {
       cancelled = true
     }
-  }, [filter, t])
+  }, [filter, i18n])
 
   useEffect(() => {
     fetchUpstreams().then(setUpstreams).catch(() => {})

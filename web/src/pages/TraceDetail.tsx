@@ -36,11 +36,11 @@ export function TraceDetail() {
       const res = await fetchTraceDetail(traceId)
       setDetail(res)
     } catch {
-      toast.error(t('traces.load_detail_failed'))
+      toast.error(i18n.t('traces.load_detail_failed'))
     } finally {
       setLoading(false)
     }
-  }, [traceId, t])
+  }, [traceId, i18n])
 
   const loadTimeline = useCallback(async () => {
     if (!traceId) return
@@ -48,9 +48,9 @@ export function TraceDetail() {
       const res = await fetchTraceTimeline(traceId)
       setTimeline(res)
     } catch {
-      toast.error(t('timeline.load_failed'))
+      toast.error(i18n.t('timeline.load_failed'))
     }
-  }, [traceId, t])
+  }, [traceId, i18n])
 
   const loadDiagram = useCallback(async () => {
     if (!traceId) return
@@ -58,9 +58,9 @@ export function TraceDetail() {
       const res = await fetchTraceDiagram(traceId)
       setDiagram(res)
     } catch {
-      toast.error(t('timeline.diagram.load_failed'))
+      toast.error(i18n.t('timeline.diagram.load_failed'))
     }
-  }, [traceId, t])
+  }, [traceId, i18n])
 
   // 按需加载单个请求的完整（未截断）事件，原位替换列表中的对应条目
   const handleLoadFullEvents = useCallback(async (logId: string) => {
@@ -73,7 +73,7 @@ export function TraceDetail() {
         requests: prev.requests.map(req => (req.log_id === logId ? entry : req)),
       } : prev)
     } catch {
-      toast.error(t('timeline.full_load_failed'))
+      toast.error(i18n.t('timeline.full_load_failed'))
     } finally {
       setLoadingFullLogIds(prev => {
         const next = new Set(prev)
@@ -81,7 +81,7 @@ export function TraceDetail() {
         return next
       })
     }
-  }, [traceId, loadingFullLogIds, t])
+  }, [traceId, loadingFullLogIds, i18n])
 
   useEffect(() => {
     loadDetail()
