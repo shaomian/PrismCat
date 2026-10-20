@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -190,7 +192,11 @@ func (e *traceToolExecutor) ExecuteToolCall(ctx context.Context, name string, ar
 
 	log, err := e.h.repo.GetLog(params.LogID)
 	if err != nil {
-		return "", fmt.Errorf("日志 %s 不存在", params.LogID)
+		// 区分不存在与查询故障，避免向模型误报「不存在」
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("日志 %s 不存在", params.LogID)
+		}
+		return "", fmt.Errorf("查询日志 %s 失败: %w", params.LogID, err)
 	}
 	// 限定只能调取本调用链内的请求，防止跨链读取
 	if log.TraceID != e.traceID {

@@ -15,9 +15,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -148,10 +151,7 @@ func RunChat(ctx context.Context, cfg config.AnalysisConfig, messages []Message,
 		// 达到轮次上限后不再提供工具，强制模型收尾作答
 		offerTools := toolsEnabled && rounds <= maxToolRounds
 
-		msgsAny, err := messagesToAny(messages)
-		if err != nil {
-			return result, err
-		}
+		msgsAny := messagesToAny(messages)
 		payload := map[string]any{
 			"model":    cfg.Model,
 			"messages": msgsAny,
@@ -163,8 +163,12 @@ func RunChat(ctx context.Context, cfg config.AnalysisConfig, messages []Message,
 
 		resp, err := postChat(ctx, cfg, endpoint, payload, opts)
 		if err != nil {
-			// 首轮带工具被拒（模型不支持）→ 降级为无工具重试一次
-			if offerTools && rounds == 1 {
+			// 首轮带工具被拒（模型/网关不支持 tools 参数）→ 降级为无工具重试一次。
+			// 仅限 4xx 中非 429 的请求错误；429/5xx/超时等其他错误原样返回，
+			// 避免盲目重试翻倍失败延迟并掩盖真实原因。
+			var httpErr *HTTPError
+			if offerTools && rounds == 1 && errors.As(err, &httpErr) &&
+				httpErr.Status >= 400 && httpErr.Status < 500 && httpErr.Status != http.StatusTooManyRequests {
 				toolsEnabled = false
 				rounds--
 				continue
@@ -180,7 +184,9 @@ func RunChat(ctx context.Context, cfg config.AnalysisConfig, messages []Message,
 			return result, err
 		}
 		if round.usage != nil {
-			accumulatedUsage = round.usage
+			// 多轮工具调用时各轮是独立的 HTTP 请求，用量要累加；
+			// 此前直接覆盖导致只报最后一轮（通常低估大半成本）
+			accumulatedUsage = mergeUsage(accumulatedUsage, round.usage)
 		}
 
 		// 本轮有工具调用：执行并循环
@@ -226,7 +232,7 @@ func RunChat(ctx context.Context, cfg config.AnalysisConfig, messages []Message,
 
 // ---------- 消息序列化 ----------
 
-func messagesToAny(messages []Message) ([]map[string]any, error) {
+func messagesToAny(messages []Message) []map[string]any {
 	out := make([]map[string]any, 0, len(messages))
 	for i := range messages {
 		m := &messages[i]
@@ -254,7 +260,7 @@ func messagesToAny(messages []Message) ([]map[string]any, error) {
 		}
 		out = append(out, entry)
 	}
-	return out, nil
+	return out
 }
 
 // ---------- 工具定义 ----------
@@ -312,9 +318,57 @@ func postChat(ctx context.Context, cfg config.AnalysisConfig, endpoint string, p
 	if resp.StatusCode != http.StatusOK {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		resp.Body.Close()
-		return nil, fmt.Errorf("分析模型返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+		return nil, &HTTPError{Status: resp.StatusCode, Body: strings.TrimSpace(string(snippet))}
 	}
 	return resp, nil
+}
+
+// HTTPError 上游返回非 200 时的带状态码错误，供调用方按错误类别决策
+// （如仅在 tools 不被支持时降级重试，其余原样透传）。
+type HTTPError struct {
+	Status int
+	Body   string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("分析模型返回 %d: %s", e.Status, e.Body)
+}
+
+// mergeUsage 累加多轮请求的用量：标量数值字段求和，其余字段以后轮为准。
+func mergeUsage(prev, next map[string]any) map[string]any {
+	if prev == nil {
+		return next
+	}
+	merged := make(map[string]any, len(next)+len(prev))
+	for k, v := range next {
+		if pv, ok := prev[k]; ok {
+			if a, okA := toFloat(pv); okA {
+				if b, okB := toFloat(v); okB {
+					merged[k] = a + b
+					continue
+				}
+			}
+		}
+		merged[k] = v
+	}
+	return merged
+}
+
+func toFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	}
+	return 0, false
 }
 
 type roundToolCall struct {
@@ -458,10 +512,9 @@ func consumeStream(body io.Reader, cb Callbacks) (*streamRound, error) {
 	}
 
 	round.content = content.String()
-	for i := 0; i < len(toolAcc); i++ {
-		if tc, ok := toolAcc[i]; ok {
-			round.toolCalls = append(round.toolCalls, *tc)
-		}
+	// 按 index 升序聚合，容忍非 0 起始/非连续的 index（部分上游如此）
+	for _, idx := range slices.Sorted(maps.Keys(toolAcc)) {
+		round.toolCalls = append(round.toolCalls, *toolAcc[idx])
 	}
 	return round, nil
 }

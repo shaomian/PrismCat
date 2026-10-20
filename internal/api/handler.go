@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -197,7 +199,9 @@ func (h *Handler) handleLogsExport(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil && r.Context().Err() == nil {
 		// Headers may already be sent; in that case the partial JSONL file is still
-		// useful up to the last complete line.
+		// useful up to the last complete line. 至少把截断原因记到服务端日志，
+		// 否则一个看似有效的文件其实是静默截断的，无从排查
+		log.Printf("logs export aborted mid-stream: %v", err)
 		return
 	}
 }
@@ -309,7 +313,13 @@ func (h *Handler) handleLogDetail(w http.ResponseWriter, r *http.Request) {
 	id := path
 	log, err := h.repo.GetLog(id)
 	if err != nil {
-		h.jsonError(w, "日志不存在", http.StatusNotFound)
+		// 区分「不存在」与「查询失败」：把 SQLite 故障伪装成 404
+		// 会让前端无从判断该刷新还是该报错
+		if errors.Is(err, sql.ErrNoRows) {
+			h.jsonError(w, "日志不存在", http.StatusNotFound)
+			return
+		}
+		h.jsonError(w, "查询日志失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -324,7 +334,11 @@ func (h *Handler) handleLogBody(w http.ResponseWriter, r *http.Request, id strin
 
 	logEntry, err := h.repo.GetLog(id)
 	if err != nil {
-		h.jsonError(w, "日志不存在", http.StatusNotFound)
+		if errors.Is(err, sql.ErrNoRows) {
+			h.jsonError(w, "日志不存在", http.StatusNotFound)
+			return
+		}
+		h.jsonError(w, "查询日志失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -393,7 +407,11 @@ func (h *Handler) handleLogAnnotation(w http.ResponseWriter, r *http.Request, id
 	}
 
 	if _, err := h.repo.GetLog(id); err != nil {
-		h.jsonError(w, "日志不存在", http.StatusNotFound)
+		if errors.Is(err, sql.ErrNoRows) {
+			h.jsonError(w, "日志不存在", http.StatusNotFound)
+			return
+		}
+		h.jsonError(w, "查询日志失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 

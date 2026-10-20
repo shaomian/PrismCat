@@ -212,10 +212,6 @@ func isImageContentType(contentType string) bool {
 	return strings.HasPrefix(mediaType, "image/")
 }
 
-func decodeContent(contentEncoding string, body []byte, maxOutputBytes int64) ([]byte, bool, string, bool) {
-	return decodeContentTokens(normalizedEncodings(contentEncoding), body, maxOutputBytes)
-}
-
 func decodeContentTokens(tokens []string, body []byte, maxOutputBytes int64) ([]byte, bool, string, bool) {
 	if len(tokens) == 0 {
 		return nil, false, "", false

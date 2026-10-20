@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"sort"
 	"strings"
 )
 
@@ -589,9 +588,4 @@ func makeMessage(ev Event) message {
 	h.Write([]byte{0})
 	h.Write([]byte(ev.ToolArgs))
 	return message{fp: hex.EncodeToString(h.Sum(nil)), ev: ev}
-}
-
-// sortMessagesForDebug 仅测试用
-func sortMessagesForDebug(msgs []message) {
-	sort.Slice(msgs, func(i, j int) bool { return msgs[i].fp < msgs[j].fp })
 }

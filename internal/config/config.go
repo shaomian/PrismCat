@@ -286,11 +286,6 @@ type StorageConfig struct {
 	AsyncBuffer int `yaml:"async_buffer"`
 }
 
-var (
-	cfg  *Config
-	once sync.Once
-)
-
 // Load 加载配置文件
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -418,14 +413,17 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	cfg = &c
 	return &c, nil
 }
 
+// parsePort 解析环境变量中的整数端口。用 Sscanf 会把 "8080abc" 也
+// 当作 8080 接受，静默吞掉输入错误；strconv.Atoi 会拒绝残留字符。
 func parsePort(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0, fmt.Errorf("invalid port %q: %w", s, err)
+	}
+	return n, nil
 }
 
 func splitCSV(s string) []string {
@@ -1109,11 +1107,6 @@ func (c *Config) AuthSnapshot() AuthSnapshot {
 		UIPassword:     c.Server.UIPassword,
 		UIPasswordHash: c.Server.UIPasswordHash,
 	}
-}
-
-// Get 获取当前配置（需要先调用 Load）
-func Get() *Config {
-	return cfg
 }
 
 // Save 保存配置文件

@@ -49,6 +49,11 @@ func (s *FileBlobStore) Put(ctx context.Context, data []byte) (string, error) {
 
 	finalPath := s.pathFor(hexHash)
 	if _, err := os.Stat(finalPath); err == nil {
+		// 内容寻址去重命中。刷新 mtime：GC 的 minAge 防线依赖文件时间，
+		// 若保留旧 mtime，新日志引用此 blob 而 GC 恰在引用快照之后运行时，
+		// 会被当作"超龄孤儿"误删（引用它的日志将永远无法恢复 body）
+		now := time.Now()
+		_ = os.Chtimes(finalPath, now, now)
 		return ref, nil
 	}
 
@@ -183,6 +188,19 @@ func (s *FileBlobStore) GarbageCollect(ctx context.Context, referencedRefs []str
 
 		name := d.Name()
 		if !isBlobFileName(name) {
+			// 崩溃残留的写入中间文件（.tmp-*）：既不被引用计数也不被
+			// 磁盘统计，不清就永久泄漏。仅在已知超龄阈值时清理，
+			// 避免与进行中的 Put（temp 文件刚创建）竞态
+			if cutoff.IsZero() || !strings.HasPrefix(name, ".tmp-") {
+				return nil
+			}
+			info, infoErr := d.Info()
+			if infoErr != nil || info.ModTime().After(cutoff) {
+				return nil
+			}
+			if os.Remove(path) == nil {
+				deleted++
+			}
 			return nil
 		}
 		if _, ok := referenced[name]; ok {

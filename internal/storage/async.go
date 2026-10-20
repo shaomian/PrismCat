@@ -109,11 +109,6 @@ func NewAsyncRepository(inner Repository, cfg *config.Config, buffer int, blobs 
 	return a
 }
 
-// Dropped returns the number of logs dropped due to a full queue.
-func (a *AsyncRepository) Dropped() uint64 {
-	return a.dropped.Load()
-}
-
 func (a *AsyncRepository) SaveLog(log *RequestLog) error {
 	if log == nil {
 		return nil

@@ -153,24 +153,6 @@ func (r *Registry) Complete(logEntry *storage.RequestLog) {
 	delete(r.entries, logEntry.ID)
 }
 
-func (r *Registry) Remove(id string) {
-	if id == "" {
-		return
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	current, ok := r.entries[id]
-	if !ok {
-		return
-	}
-	for _, ch := range current.subs {
-		close(ch)
-	}
-	delete(r.entries, id)
-}
-
 func (r *Registry) Snapshot(id string) (*storage.RequestLog, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

@@ -3,6 +3,7 @@ package analysis
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -100,8 +101,15 @@ func TestRunChatToolLoop(t *testing.T) {
 	if len(toolCalls) != 1 || toolCalls[0] != `get_request_detail:{"log_id":"abc"}` {
 		t.Errorf("tool call callback mismatch: %v", toolCalls)
 	}
-	if usage, _ := result.Usage["total_tokens"].(float64); usage != 350 {
-		t.Errorf("usage mismatch: %v", result.Usage)
+	// 多轮用量按轮累加：100+350=450 / 100+300=400 / 50
+	if usage, _ := result.Usage["total_tokens"].(float64); usage != 450 {
+		t.Errorf("total_tokens mismatch: %v", result.Usage)
+	}
+	if usage, _ := result.Usage["prompt_tokens"].(float64); usage != 400 {
+		t.Errorf("prompt_tokens mismatch: %v", result.Usage)
+	}
+	if usage, _ := result.Usage["completion_tokens"].(float64); usage != 50 {
+		t.Errorf("completion_tokens mismatch: %v", result.Usage)
 	}
 }
 
@@ -140,6 +148,35 @@ func TestRunChatToolFallback(t *testing.T) {
 	}
 	if result.Rounds != 1 || result.ToolCalls != 0 {
 		t.Errorf("expected 1 round 0 tools after fallback, got rounds=%d tools=%d", result.Rounds, result.ToolCalls)
+	}
+}
+
+// 非工具不支持的错误（5xx）不应触发降级重试：盲重试会翻倍失败延迟
+// 并掩盖真实错误。
+func TestRunChatNoFallbackOnServerError(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(500)
+		w.Write([]byte(`{"error":"upstream exploded"}`))
+	}))
+	defer server.Close()
+
+	_, err := RunChat(context.Background(),
+		config.AnalysisConfig{BaseURL: server.URL, Model: "test"},
+		[]Message{{Role: "user", Content: "hi"}},
+		StreamOptions{}, funcExecutor{},
+		Callbacks{},
+	)
+	if err == nil {
+		t.Fatal("expected error from 500 response")
+	}
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Status != 500 {
+		t.Fatalf("expected HTTPError 500, got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected 1 HTTP call (no blind retry), got %d", calls)
 	}
 }
 

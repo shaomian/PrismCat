@@ -3,8 +3,20 @@ package timeline
 import (
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 )
+
+// sortedIntKeys 升序返回 map 的 index 键。部分上游会以非 0 起始/非连续的
+// choice 或 tool_call index 发送增量，按 len 循环遍历会静默丢失事件。
+func sortedIntKeys[V any](m map[int]V) []int {
+	keys := make([]int, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+	return keys
+}
 
 // sseEvent 一条 SSE 消息
 type sseEvent struct {
@@ -180,11 +192,8 @@ func mergeOpenAIChatSSE(events []sseEvent) map[string]any {
 	}
 
 	var choiceList []any
-	for i := 0; i < len(choices); i++ {
-		acc, ok := choices[i]
-		if !ok {
-			continue
-		}
+	for _, cIdx := range sortedIntKeys(choices) {
+		acc := choices[cIdx]
 		msg := map[string]any{"role": "assistant"}
 		if acc.role != "" {
 			msg["role"] = acc.role
@@ -196,11 +205,8 @@ func mergeOpenAIChatSSE(events []sseEvent) map[string]any {
 			msg["reasoning_content"] = acc.reasoningContent.String()
 		}
 		var toolCalls []any
-		for j := 0; j < len(acc.toolCalls); j++ {
-			tool, ok := acc.toolCalls[j]
-			if !ok {
-				continue
-			}
+		for _, tIdx := range sortedIntKeys(acc.toolCalls) {
+			tool := acc.toolCalls[tIdx]
 			toolCalls = append(toolCalls, map[string]any{
 				"id":   tool.id,
 				"type": "function",
@@ -213,7 +219,7 @@ func mergeOpenAIChatSSE(events []sseEvent) map[string]any {
 		if len(toolCalls) > 0 {
 			msg["tool_calls"] = toolCalls
 		}
-		choiceList = append(choiceList, map[string]any{"index": i, "message": msg})
+		choiceList = append(choiceList, map[string]any{"index": cIdx, "message": msg})
 	}
 	return map[string]any{"choices": choiceList}
 }

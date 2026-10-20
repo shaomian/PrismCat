@@ -59,8 +59,10 @@ func (h *Handler) recoverBody(ctx context.Context, inline, ref string, headers m
 		storage.FirstHeaderValue(headers, "Content-Encoding"),
 		data,
 		httpbody.FormatOptions{
-			MaxOutputBytes:               maxBytes,
-			TrimLargeBase64:              true,
+			MaxOutputBytes: maxBytes,
+			// 与日志详情/导出路径保持一致：store_base64: true 时保留
+			// base64 内容，否则与采集时同样裁剪大段 base64
+			TrimLargeBase64:              !h.cfg.LoggingSnapshot().StoreBase64,
 			RequireContentEncodingDecode: true,
 		},
 	)

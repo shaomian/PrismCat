@@ -3,7 +3,10 @@ package storage
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 )
 
 // 引用列表为空但仓库非空,曾经会把整个 blob 仓库删空 —— 只要进程被指向另一个
@@ -81,4 +84,92 @@ func TestGarbageCollectStillCollectsUnreferenced(t *testing.T) {
 	if _, err := store.Get(ctx, orphan); err == nil {
 		t.Fatal("orphan blob should have been deleted")
 	}
+}
+
+// 去重命中必须刷新 mtime：否则「新日志引用了旧 blob」在 GC 的 minAge
+// 防线看来仍是超龄孤儿，引用快照落后于日志写入时会被误删。
+func TestPutDedupRefreshesMTime(t *testing.T) {
+	store, err := NewFileBlobStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	ref, err := store.Put(ctx, []byte("payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, hexHash, _ := parseBlobRef(ref)
+	path := store.pathFor(hexHash)
+
+	stale := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(path, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.Put(ctx, []byte("payload")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.ModTime().Before(time.Now().Add(-time.Minute)) {
+		t.Fatalf("dedup hit did not refresh mtime: %v", info.ModTime())
+	}
+}
+
+// 崩溃残留的 .tmp- 写入中间文件应当被 GC 清掉（超龄时），
+// 但进行中的写入（新鲜 .tmp-）不能动。
+func TestGarbageCollectRemovesStaleTmpFiles(t *testing.T) {
+	store, err := NewFileBlobStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	ref, err := store.Put(ctx, []byte("payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Dir(store.pathFor(mustHexHash(t, ref)))
+	staleTmp := filepath.Join(dir, ".tmp-deadbeef-1")
+	if err := os.WriteFile(staleTmp, []byte("crash leftover"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(staleTmp, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	freshTmp := filepath.Join(dir, ".tmp-inflight-2")
+	if err := os.WriteFile(freshTmp, []byte("being written"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := store.GarbageCollect(ctx, []string{ref}, time.Hour)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("want 1 deleted (stale tmp only), got %d", deleted)
+	}
+	if _, err := os.Stat(staleTmp); !os.IsNotExist(err) {
+		t.Fatal("stale .tmp- file should have been removed")
+	}
+	if _, err := os.Stat(freshTmp); err != nil {
+		t.Fatalf("in-flight .tmp- file must survive: %v", err)
+	}
+	if _, err := store.Get(ctx, ref); err != nil {
+		t.Fatalf("referenced blob should survive: %v", err)
+	}
+}
+
+func mustHexHash(t *testing.T, ref string) string {
+	t.Helper()
+	_, hexHash, err := parseBlobRef(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hexHash
 }
