@@ -1,4 +1,4 @@
-module github.com/paopaoandlingyia/PrismCat
+module github.com/shaomian/PrismCat
 
 go 1.25.7
 

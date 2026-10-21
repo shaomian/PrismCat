@@ -89,7 +89,7 @@ function AppLayout({ onSignOut }: AppLayoutProps) {
         className="fixed inset-y-0 left-0 z-40 hidden w-[200px] flex-col border-r border-border bg-muted/40 md:flex"
       >
         <a
-          href="https://github.com/paopaoandlingyia/PrismCat"
+          href="https://github.com/shaomian/PrismCat"
           target="_blank"
           rel="noopener noreferrer"
           className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 transition-colors hover:bg-accent/60"

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/config"
 )
 
 func TestProxyWebSocketUpgradeSurvivesRequestTimeout(t *testing.T) {

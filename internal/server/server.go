@@ -19,13 +19,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/api"
-	"github.com/paopaoandlingyia/PrismCat/internal/auth"
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
-	"github.com/paopaoandlingyia/PrismCat/internal/live"
-	"github.com/paopaoandlingyia/PrismCat/internal/proxy"
-	"github.com/paopaoandlingyia/PrismCat/internal/storage"
-	"github.com/paopaoandlingyia/PrismCat/internal/trace"
+	"github.com/shaomian/PrismCat/internal/api"
+	"github.com/shaomian/PrismCat/internal/auth"
+	"github.com/shaomian/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/live"
+	"github.com/shaomian/PrismCat/internal/proxy"
+	"github.com/shaomian/PrismCat/internal/storage"
+	"github.com/shaomian/PrismCat/internal/trace"
 )
 
 //go:embed all:ui

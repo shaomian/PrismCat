@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/requestoverride"
+	"github.com/shaomian/PrismCat/internal/requestoverride"
 )
 
 func TestSanitizeHeaderChangesMasksSensitiveValuesWithoutMutatingInput(t *testing.T) {

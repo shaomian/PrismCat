@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
-	"github.com/paopaoandlingyia/PrismCat/internal/httpbody"
+	"github.com/shaomian/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/httpbody"
 )
 
 type Result struct {

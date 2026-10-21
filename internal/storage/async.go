@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/config"
 )
 
 var (

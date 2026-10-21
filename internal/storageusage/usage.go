@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/config"
 )
 
 type Usage struct {

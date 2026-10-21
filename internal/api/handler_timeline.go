@@ -5,9 +5,9 @@ import (
 	"math"
 	"net/http"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/httpbody"
-	"github.com/paopaoandlingyia/PrismCat/internal/storage"
-	"github.com/paopaoandlingyia/PrismCat/internal/timeline"
+	"github.com/shaomian/PrismCat/internal/httpbody"
+	"github.com/shaomian/PrismCat/internal/storage"
+	"github.com/shaomian/PrismCat/internal/timeline"
 )
 
 // handleTraceTimeline 构建调用链的对话时间线: GET /api/traces/{id}/timeline

@@ -3,7 +3,7 @@ package live
 import (
 	"sync"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/storage"
+	"github.com/shaomian/PrismCat/internal/storage"
 )
 
 type EventType string

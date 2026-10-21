@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/analysis"
-	"github.com/paopaoandlingyia/PrismCat/internal/timeline"
+	"github.com/shaomian/PrismCat/internal/analysis"
+	"github.com/shaomian/PrismCat/internal/timeline"
 )
 
 // analysisContextEventChars 分析上下文中单事件内容上限（比展示视图更紧凑）

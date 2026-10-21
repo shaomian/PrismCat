@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/config"
 )
 
 func TestHashPasswordVerifiesOnlyCorrectPassword(t *testing.T) {

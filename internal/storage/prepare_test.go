@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/config"
 )
 
 // 回归测试：body_preview_bytes 为 0（禁用预览）且开启 detach 时，

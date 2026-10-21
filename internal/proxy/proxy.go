@@ -19,13 +19,13 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
-	"github.com/paopaoandlingyia/PrismCat/internal/httpbody"
-	"github.com/paopaoandlingyia/PrismCat/internal/live"
-	"github.com/paopaoandlingyia/PrismCat/internal/outbound"
-	"github.com/paopaoandlingyia/PrismCat/internal/requestoverride"
-	"github.com/paopaoandlingyia/PrismCat/internal/storage"
-	"github.com/paopaoandlingyia/PrismCat/internal/trace"
+	"github.com/shaomian/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/httpbody"
+	"github.com/shaomian/PrismCat/internal/live"
+	"github.com/shaomian/PrismCat/internal/outbound"
+	"github.com/shaomian/PrismCat/internal/requestoverride"
+	"github.com/shaomian/PrismCat/internal/storage"
+	"github.com/shaomian/PrismCat/internal/trace"
 )
 
 type responseBodyFirstByteTimeoutError struct {

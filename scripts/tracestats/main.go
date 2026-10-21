@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/timeline"
+	"github.com/shaomian/PrismCat/internal/timeline"
 	_ "modernc.org/sqlite"
 )
 

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/config"
 )
 
 type ClientCache struct {

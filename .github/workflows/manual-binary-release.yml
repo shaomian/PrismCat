@@ -82,7 +82,7 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           ASSET_NAME="prismcat-${RELEASE_TAG}-${GOOS}-${GOARCH}${{ matrix.suffix }}"
-          go build -ldflags="-s -w -X github.com/paopaoandlingyia/PrismCat/internal/config.Version=${VERSION}" -o "$ASSET_NAME" ./cmd/prismcat
+          go build -ldflags="-s -w -X github.com/shaomian/PrismCat/internal/config.Version=${VERSION}" -o "$ASSET_NAME" ./cmd/prismcat
           echo "ASSET_NAME=$ASSET_NAME" >> "$GITHUB_ENV"
 
       - name: Stage binary

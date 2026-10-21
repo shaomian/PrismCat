@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
-	"github.com/paopaoandlingyia/PrismCat/internal/server"
-	"github.com/paopaoandlingyia/PrismCat/internal/storage"
+	"github.com/shaomian/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/server"
+	"github.com/shaomian/PrismCat/internal/storage"
 )
 
 const defaultYAML = `

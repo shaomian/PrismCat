@@ -5,8 +5,8 @@ import (
 	"math"
 	"sync"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/storage"
-	"github.com/paopaoandlingyia/PrismCat/internal/timeline"
+	"github.com/shaomian/PrismCat/internal/storage"
+	"github.com/shaomian/PrismCat/internal/timeline"
 )
 
 // tlCacheLimit 缓存的调用链时间线上限。

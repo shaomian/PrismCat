@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/config"
 )
 
 type memRepo struct {

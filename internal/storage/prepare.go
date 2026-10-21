@@ -4,9 +4,9 @@ import (
 	"context"
 	"log"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
-	"github.com/paopaoandlingyia/PrismCat/internal/httpbody"
-	"github.com/paopaoandlingyia/PrismCat/internal/usage"
+	"github.com/shaomian/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/httpbody"
+	"github.com/shaomian/PrismCat/internal/usage"
 )
 
 // PrepareLogForPersistence converts raw captured bodies into bounded previews

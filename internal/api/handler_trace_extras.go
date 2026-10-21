@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/storage"
-	"github.com/paopaoandlingyia/PrismCat/internal/timeline"
+	"github.com/shaomian/PrismCat/internal/storage"
+	"github.com/shaomian/PrismCat/internal/timeline"
 )
 
 // handleTraceDiagram 生成调用链的 Mermaid 流程图: GET /api/traces/{id}/diagram

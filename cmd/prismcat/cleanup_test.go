@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
-	"github.com/paopaoandlingyia/PrismCat/internal/storageusage"
+	"github.com/shaomian/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/storageusage"
 )
 
 func TestCleanupStorageLimitReclaimsBeforeDeletingLogs(t *testing.T) {

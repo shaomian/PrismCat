@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/storage"
-	"github.com/paopaoandlingyia/PrismCat/internal/timeline"
+	"github.com/shaomian/PrismCat/internal/storage"
+	"github.com/shaomian/PrismCat/internal/timeline"
 )
 
 func TestTraceTimelineCacheHitInvalidationAndLRU(t *testing.T) {

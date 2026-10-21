@@ -16,14 +16,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
-	"github.com/paopaoandlingyia/PrismCat/internal/httpbody"
-	"github.com/paopaoandlingyia/PrismCat/internal/live"
-	"github.com/paopaoandlingyia/PrismCat/internal/outbound"
-	"github.com/paopaoandlingyia/PrismCat/internal/storage"
-	"github.com/paopaoandlingyia/PrismCat/internal/storageusage"
-	"github.com/paopaoandlingyia/PrismCat/internal/systemmetrics"
-	"github.com/paopaoandlingyia/PrismCat/internal/updatecheck"
+	"github.com/shaomian/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/httpbody"
+	"github.com/shaomian/PrismCat/internal/live"
+	"github.com/shaomian/PrismCat/internal/outbound"
+	"github.com/shaomian/PrismCat/internal/storage"
+	"github.com/shaomian/PrismCat/internal/storageusage"
+	"github.com/shaomian/PrismCat/internal/systemmetrics"
+	"github.com/shaomian/PrismCat/internal/updatecheck"
 )
 
 // Handler API 处理器

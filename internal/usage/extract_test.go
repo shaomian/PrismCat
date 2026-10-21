@@ -3,7 +3,7 @@ package usage
 import (
 	"testing"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/config"
 )
 
 func TestExtractOpenAIJSONUsage(t *testing.T) {

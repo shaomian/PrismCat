@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/config"
 )
 
 // 模拟两轮流式响应：第 1 轮发起 tool_call（参数分片），第 2 轮给出最终回答

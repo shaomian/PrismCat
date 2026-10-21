@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
-	"github.com/paopaoandlingyia/PrismCat/internal/storage"
+	"github.com/shaomian/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/storage"
 )
 
 func TestIsSafeInlineBlobType(t *testing.T) {

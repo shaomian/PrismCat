@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paopaoandlingyia/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/config"
 )
 
 // Message 对话消息
