@@ -2,7 +2,9 @@
 
 [English](./README.md) | [简体中文](./README_CN.md)
 
-![GitHub Release](https://img.shields.io/github/v/release/paopaoandlingyia/PrismCat) ![License](https://img.shields.io/github/license/paopaoandlingyia/PrismCat) ![Docker Image](https://img.shields.io/badge/image-ghcr.io%2Fpaopaoandlingyia%2Fprismcat-blue)
+![GitHub Release](https://img.shields.io/github/v/release/shaomian/PrismCat) ![License](https://img.shields.io/github/license/shaomian/PrismCat) ![Docker Image](https://img.shields.io/badge/image-ghcr.io%2Fshaomian%2Fprismcat-blue)
+
+> 基于 [PrismCat](https://github.com/paopaoandlingyia/PrismCat) 独立维护的分支 —— 沿用同一 MIT License。
 
 > **你永远不知道 SDK 在你的 Prompt 里偷偷塞了多少东西 —— 直到你用了 PrismCat。**
 
@@ -32,7 +34,7 @@ PrismCat 是一个**自托管的 LLM API 透明代理与调试控制台**。
 
 ### 1. 启动
 
-前往 [Releases](https://github.com/paopaoandlingyia/PrismCat/releases) 下载对应系统的压缩包。
+前往 [Releases](https://github.com/shaomian/PrismCat/releases) 下载对应系统的压缩包。
 
 | 平台 | 启动方式 |
 |------|---------|
@@ -163,7 +165,7 @@ PrismCat 使用**子域名路由**实现透明代理。当你在 Settings 里添
 ```yaml
 services:
   prismcat:
-    image: ghcr.io/paopaoandlingyia/prismcat:latest
+    image: ghcr.io/shaomian/prismcat:latest
     container_name: prismcat
     ports:
       - "8711:8711"
@@ -198,7 +200,7 @@ docker run -d --name prismcat \
   -e PRISMCAT_RETENTION_DAYS=30 \
   -v ./data:/app/data \
   --restart always \
-  ghcr.io/paopaoandlingyia/prismcat:latest
+  ghcr.io/shaomian/prismcat:latest
 ```
 
 ---

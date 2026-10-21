@@ -2,7 +2,9 @@
 
 [English](./README.md) | [简体中文](./README_CN.md)
 
-![GitHub Release](https://img.shields.io/github/v/release/paopaoandlingyia/PrismCat) ![License](https://img.shields.io/github/license/paopaoandlingyia/PrismCat) ![Docker Image](https://img.shields.io/badge/image-ghcr.io%2Fpaopaoandlingyia%2Fprismcat-blue)
+![GitHub Release](https://img.shields.io/github/v/release/shaomian/PrismCat) ![License](https://img.shields.io/github/license/shaomian/PrismCat) ![Docker Image](https://img.shields.io/badge/image-ghcr.io%2Fshaomian%2Fprismcat-blue)
+
+> Independently maintained fork of [PrismCat](https://github.com/paopaoandlingyia/PrismCat) — released under the same MIT License.
 
 > **You never know how much junk your SDK silently injects into your prompts — until you use PrismCat.**
 
@@ -32,7 +34,7 @@ Change one line — your `base_url` — and instantly see every request and resp
 
 ### 1. Launch
 
-Grab the binary for your system from [Releases](https://github.com/paopaoandlingyia/PrismCat/releases).
+Grab the binary for your system from [Releases](https://github.com/shaomian/PrismCat/releases).
 
 | Platform | How to Start |
 |----------|-------------|
@@ -163,7 +165,7 @@ Create a `docker-compose.yml`:
 ```yaml
 services:
   prismcat:
-    image: ghcr.io/paopaoandlingyia/prismcat:latest
+    image: ghcr.io/shaomian/prismcat:latest
     container_name: prismcat
     ports:
       - "8711:8711"
@@ -198,7 +200,7 @@ docker run -d --name prismcat \
   -e PRISMCAT_RETENTION_DAYS=30 \
   -v ./data:/app/data \
   --restart always \
-  ghcr.io/paopaoandlingyia/prismcat:latest
+  ghcr.io/shaomian/prismcat:latest
 ```
 
 ---

@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-const latestReleaseURL = "https://api.github.com/repos/paopaoandlingyia/PrismCat/releases/latest"
+// latestReleaseURL 指向本项目的独立维护仓库。检查更新返回的下载
+// 资产必须与当前构建同源——若指向其他仓库（如 fork 上游），下载的
+// 二进制会回退本地全部修改。
+const latestReleaseURL = "https://api.github.com/repos/shaomian/PrismCat/releases/latest"
 
 type Info struct {
 	CurrentVersion  string    `json:"current_version"`
