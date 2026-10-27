@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shaomian/PrismCat/internal/config"
@@ -28,27 +29,33 @@ import (
 
 // Handler API 处理器
 type Handler struct {
-	cfg     *config.Config
-	repo    storage.Repository
-	blobs   storage.BlobStore
-	live    *live.Registry
-	clients *outbound.ClientCache
-	metrics *systemmetrics.Collector
-	updates *updatecheck.Checker
-	tlCache *traceTimelineCache
+	cfg            *config.Config
+	repo           storage.Repository
+	blobs          storage.BlobStore
+	live           *live.Registry
+	clients        *outbound.ClientCache
+	metrics        *systemmetrics.Collector
+	updates        *updatecheck.Checker
+	tlCache        *traceTimelineCache
+	reviewMu       sync.Mutex
+	reviewActive   map[string]bool
+	cleanupMu      sync.Mutex
+	cleanupJob     *cleanupJobState
+	cleanupPreview *cleanupPreviewState
 }
 
 // New 创建 API 处理器
 func New(cfg *config.Config, repo storage.Repository, blobs storage.BlobStore, liveRegistry *live.Registry) *Handler {
 	return &Handler{
-		cfg:     cfg,
-		repo:    repo,
-		blobs:   blobs,
-		live:    liveRegistry,
-		clients: outbound.NewClientCache(50, 10),
-		metrics: systemmetrics.NewCollector(),
-		updates: updatecheck.NewChecker(),
-		tlCache: newTraceTimelineCache(),
+		cfg:          cfg,
+		repo:         repo,
+		blobs:        blobs,
+		live:         liveRegistry,
+		clients:      outbound.NewClientCache(50, 10),
+		metrics:      systemmetrics.NewCollector(),
+		updates:      updatecheck.NewChecker(),
+		tlCache:      newTraceTimelineCache(),
+		reviewActive: map[string]bool{},
 	}
 }
 
@@ -66,13 +73,25 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/health", h.handleHealth)
 	mux.HandleFunc("/api/system/metrics", h.handleSystemMetrics)
 	mux.HandleFunc("/api/system/storage", h.handleSystemStorage)
+	mux.HandleFunc("/api/system/cleanup/preview", h.handleCleanupPreview)
+	mux.HandleFunc("/api/system/cleanup", h.handleCleanup)
+	mux.HandleFunc("/api/task-management/", h.handleTaskManagement)
 	mux.HandleFunc("/api/system/update", h.handleSystemUpdate)
 	mux.HandleFunc("/healthz", h.handleHealth)
 	mux.HandleFunc("/api/blobs/", h.handleBlob)
 	mux.HandleFunc("/api/replay", h.handleReplay)
+	mux.HandleFunc("/api/trace-correlation/status", h.handleCorrelationStatus)
+	mux.HandleFunc("/api/capture-runs", h.handleCaptureRuns)
+	mux.HandleFunc("/api/capture-runs/", h.handleStopCapture)
 	mux.HandleFunc("/api/traces", h.handleTraces)
 	mux.HandleFunc("/api/traces/", h.handleTraceDetail)
+	mux.HandleFunc("/api/experiments", h.handleExperiments)
+	mux.HandleFunc("/api/experiments/", h.handleExperimentDetail)
 	mux.HandleFunc("/api/analysis/chat", h.handleAnalysisChat)
+	mux.HandleFunc("/api/analysis/config", h.handleAnalysisConfig)
+	mux.HandleFunc("/api/analysis/models", h.handleAnalysisModels)
+	mux.HandleFunc("/api/review-templates", h.handleReviewTemplates)
+	mux.HandleFunc("/api/review-templates/", h.handleReviewTemplate)
 }
 
 // handleLogs 获取日志列表
@@ -101,13 +120,14 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 func parseLogFilter(query url.Values, includePagination bool) storage.LogFilter {
 	filter := storage.LogFilter{
-		Upstream: query.Get("upstream"),
-		Method:   query.Get("method"),
-		Path:     query.Get("path"),
-		Tag:      query.Get("tag"),
-		TraceID:  query.Get("trace_id"),
-		Status:   query.Get("annotation_status"),
-		Label:    query.Get("annotation_label"),
+		CaptureRunID: query.Get("capture_run_id"),
+		Upstream:     query.Get("upstream"),
+		Method:       query.Get("method"),
+		Path:         query.Get("path"),
+		Tag:          query.Get("tag"),
+		TraceID:      query.Get("trace_id"),
+		Status:       query.Get("annotation_status"),
+		Label:        query.Get("annotation_label"),
 	}
 	if saved := query.Get("saved"); saved != "" {
 		if v, err := strconv.ParseBool(saved); err == nil {
@@ -278,6 +298,10 @@ func (h *Handler) handleLogDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if logID, ok := strings.CutSuffix(path, "/trace"); ok {
+		h.handleTraceAssignment(w, r, logID)
+		return
+	}
 	if logID, ok := strings.CutSuffix(path, "/annotation"); ok {
 		if logID == "" {
 			h.jsonError(w, "缺少日志 ID", http.StatusBadRequest)
@@ -545,9 +569,16 @@ func (h *Handler) handleTraces(w http.ResponseWriter, r *http.Request) {
 
 	query := r.URL.Query()
 	filter := storage.TraceFilter{
+		Query: query.Get("q"), Status: query.Get("status"), Label: query.Get("label"),
 		TraceID:  query.Get("trace_id"),
 		Upstream: query.Get("upstream"),
 		Tag:      query.Get("tag"),
+	}
+	if value, err := strconv.ParseBool(query.Get("archived")); err == nil {
+		filter.Archived = &value
+	}
+	if value, err := strconv.ParseBool(query.Get("pinned")); err == nil {
+		filter.Pinned = &value
 	}
 
 	if hasError := query.Get("has_error"); hasError != "" {
@@ -591,6 +622,10 @@ func (h *Handler) handleTraces(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleTraceDetail(w http.ResponseWriter, r *http.Request) {
+	if id, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/api/traces/"), "/metadata"); ok {
+		h.handleTraceMetadata(w, r, id)
+		return
+	}
 	if r.Method != http.MethodGet {
 		h.jsonError(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
@@ -960,11 +995,13 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 				"blob_store":        storageCfg.BlobStore,
 				"blob_dir":          storageCfg.BlobDir,
 			},
+			"trace_correlation": h.cfg.CorrelationSnapshot(),
 			"request_overrides": overrides,
 			"usage_extraction":  usageExtraction,
 			// api_key 不回显，只告知是否已配置
 			"analysis": map[string]interface{}{
 				"enabled":     analysis.Enabled,
+				"protocol":    analysis.Protocol,
 				"base_url":    analysis.BaseURL,
 				"model":       analysis.Model,
 				"has_api_key": analysis.APIKey != "",
@@ -993,19 +1030,30 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 				RetentionDays   *int   `json:"retention_days"`
 				MaxStorageBytes *int64 `json:"max_storage_bytes"`
 			} `json:"storage"`
+			Correlation      *config.CorrelationConfig      `json:"trace_correlation"`
 			RequestOverrides *config.RequestOverridesConfig `json:"request_overrides"`
 			UsageExtraction  *config.UsageExtractionConfig  `json:"usage_extraction"`
 			Analysis         *struct {
-				Enabled *bool   `json:"enabled"`
-				BaseURL *string `json:"base_url"`
-				APIKey  *string `json:"api_key"`
-				Model   *string `json:"model"`
+				Enabled  *bool   `json:"enabled"`
+				Protocol *string `json:"protocol"`
+				BaseURL  *string `json:"base_url"`
+				APIKey   *string `json:"api_key"`
+				Model    *string `json:"model"`
 			} `json:"analysis"`
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			h.jsonError(w, "无效的请求体", http.StatusBadRequest)
 			return
+		}
+
+		if req.Analysis != nil && req.Analysis.Protocol != nil {
+			protocol, err := config.NormalizeAnalysisProtocol(*req.Analysis.Protocol)
+			if err != nil {
+				h.jsonError(w, "analysis_invalid_protocol", http.StatusBadRequest)
+				return
+			}
+			req.Analysis.Protocol = &protocol
 		}
 
 		// 更新日志配置
@@ -1052,6 +1100,9 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+			if req.Correlation != nil {
+				c.Correlation = *req.Correlation
+			}
 			if req.RequestOverrides != nil {
 				c.Overrides = config.NormalizeRequestOverrides(*req.RequestOverrides)
 			}
@@ -1060,6 +1111,9 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if req.Analysis != nil {
+				if req.Analysis.Protocol != nil {
+					c.Analysis.Protocol = *req.Analysis.Protocol
+				}
 				if req.Analysis.Enabled != nil {
 					c.Analysis.Enabled = *req.Analysis.Enabled
 				}

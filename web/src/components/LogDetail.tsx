@@ -1,3 +1,4 @@
+import { TraceAssociationEditor } from '@/components/TraceAssociationEditor'
 import { toast } from 'sonner'
 import { cn, formatDate, formatLatency, formatSize, getStatusColor, METHOD_CLASS, FOCUS_RING } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
@@ -895,6 +896,8 @@ export function LogDetail({
                                     size="sm"
                                     className="h-7 gap-1.5 border-border bg-background px-2.5 text-xs font-semibold transition-all hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
                                     onClick={copyCurlCommand}
+                                    disabled={!!displayLog.websocket}
+                                    title={displayLog.websocket ? t('correlation.websocket_replay_hint') : undefined}
                                 >
                                     {copiedField === 'curl' ? (
                                         <Check className="h-3 w-3 text-success" />
@@ -907,6 +910,8 @@ export function LogDetail({
                                     variant="outline"
                                     size="sm"
                                     className="h-7 gap-1.5 border-primary/20 bg-primary/5 px-2.5 text-xs font-semibold transition-all hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
+                                    disabled={!!displayLog.websocket}
+                                    title={displayLog.websocket ? t('correlation.websocket_replay_hint') : undefined}
                                     onClick={async () => {
                                         const navigateToPlayground = (body: string) => {
                                             onClose()
@@ -945,6 +950,7 @@ export function LogDetail({
                         )}
                     </div>
                 </SheetHeader>
+ <div className="border-b border-border px-5 py-3"><TraceAssociationEditor log={displayLog} onChange={next => { setLiveLog(next); onLogChange?.(next) }} /></div>
 
                 {/* 主内容区域 */}
                 <div className="custom-scrollbar flex-1 space-y-4 overflow-y-auto bg-background px-5 py-4">

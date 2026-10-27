@@ -1,15 +1,16 @@
-﻿import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Sparkles, Send, Loader2, Settings2, AlertCircle, Wrench, FileSearch, Trash2, Square } from 'lucide-react'
 import {
-  fetchConfig, updateConfig, streamAnalysisChat,
+  fetchAnalysisConfig, streamAnalysisChat,
   type AnalysisMessage, type AppConfig,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import Markdown from 'react-markdown'
 import { toast } from 'sonner'
+
+const ModelSettings = lazy(() => import('@/components/AnalysisModelSettings'))
 
 // 展示用的消息（在 API 消息基础上附加工具活动记录，不上传回服务端）
 interface DisplayMessage {
@@ -225,13 +226,9 @@ function isConfigured(cfg: AppConfig['analysis'] | null): cfg is AppConfig['anal
 export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean }) {
   const { t } = useTranslation()
   const [config, setConfig] = useState<AppConfig['analysis'] | null>(null)
-  const [configLoading, setConfigLoading] = useState(false)
-
-  // 配置表单
-  const [baseUrl, setBaseUrl] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [model, setModel] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [configLoading, setConfigLoading] = useState(true)
+  const [configError, setConfigError] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const subscribe = useCallback((cb: () => void) => subscribeSession(traceId, cb), [traceId])
   const getSnapshot = useCallback(() => getSession(traceId), [traceId])
@@ -245,19 +242,15 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
 
   const loadConfig = useCallback(async () => {
     setConfigLoading(true)
+    setConfigError('')
     try {
-      const cfg = await fetchConfig()
-      setConfig(cfg.analysis ?? null)
-      if (cfg.analysis) {
-        setBaseUrl(cfg.analysis.base_url ?? '')
-        setModel(cfg.analysis.model ?? '')
-      }
-    } catch {
-      setConfig(null)
+      setConfig(await fetchAnalysisConfig())
+    } catch (e) {
+      setConfigError(e instanceof Error ? e.message : t('errors.load_config'))
     } finally {
       setConfigLoading(false)
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     if (open) {
@@ -275,27 +268,6 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
     }
   }, [messages])
 
-  const saveConfig = async () => {
-    setSaving(true)
-    try {
-      await updateConfig({
-        analysis: {
-          enabled: true,
-          base_url: baseUrl.trim(),
-          model: model.trim(),
-          // 留空表示保持已保存的 key 不变（后端语义）
-          api_key: apiKey.trim() || undefined,
-        },
-      })
-      toast.success(t('analysis.config_saved'))
-      await loadConfig()
-    } catch (e) {
-      toast.error((e as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const handleSend = useCallback((question: string) => {
     const q = question.trim()
     if (!q) return
@@ -312,6 +284,16 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
     toast.success(t('analysis.cleared'))
   }, [traceId, t])
 
+  const settingsDialog = settingsOpen && (
+    <Suspense fallback={<p role="status" className="text-xs text-muted-foreground">{t('common.loading')}</p>}>
+      <ModelSettings value={config} onClose={() => setSettingsOpen(false)} onSaved={value => {
+        setConfig(value)
+        setSettingsOpen(false)
+        toast.success(t('analysis.config_saved'))
+      }} />
+    </Suspense>
+  )
+
   if (configLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -320,8 +302,14 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
     )
   }
 
-  // ---------- 未配置：内嵌配置表单 ----------
-  const hasApiKey = !!config?.has_api_key
+  if (configError) {
+    return <div className="space-y-3">
+      <p role="alert" className="text-xs text-danger">{configError}</p>
+      <Button size="sm" variant="outline" onClick={() => void loadConfig()}>{t('common.refresh')}</Button>
+    </div>
+  }
+
+  // 未配置与已配置均使用同一设置弹窗，保存后即可继续提问。
   if (!isConfigured(config)) {
     return (
       <div className="space-y-4 px-1">
@@ -330,43 +318,8 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
           {t('analysis.setup_title')}
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed">{t('analysis.setup_hint')}</p>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="analysis-base-url" className="text-xs">{t('analysis.base_url')}</Label>
-            <Input
-              id="analysis-base-url"
-              value={baseUrl}
-              onChange={e => setBaseUrl(e.target.value)}
-              placeholder="http://localhost:8711/_proxy/openai 或 https://api.openai.com/v1"
-              className="text-xs font-mono"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="analysis-api-key" className="text-xs">{t('analysis.api_key')}</Label>
-            <Input
-              id="analysis-api-key"
-              type="password"
-              value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
-              placeholder={hasApiKey ? t('analysis.api_key_keep') : 'sk-...'}
-              className="text-xs font-mono"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="analysis-model" className="text-xs">{t('analysis.model')}</Label>
-            <Input
-              id="analysis-model"
-              value={model}
-              onChange={e => setModel(e.target.value)}
-              placeholder="gpt-4o / claude-sonnet-4-5 / ..."
-              className="text-xs font-mono"
-            />
-          </div>
-          <Button size="sm" className="w-full gap-1.5" onClick={saveConfig} disabled={saving || !baseUrl.trim() || !model.trim()}>
-            {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            {t('analysis.save_and_start')}
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => setSettingsOpen(true)}><Settings2 className="size-4" />{t('analysis.model_settings')}</Button>
+        {settingsDialog}
       </div>
     )
   }
@@ -375,12 +328,15 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
   const empty = messages.length === 0
   return (
     <div className="flex flex-col h-full min-h-0 gap-3">
-      {/* 配置摘要 + 清空历史 */}
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
-        <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" />
-        <span className="font-medium shrink-0">{config.model}</span>
-        <span className="opacity-50 shrink-0">·</span>
-        <span className="font-mono truncate">{config.base_url}</span>
+      {/* 配置摘要、修改入口与清空历史 */}
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+        <div className="flex flex-1 items-center gap-1.5 min-w-0">
+          <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" />
+          <span className="font-medium truncate max-w-40" title={config.model}>{config.model}</span>
+          <span className="opacity-50 shrink-0">·</span>
+          <span className="font-mono truncate" title={config.base_url}>{config.base_url}</span>
+        </div>
+        <Button size="xs" variant="ghost" disabled={streaming} onClick={() => setSettingsOpen(true)}><Settings2 className="size-3" />{t('analysis.model_settings')}</Button>
         {messages.length > 0 && (
           <button
             type="button"
@@ -388,12 +344,14 @@ export function AnalysisChat({ traceId, open }: { traceId: string; open: boolean
             disabled={streaming}
             title={t('analysis.clear')}
             aria-label={t('analysis.clear')}
-            className="ml-auto shrink-0 inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-danger transition-colors disabled:opacity-50 disabled:pointer-events-none"
+            className="shrink-0 inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-danger transition-colors disabled:opacity-50 disabled:pointer-events-none"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         )}
       </div>
+
+      {settingsDialog}
 
       {/* 消息列表 */}
       <div

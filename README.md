@@ -6,6 +6,8 @@
 
 > Independently maintained fork of [PrismCat](https://github.com/paopaoandlingyia/PrismCat) — released under the same MIT License.
 
+v2.1.0 adds automatic task traces, capture runs, AI comparison reviews and task management. See the [release notes](CHANGELOG.md).
+
 > **You never know how much junk your SDK silently injects into your prompts — until you use PrismCat.**
 
 PrismCat is a **self-hosted, transparent proxy and debugging console for LLM APIs**.
@@ -112,6 +114,12 @@ See a failed request? Hit **Replay**, tweak the prompt or parameters right in yo
 ### Trace & Usage Tracking
 Automatically correlate related requests into traces, and extract token usage from responses. Built-in extraction rules for OpenAI, Anthropic, and Gemini — or define your own.
 
+Trace AI analysis and comparison reviews share model settings, with OpenAI-compatible Chat Completions and native Anthropic Messages support. Sync available models from your API or enter a model ID manually. See [comparison reviews](./EXPERIMENTS_CN.md) for details (Chinese).
+
+Automatic task correlation, capture runs, and manual corrections work without custom trace headers. See [Automatic traces](./AUTO_TRACE.md).
+For archiving, deletion and manual expired-log cleanup, see [Task management and cleanup](TASK_MANAGEMENT.md).
+
+
 ### Target Presets
 One stable proxy endpoint, several complete targets behind it — switch between them from Settings without touching the client.
 
@@ -153,6 +161,34 @@ Built to run as a silent, 24/7 black box — you never have to "remember to star
 | Data Ownership | Fully local | Fully local | Third-party dependent |
 | Stream Playback | ✅ Raw + merged view | Poor UX | Partial |
 | Long-Term Running | ✅ Auto-cleanup, silent background | Ad-hoc debugging tool | ✅ But requires external infra |
+
+---
+
+## Build and Run from Source
+
+Install Go (see `go.mod` for the required version) and Node.js (24 recommended), then use an entry point in the repository root:
+
+| Platform | Entry point |
+|----------|-------------|
+| macOS | Double-click `快速编译并运行.command`, or run `bash ./快速编译并运行.command` |
+| Windows | Double-click `快速编译并运行.bat` |
+| Shared terminal entry | `node scripts/build-and-run.mjs` |
+
+Both launchers use `scripts/build-and-run.mjs`: run `npm ci` when dependencies change, build the frontend, sync embedded assets while preserving `internal/server/ui/README.md`, and compile the backend. Only after all build steps succeed does the script stop the old instance and replace the root executable. Failed builds leave the old instance running. On macOS, only the PID-file instance with a matching executable path is restarted; Windows only stops `prismcat.exe` instances whose executable path matches this checkout.
+
+The working directory is always the repository root, using `data/config.yaml` and `data/` by default. macOS keeps logs in the terminal and stops with Ctrl+C; Windows launches the tray app, which can be closed from its tray menu. Backend arguments are forwarded:
+
+```sh
+node scripts/build-and-run.mjs -config "data/my config.yaml"
+```
+
+To verify the build without stopping or replacing the running executable:
+
+```sh
+node scripts/build-and-run.mjs --build-only
+```
+
+The build-only executable is saved under `.cache/local-debug/build-*/`; the command prints its full path. This mode still updates local frontend and embedded assets. The root Windows `start-prismcat.bat` and `restart-prismcat.bat` scripts start or restart an existing executable without rebuilding.
 
 ---
 
@@ -413,3 +449,5 @@ If PrismCat helps you debug LLM apps or saves you time, you can support the proj
 ## License
 
 [MIT License](LICENSE)
+
+Agent/model comparisons, reusable review cards and AI review: [guide (Chinese)](EXPERIMENTS_CN.md).

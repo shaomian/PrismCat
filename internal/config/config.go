@@ -14,7 +14,7 @@ import (
 
 // Version 本地构建显示的版本号；CI 发布构建由 ldflags 注入实际 tag 版本。
 // v2.0.0 起为本仓库独立版本线（v1.x 为上游历史）。
-var Version = "2.0.0"
+var Version = "2.1.0"
 
 const (
 	DefaultUpstreamTimeoutSeconds      = 300
@@ -26,14 +26,15 @@ const (
 
 // Config 应用配置
 type Config struct {
-	Server    ServerConfig              `yaml:"server"`
-	Upstreams map[string]UpstreamConfig `yaml:"upstreams"`
-	Logging   LoggingConfig             `yaml:"logging"`
-	LogRules  LoggingRulesConfig        `yaml:"logging_rules"`
-	Storage   StorageConfig             `yaml:"storage"`
-	Overrides RequestOverridesConfig    `yaml:"request_overrides"`
-	Usage     UsageExtractionConfig     `yaml:"usage_extraction"`
-	Analysis  AnalysisConfig            `yaml:"analysis"`
+	Server      ServerConfig              `yaml:"server"`
+	Upstreams   map[string]UpstreamConfig `yaml:"upstreams"`
+	Logging     LoggingConfig             `yaml:"logging"`
+	LogRules    LoggingRulesConfig        `yaml:"logging_rules"`
+	Storage     StorageConfig             `yaml:"storage"`
+	Overrides   RequestOverridesConfig    `yaml:"request_overrides"`
+	Usage       UsageExtractionConfig     `yaml:"usage_extraction"`
+	Correlation CorrelationConfig         `yaml:"trace_correlation"`
+	Analysis    AnalysisConfig            `yaml:"analysis"`
 
 	configPath     string // 配置文件路径
 	fileUIPassword string
@@ -44,14 +45,15 @@ type Config struct {
 // persistedConfig contains only fields that belong in config.yaml. Keeping
 // runtime state out of this snapshot avoids copying Config's mutex during Save.
 type persistedConfig struct {
-	Server    ServerConfig              `yaml:"server"`
-	Upstreams map[string]UpstreamConfig `yaml:"upstreams"`
-	Logging   LoggingConfig             `yaml:"logging"`
-	LogRules  LoggingRulesConfig        `yaml:"logging_rules"`
-	Storage   StorageConfig             `yaml:"storage"`
-	Overrides RequestOverridesConfig    `yaml:"request_overrides"`
-	Usage     UsageExtractionConfig     `yaml:"usage_extraction"`
-	Analysis  AnalysisConfig            `yaml:"analysis"`
+	Server      ServerConfig              `yaml:"server"`
+	Upstreams   map[string]UpstreamConfig `yaml:"upstreams"`
+	Logging     LoggingConfig             `yaml:"logging"`
+	LogRules    LoggingRulesConfig        `yaml:"logging_rules"`
+	Storage     StorageConfig             `yaml:"storage"`
+	Overrides   RequestOverridesConfig    `yaml:"request_overrides"`
+	Usage       UsageExtractionConfig     `yaml:"usage_extraction"`
+	Correlation CorrelationConfig         `yaml:"trace_correlation"`
+	Analysis    AnalysisConfig            `yaml:"analysis"`
 }
 
 // ServerConfig 服务器配置
@@ -89,11 +91,12 @@ type ServerConfig struct {
 
 // AnalysisConfig AI 分析模型配置
 //
-// BaseURL 指向 OpenAI 兼容端点（如 https://api.openai.com/v1），
+// BaseURL 指向所选协议的 API 根地址，Protocol 为空时兼容旧配置，使用 OpenAI。
 // 也可以指向 PrismCat 自身的代理地址（如 http://localhost:8711/_proxy/openai），
 // 后者能让分析流量也被记录（dogfooding）。
 type AnalysisConfig struct {
 	Enabled        bool   `yaml:"enabled" json:"enabled"`
+	Protocol       string `yaml:"protocol,omitempty" json:"protocol"`
 	BaseURL        string `yaml:"base_url" json:"base_url"`
 	APIKey         string `yaml:"api_key" json:"-"`
 	Model          string `yaml:"model" json:"model"`
@@ -104,7 +107,22 @@ type AnalysisConfig struct {
 func (c *Config) AnalysisSnapshot() AnalysisConfig {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.Analysis
+	out := c.Analysis
+	if protocol, err := NormalizeAnalysisProtocol(out.Protocol); err == nil {
+		out.Protocol = protocol
+	}
+	return out
+}
+
+func NormalizeAnalysisProtocol(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "openai":
+		return "openai", nil
+	case "anthropic":
+		return "anthropic", nil
+	default:
+		return "", fmt.Errorf("analysis protocol must be openai or anthropic")
+	}
 }
 
 // UpstreamConfig 上游配置
@@ -403,6 +421,10 @@ func Load(path string) (*Config, error) {
 	c.LogRules = logRules
 	c.Overrides = NormalizeRequestOverrides(c.Overrides)
 	c.Usage = NormalizeUsageExtraction(c.Usage)
+	c.Analysis.Protocol, err = NormalizeAnalysisProtocol(c.Analysis.Protocol)
+	if err != nil {
+		return nil, err
+	}
 
 	// 确保目录存在
 	dbDir := filepath.Dir(c.Storage.Database)
@@ -1121,14 +1143,15 @@ func (c *Config) Save() error {
 
 func (c *Config) saveLocked() error {
 	saved := persistedConfig{
-		Server:    c.Server,
-		Upstreams: c.Upstreams,
-		Logging:   c.Logging,
-		LogRules:  c.LogRules,
-		Storage:   c.Storage,
-		Overrides: c.Overrides,
-		Usage:     c.Usage,
-		Analysis:  c.Analysis,
+		Server:      c.Server,
+		Upstreams:   c.Upstreams,
+		Logging:     c.Logging,
+		LogRules:    c.LogRules,
+		Storage:     c.Storage,
+		Overrides:   c.Overrides,
+		Usage:       c.Usage,
+		Analysis:    c.Analysis,
+		Correlation: c.Correlation,
 	}
 	if c.envUIPassword {
 		saved.Server.UIPassword = c.fileUIPassword

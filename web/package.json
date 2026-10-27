@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "font:subset": "node scripts/build-font.mjs",
     "lint": "eslint .",
-    "test": "node --test tests/json-search.test.mjs tests/stream-merge.test.mjs tests/logging-rules.test.mjs",
+    "test": "node --test tests/json-search.test.mjs tests/stream-merge.test.mjs tests/logging-rules.test.mjs tests/review-stream.test.mjs tests/trace-capture.test.mjs tests/trace-filters.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -8,6 +8,8 @@ import {
 import { fetchTraceDetail, fetchTraceTimeline, fetchTraceTimelineEntry, fetchTraceDiagram, fetchLog, traceExportUrl, type TraceDetail as TraceDetailType, type TraceTimeline, type RequestLog, type TraceDiagram as TraceDiagramData } from '@/lib/api'
 import { cn, formatLatency, formatDate, getStatusColor, METHOD_CLASS } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { CopyTraceIdButton } from '@/components/CopyTraceIdButton'
+import { TraceTaskManager } from '@/components/TraceTaskManager'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { LogDetail } from '@/components/LogDetail'
@@ -24,6 +26,7 @@ export function TraceDetail() {
   const [detail, setDetail] = useState<TraceDetailType | null>(null)
   const [timeline, setTimeline] = useState<TraceTimeline | null>(null)
   const [diagram, setDiagram] = useState<TraceDiagramData | null>(null)
+  const [diagramView, setDiagramView] = useState<'sequence' | 'dependencies'>('sequence')
   const [loading, setLoading] = useState(true)
   const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null)
   const [analysisOpen, setAnalysisOpen] = useState(false)
@@ -52,16 +55,6 @@ export function TraceDetail() {
     }
   }, [traceId, i18n])
 
-  const loadDiagram = useCallback(async () => {
-    if (!traceId) return
-    try {
-      const res = await fetchTraceDiagram(traceId)
-      setDiagram(res)
-    } catch {
-      toast.error(i18n.t('timeline.diagram.load_failed'))
-    }
-  }, [traceId, i18n])
-
   // 按需加载单个请求的完整（未截断）事件，原位替换列表中的对应条目
   const handleLoadFullEvents = useCallback(async (logId: string) => {
     if (!traceId || loadingFullLogIds.has(logId)) return
@@ -86,8 +79,18 @@ export function TraceDetail() {
   useEffect(() => {
     loadDetail()
     loadTimeline()
-    loadDiagram()
-  }, [loadDetail, loadTimeline, loadDiagram])
+  }, [loadDetail, loadTimeline])
+
+  useEffect(() => {
+    if (!traceId) return
+    let cancelled = false
+    void fetchTraceDiagram(traceId, diagramView).then(value => {
+      if (!cancelled) setDiagram(value)
+    }).catch(() => {
+      if (!cancelled) toast.error(i18n.t('timeline.diagram.load_failed'))
+    })
+    return () => { cancelled = true }
+  }, [traceId, diagramView, i18n])
 
   const requests = useMemo(() => detail?.requests ?? [], [detail?.requests])
   const summary = detail?.summary
@@ -186,10 +189,12 @@ export function TraceDetail() {
           {t('traces.title')}
         </Button>
         <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />
-        <span className="font-mono text-xs text-foreground/80 truncate max-w-[300px]">{traceId}</span>
+        <span className="font-mono text-xs text-foreground/80 truncate max-w-[300px]" title={traceId}>{traceId}</span>
+        {traceId && <CopyTraceIdButton traceId={traceId} />}
       </div>
 
       {/* Summary strip */}
+      {traceId && <TraceTaskManager traceId={traceId} />}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <SummaryCard
           icon={Layers}
@@ -285,6 +290,14 @@ export function TraceDetail() {
         </TabsContent>
 
         <TabsContent value="diagram" className="pt-4">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            {(['sequence', 'dependencies'] as const).map(view => (
+              <Button key={view} size="sm" variant={diagramView === view ? 'default' : 'outline'} onClick={() => { setDiagram(null); setDiagramView(view) }} disabled={diagramView === view}>
+                {t(`correlation.diagram_${view}`)}
+              </Button>
+            ))}
+          </div>
+          {diagramView === 'dependencies' && <p className="mb-3 text-xs text-muted-foreground">{t('correlation.diagram_hint')}</p>}
           {!diagram ? (
             <div className="flex min-h-[20vh] items-center justify-center">
               <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -359,7 +372,7 @@ export function TraceDetail() {
 
                   {req.streaming && (
                     <span className="text-xs font-medium text-primary bg-primary/10 px-1 py-0.5 rounded">
-                      SSE
+                      {req.websocket ? 'WS' : 'SSE'}
                     </span>
                   )}
 

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/shaomian/PrismCat/internal/trace"
 )
 
 // RequestLog 请求日志记录
@@ -41,6 +43,10 @@ type RequestLog struct {
 	Error                        string              `json:"error,omitempty"` // 错误信息
 	Truncated                    bool                `json:"truncated"`       // 请求或响应内容是否无法完整恢复
 	Tag                          string              `json:"tag,omitempty"`   // 来自 X-PrismCat-Tag 请求头
+	TraceAssociation             *trace.Assignment   `json:"trace_association,omitempty"`
+	CaptureRunID                 string              `json:"capture_run_id,omitempty"`
+	WebSocket                    *WebSocketInfo      `json:"websocket,omitempty"`
+	CorrelationFinal             bool                `json:"-"`
 	TraceID                      string              `json:"trace_id,omitempty"`
 	ParentLogID                  string              `json:"parent_log_id,omitempty"`
 	TraceSeq                     int                 `json:"trace_seq,omitempty"`
@@ -66,6 +72,14 @@ type RequestLog struct {
 	ResponseBodyCaptureTruncated bool   `json:"-"`
 }
 
+// WebSocketInfo identifies normalized per-call logs and their original tunnel.
+type WebSocketInfo struct {
+	ConnectionID     string `json:"connection_id"`
+	StreamID         string `json:"stream_id,omitempty"`
+	Kind             string `json:"kind"` // connection / response
+	ObservationError string `json:"observation_error,omitempty"`
+}
+
 type LogAnnotation struct {
 	Saved     bool      `json:"saved"`
 	Status    string    `json:"status"`
@@ -77,19 +91,20 @@ type LogAnnotation struct {
 
 // LogFilter 日志查询过滤器
 type LogFilter struct {
-	Upstream   string     // 按上游名称过滤
-	Method     string     // 按请求方法过滤
-	StatusCode int        // 按状态码过滤
-	Path       string     // 按路径模糊搜索
-	Tag        string     // 按标签过滤
-	TraceID    string     // 按 trace ID 过滤
-	Saved      *bool      // 是否保存
-	Status     string     // 人工处理状态：none/todo/done
-	Label      string     // 按人工标签过滤
-	StartTime  *time.Time // 开始时间
-	EndTime    *time.Time // 结束时间
-	HasError   *bool      // 是否有错误
-	Streaming  *bool      // 是否为流式
+	Upstream     string // 按上游名称过滤
+	Method       string // 按请求方法过滤
+	StatusCode   int    // 按状态码过滤
+	Path         string // 按路径模糊搜索
+	Tag          string // 按标签过滤
+	CaptureRunID string
+	TraceID      string     // 按 trace ID 过滤
+	Saved        *bool      // 是否保存
+	Status       string     // 人工处理状态：none/todo/done
+	Label        string     // 按人工标签过滤
+	StartTime    *time.Time // 开始时间
+	EndTime      *time.Time // 结束时间
+	HasError     *bool      // 是否有错误
+	Streaming    *bool      // 是否为流式
 
 	// 分页
 	Offset int
@@ -109,21 +124,28 @@ type LogStats struct {
 
 // TraceSummary trace 列表的聚合摘要
 type TraceSummary struct {
-	TraceID           string   `json:"trace_id"`
-	RequestCount      int      `json:"request_count"`
-	FirstTime         int64    `json:"first_time"`
-	LastTime          int64    `json:"last_time"`
-	TotalLatency      int64    `json:"total_latency_ms"`
-	ErrorCount        int      `json:"error_count"`
-	UsageInputTokens  *int64   `json:"usage_input_tokens,omitempty"`
-	UsageOutputTokens *int64   `json:"usage_output_tokens,omitempty"`
-	UsageTotalTokens  *int64   `json:"usage_total_tokens,omitempty"`
-	Upstreams         []string `json:"upstreams"`
-	Tags              []string `json:"tags"`
+	Metadata          *TraceMetadata `json:"metadata,omitempty"`
+	Sources           []string       `json:"sources,omitempty"`
+	TraceID           string         `json:"trace_id"`
+	RequestCount      int            `json:"request_count"`
+	FirstTime         int64          `json:"first_time"`
+	LastTime          int64          `json:"last_time"`
+	TotalLatency      int64          `json:"total_latency_ms"`
+	ErrorCount        int            `json:"error_count"`
+	UsageInputTokens  *int64         `json:"usage_input_tokens,omitempty"`
+	UsageOutputTokens *int64         `json:"usage_output_tokens,omitempty"`
+	UsageTotalTokens  *int64         `json:"usage_total_tokens,omitempty"`
+	Upstreams         []string       `json:"upstreams"`
+	Tags              []string       `json:"tags"`
 }
 
 // TraceFilter trace 查询过滤器
 type TraceFilter struct {
+	Query     string
+	Archived  *bool
+	Pinned    *bool
+	Status    string
+	Label     string
 	TraceID   string     // 模糊搜索 trace ID
 	Upstream  string     // 按上游名称过滤
 	Tag       string     // 按标签过滤
@@ -135,10 +157,11 @@ type TraceFilter struct {
 	Limit  int
 }
 
-// TraceFingerprint 调用链的低成本变更信号，用于缓存失效判断。
+// TraceFingerprint combines membership, creation time and persisted content/assignment revisions.
 type TraceFingerprint struct {
-	Count  int64 // 调用链中的日志条数
-	LastMs int64 // 最新日志的创建时间（unix 毫秒），无日志时为 0
+	Count    int64 // 调用链中的日志条数
+	Revision int64
+	LastMs   int64 // 最新日志的创建时间（unix 毫秒），无日志时为 0
 }
 
 // Repository 存储接口
@@ -159,9 +182,7 @@ type Repository interface {
 	// Trace 操作
 	ListTraces(filter TraceFilter) ([]TraceSummary, int64, error)
 	GetTraceRequests(traceID string) ([]*RequestLog, error)
-	// GetTraceFingerprint 返回调用链的低成本变更信号（日志条数 + 最新
-	// 创建时间毫秒），用于调用链级缓存的失效判断。request_logs 只有
-	// 插入没有在位内容更新，因此该信号足以覆盖所有内容变化。
+	// GetTraceFingerprint covers inserts, asynchronous body updates and trace reassignment.
 	GetTraceFingerprint(traceID string) (TraceFingerprint, error)
 
 	// 统计
@@ -177,6 +198,15 @@ func (l *RequestLog) Clone() *RequestLog {
 		return nil
 	}
 	out := *l
+	if l.WebSocket != nil {
+		info := *l.WebSocket
+		out.WebSocket = &info
+	}
+	if l.TraceAssociation != nil {
+		a := *l.TraceAssociation
+		a.Parents = append([]string(nil), a.Parents...)
+		out.TraceAssociation = &a
+	}
 	out.RequestHeaders = CloneHeaders(l.RequestHeaders)
 	out.ResponseHeaders = CloneHeaders(l.ResponseHeaders)
 	out.RequestHeadersOriginal = CloneHeaders(l.RequestHeadersOriginal)

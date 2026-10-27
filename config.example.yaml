@@ -1,6 +1,11 @@
 # PrismCat 配置文件
 # 复制此文件为 config.yaml 并根据需要修改
 
+trace_correlation:
+  # Disabled by default. Groups HTTP/SSE model calls using protocol references
+  # and conservative context matching; does not inject headers or modify bodies.
+  enabled: false
+
 server:
   # 监听地址。默认 127.0.0.1（仅本机访问，安全）。
   # 设为空或 0.0.0.0 会监听所有网卡：未设置密码时局域网内任何人
@@ -203,6 +208,17 @@ request_overrides:
   #         value: "my-value"
   #       - op: remove
   #         name: "X-Unwanted-Header"
+
+# 调用链 AI 分析与对比实验共用的分析模型（默认关闭）。
+# protocol 省略时沿用 openai；anthropic 使用原生 Messages 协议。
+# base_url 可填写 API 根地址、带 /v1 的地址，或完整的消息接口地址。
+analysis:
+  enabled: false
+  protocol: openai              # openai | anthropic
+  base_url: ""                 # 如 https://api.openai.com/v1 或 https://api.anthropic.com
+  api_key: ""
+  model: ""                    # 可在页面同步模型后选择，也可手动填写模型 ID
+  timeout_seconds: 300
 
 # Usage / token 用量提取（默认关闭）
 # 规则只做响应后的 best-effort 元数据提取，不影响代理转发或日志保存。

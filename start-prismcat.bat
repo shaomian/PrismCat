@@ -2,7 +2,7 @@
 title PrismCat
 cd /d "%~dp0"
 
-rem Runs prismcat.exe from the project root (built by the build script in docs\).
+rem Runs prismcat.exe from the project root (built by the root build launcher).
 rem No -config flag: the exe defaults to data\config.yaml relative to this
 rem directory (start script and build script use the same config/data).
 

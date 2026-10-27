@@ -1,3 +1,5 @@
+import { TraceCorrelationSetting } from '@/components/TraceCorrelationSetting'
+import { StorageCleanup } from '@/components/StorageCleanup'
 import {
     useEffect,
     useState,
@@ -2840,6 +2842,7 @@ export function Settings() {
 
                                     {loggingSection === 'general' ? (
                                     <>
+                                    <TraceCorrelationSetting />
                                     <SettingSection
                                         title={t('settings.section_content_size')}
                                         description={t('settings.section_content_size_desc')}
@@ -3148,6 +3151,7 @@ export function Settings() {
                                             </div>
                                         </div>
                                     </div>
+                                    <StorageCleanup onCompleted={() => { void handleCalculateStorage() }} />
                                 </div>
 
                                 <div className="rounded-md border border-input bg-background px-5 py-4">

@@ -166,8 +166,10 @@ func (errClosed) Error() string { return "client closed" }
 
 // traceToolExecutor 分析工具执行器：按日志 ID 调取原始请求/响应全文
 type traceToolExecutor struct {
-	h       *Handler
-	traceID string
+	h            *Handler
+	traceID      string
+	allowedLogs  map[string]bool
+	maxBodyBytes int64
 }
 
 func (e *traceToolExecutor) ExecuteToolCall(ctx context.Context, name string, args json.RawMessage) (string, error) {
@@ -189,6 +191,9 @@ func (e *traceToolExecutor) ExecuteToolCall(ctx context.Context, name string, ar
 	if part == "" {
 		part = "both"
 	}
+	if part != "request" && part != "response" && part != "both" {
+		return "", fmt.Errorf("part 必须是 request、response 或 both")
+	}
 
 	log, err := e.h.repo.GetLog(params.LogID)
 	if err != nil {
@@ -199,11 +204,19 @@ func (e *traceToolExecutor) ExecuteToolCall(ctx context.Context, name string, ar
 		return "", fmt.Errorf("查询日志 %s 失败: %w", params.LogID, err)
 	}
 	// 限定只能调取本调用链内的请求，防止跨链读取
-	if log.TraceID != e.traceID {
+	if (e.allowedLogs != nil && !e.allowedLogs[log.ID]) || (e.allowedLogs == nil && log.TraceID != e.traceID) {
 		return "", fmt.Errorf("日志 %s 不属于当前调用链", params.LogID)
 	}
 
 	logging := e.h.cfg.LoggingSnapshot()
+	if e.maxBodyBytes > 0 {
+		if logging.MaxRequestBody <= 0 || logging.MaxRequestBody > e.maxBodyBytes {
+			logging.MaxRequestBody = e.maxBodyBytes
+		}
+		if logging.MaxResponseBody <= 0 || logging.MaxResponseBody > e.maxBodyBytes {
+			logging.MaxResponseBody = e.maxBodyBytes
+		}
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "[日志ID=%s] 上游=%s %s 状态=%d 耗时=%dms 流式=%v",
 		log.ID, log.Upstream, log.Path, log.StatusCode, log.Latency, log.Streaming)
@@ -211,19 +224,28 @@ func (e *traceToolExecutor) ExecuteToolCall(ctx context.Context, name string, ar
 		fmt.Fprintf(&b, "\n[错误] %s", log.Error)
 	}
 
-	appendBody := func(label, inline, ref string, headers map[string][]string, maxBytes int64) {
-		if part != "both" && part != label {
+	appendBody := func(key, label, inline, ref string, headers map[string][]string, maxBytes int64) {
+		if part != "both" && part != key {
 			return
 		}
-		body := e.h.recoverBody(ctx, inline, ref, headers, maxBytes)
+		size := log.RequestBodySize
+		if label == "响应" {
+			size = log.ResponseBodySize
+		}
+		body := ""
+		if e.maxBodyBytes > 0 && (size > e.maxBodyBytes || int64(len(inline)) > e.maxBodyBytes || (ref != "" && size <= 0)) {
+			body = reviewClip(inline, 4000) + "\n[正文超出本次复盘读取范围，以下信息不完整]"
+		} else {
+			body = e.h.recoverBody(ctx, inline, ref, headers, maxBytes)
+		}
 		if strings.TrimSpace(body) == "" {
 			fmt.Fprintf(&b, "\n%s体: (空)", label)
 			return
 		}
 		fmt.Fprintf(&b, "\n%s体:\n%s", label, body)
 	}
-	appendBody("请求", log.RequestBody, log.RequestBodyRef, log.RequestHeaders, logging.MaxRequestBody)
-	appendBody("响应", log.ResponseBody, log.ResponseBodyRef, log.ResponseHeaders, logging.MaxResponseBody)
+	appendBody("request", "请求", log.RequestBody, log.RequestBodyRef, log.RequestHeaders, logging.MaxRequestBody)
+	appendBody("response", "响应", log.ResponseBody, log.ResponseBodyRef, log.ResponseHeaders, logging.MaxResponseBody)
 
 	out := b.String()
 	if runes := []rune(out); len(runes) > analysisToolResultChars {

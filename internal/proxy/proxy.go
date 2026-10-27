@@ -226,6 +226,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RequestHeaders: p.sanitizeHeaders(r.Header, loggingCfg.SensitiveHeaders),
 	}
 	if loggingEnabled {
+		if tracker, ok := p.repo.(interface{ CaptureRunForUpstream(string) string }); ok {
+			logEntry.CaptureRunID = tracker.CaptureRunForUpstream(upstreamName)
+		}
+	}
+	if loggingEnabled {
 		logMu.Lock()
 		p.saveLogSnapshot(logEntry)
 		p.publishInitialLive(logEntry)
@@ -330,7 +335,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if loggingEnabled {
 			tee := io.TeeReader(requestBodySource, reqCapture)
 			rc := &teeReadCloser{r: tee, c: requestBodySource}
-			if p.live != nil || loggingCfg.EarlyRequestBodySnapshot {
+			if p.live != nil || loggingCfg.EarlyRequestBodySnapshot || p.cfg.CorrelationSnapshot().Enabled {
 				bodyDone := make(chan struct{})
 				body = &eofNotifyReadCloser{rc: rc, done: bodyDone}
 
@@ -346,7 +351,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 					logMu.Lock()
 					p.applyRequestCapture(logEntry, reqCapture)
-					if loggingCfg.EarlyRequestBodySnapshot {
+					if loggingCfg.EarlyRequestBodySnapshot || p.cfg.CorrelationSnapshot().Enabled {
 						p.saveLogSnapshot(logEntry)
 					}
 					p.publishRequestReady(logEntry)
@@ -472,9 +477,36 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			logMu.Unlock()
 		}
-		hijacked, tunnelErr := p.handleWebSocketUpgrade(w, r, resp, onUpgraded)
+		var observer *responsesObserver
+		if loggingEnabled && p.cfg.CorrelationSnapshot().Enabled && strings.HasSuffix(logEntry.Path, "/responses") {
+			logMu.Lock()
+			logEntry.WebSocket = &storage.WebSocketInfo{ConnectionID: logEntry.ID, Kind: "connection"}
+			observer = p.newResponsesObserver(logEntry, resp.Header, func(reason string, unowned []byte) {
+				logMu.Lock()
+				defer logMu.Unlock()
+				logEntry.WebSocket.ObservationError = reason
+				logEntry.StatusCode = resp.StatusCode
+				logEntry.Streaming = true
+				logEntry.ResponseBodyRaw = unowned
+				logEntry.ResponseBodySize = int64(len(unowned))
+				logEntry.Latency = time.Since(startTime).Milliseconds()
+				p.saveLogSnapshot(logEntry)
+				p.publishHeaders(logEntry)
+			})
+			logMu.Unlock()
+		}
+		hijacked, tunnelErr := p.handleWebSocketUpgrade(w, r, resp, onUpgraded, observer)
+		observationError := ""
+		if observer != nil {
+			observationError = observer.close()
+		}
 
 		logMu.Lock()
+		if logEntry.WebSocket != nil {
+			logEntry.WebSocket.ObservationError = observationError
+			logEntry.ResponseBodyRaw = observer.unmatched
+			logEntry.ResponseBodySize = int64(len(observer.unmatched))
+		}
 		if tunnelErr != nil {
 			logEntry.Error = fmt.Sprintf("websocket proxy failed: %v", tunnelErr)
 		}
@@ -659,6 +691,7 @@ func (p *Proxy) finalizeAndSaveLog(log *storage.RequestLog, startTime time.Time,
 	p.applyRequestCapture(log, reqCap)
 	p.applyResponseCapture(log, respCap)
 	log.Latency = time.Since(startTime).Milliseconds()
+	log.CorrelationFinal = true
 
 	p.saveLogSnapshot(log)
 }
@@ -866,6 +899,7 @@ func (p *Proxy) handleWebSocketUpgrade(
 	r *http.Request,
 	resp *http.Response,
 	onUpgraded func(),
+	observer *responsesObserver,
 ) (bool, error) {
 	if !isWebSocketUpgrade(resp.Header) {
 		return false, fmt.Errorf("upstream returned 101 without a valid websocket upgrade")
@@ -912,14 +946,20 @@ func (p *Proxy) handleWebSocketUpgrade(
 		err       error
 	}
 	results := make(chan copyResult, 2)
+	var clientReader io.Reader = clientBuf
+	var upstreamReader io.Reader = upstreamConn
+	if observer != nil {
+		clientReader = observedWSReader{Reader: clientBuf, observer: observer, client: true}
+		upstreamReader = observedWSReader{Reader: upstreamConn, observer: observer}
+	}
 	go func() {
 		// Read through the hijacked buffer first so any bytes already received
 		// after the HTTP headers are not stranded there.
-		_, copyErr := io.Copy(upstreamConn, clientBuf)
+		_, copyErr := io.Copy(upstreamConn, clientReader)
 		results <- copyResult{direction: "client to upstream", err: copyErr}
 	}()
 	go func() {
-		_, copyErr := io.Copy(clientConn, upstreamConn)
+		_, copyErr := io.Copy(clientConn, upstreamReader)
 		results <- copyResult{direction: "upstream to client", err: copyErr}
 	}()
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shaomian/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/trace"
 )
 
 var (
@@ -22,12 +23,19 @@ var (
 // AsyncRepository wraps a Repository and makes SaveLog best-effort/async.
 // Other operations are executed synchronously against the underlying repository.
 //
-// This is intentionally single-worker: SQLite only allows one writer at a time anyway,
-// and preserving order (insert then update) matters.
+// Log snapshots retain a single ordered writer. Correlation parsing uses a separate
+// bounded worker; its assignment transactions serialize with snapshot writes.
 type AsyncRepository struct {
-	inner Repository
-	cfg   *config.Config
-	blobs BlobStore
+	correlationPruned  time.Time
+	correlationMu      sync.Mutex
+	correlationCh      chan *RequestLog
+	correlationWG      sync.WaitGroup
+	correlationBytes   atomic.Int64
+	correlationDropped atomic.Uint64
+	correlator         *trace.Correlator
+	inner              Repository
+	cfg                *config.Config
+	blobs              BlobStore
 
 	ch        chan *RequestLog
 	closeOnce sync.Once
@@ -70,14 +78,36 @@ func NewAsyncRepository(inner Repository, cfg *config.Config, buffer int, blobs 
 	}
 	a.inflightCond = sync.NewCond(&a.inflightMu)
 
+	if store, ok := inner.(*SQLiteRepository); ok {
+		a.correlator = trace.NewCorrelator()
+		if observations, err := store.loadObservations(); err == nil {
+			for _, o := range observations {
+				a.correlator.Restore(o)
+			}
+		}
+	}
+	a.correlationCh = make(chan *RequestLog, 32)
+	a.correlationWG.Add(1)
+	go func() {
+		defer a.correlationWG.Done()
+		for entry := range a.correlationCh {
+			observation := a.correlationObservation(entry)
+			a.processCorrelation(observation, entry)
+			a.correlationBytes.Add(-correlationSize(entry))
+		}
+	}()
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
+		defer close(a.correlationCh)
 		for entry := range a.ch {
+			work := *entry
 			PrepareLogForPersistence(entry, a.cfg, a.blobs)
 			if err := a.inner.SaveLog(entry); err != nil {
 				// Best-effort: avoid crashing the proxy path.
 				log.Printf("save log failed: %v", err)
+			} else {
+				a.enqueueCorrelation(&work)
 			}
 		}
 	}()
@@ -335,6 +365,7 @@ func (a *AsyncRepository) Close() error {
 		a.inflightMu.Unlock()
 	})
 	a.wg.Wait()
+	a.correlationWG.Wait()
 	a.ignoredWG.Wait()
 	a.ignoredFlushErrMu.Lock()
 	flushErr := a.ignoredFlushErr

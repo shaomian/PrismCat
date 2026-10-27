@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
 	"mime"
 	"strconv"
 	"strings"
 
 	"github.com/shaomian/PrismCat/internal/config"
-	"github.com/shaomian/PrismCat/internal/httpbody"
 )
 
 type Result struct {
@@ -42,27 +42,18 @@ func Extract(cfg config.UsageExtractionConfig, upstream string, contentType stri
 		return Result{}
 	}
 
-	data := body
-	if hasContentEncoding(contentEncoding) {
-		// 解压上限取「原始大小×32」与绝对上限的较小者：
-		// 响应体捕获上限（默认 32MB）×32 放大可达 ~1GB，几个并发就能 OOM
-		maxDecompressed := int64(len(body)) * 32
-		if maxDecompressed > maxUsageDecompressBytes {
-			maxDecompressed = maxUsageDecompressBytes
-		}
-		formatted := httpbody.FormatForDisplay(contentType, contentEncoding, body, httpbody.FormatOptions{
-			MaxOutputBytes: maxDecompressed,
-		})
-		if formatted.Text == "" || formatted.Binary {
-			return Result{}
-		}
-		data = []byte(formatted.Text)
+	reader, err := newUsageReader(body, contentEncoding, maxUsageDecompressBytes)
+	if err != nil {
+		return Result{}
 	}
+	defer reader.Close()
+	buffered := bufio.NewReader(reader)
+	prefix, _ := buffered.Peek(512)
 
-	if isSSE(contentType, data) {
-		return extractFromSSE(rules, data)
+	if isSSE(contentType, prefix) {
+		return extractFromSSE(rules, buffered)
 	}
-	return extractFromJSONDocument(rules, data)
+	return extractFromJSONReader(rules, buffered)
 }
 
 func selectedRules(rules []config.UsageExtractionRule, names []string, contentType string) []config.UsageExtractionRule {
@@ -112,16 +103,6 @@ func normalizedContentType(contentType string) string {
 	return strings.ToLower(mediaType)
 }
 
-func hasContentEncoding(contentEncoding string) bool {
-	for _, part := range strings.Split(contentEncoding, ",") {
-		token := strings.ToLower(strings.TrimSpace(part))
-		if token != "" && token != "identity" {
-			return true
-		}
-	}
-	return false
-}
-
 func isSSE(contentType string, data []byte) bool {
 	if strings.EqualFold(normalizedContentType(contentType), "text/event-stream") {
 		return true
@@ -129,9 +110,9 @@ func isSSE(contentType string, data []byte) bool {
 	return bytes.Contains(data, []byte("\ndata:")) || bytes.HasPrefix(data, []byte("data:"))
 }
 
-func extractFromSSE(rules []config.UsageExtractionRule, data []byte) Result {
+func extractFromSSE(rules []config.UsageExtractionRule, reader io.Reader) Result {
 	var best Result
-	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
@@ -178,8 +159,12 @@ func extractFromJSONDocument(rules []config.UsageExtractionRule, data []byte) Re
 		return Result{}
 	}
 
+	return extractFromJSONReader(rules, bytes.NewReader(data))
+}
+
+func extractFromJSONReader(rules []config.UsageExtractionRule, reader io.Reader) Result {
 	var doc interface{}
-	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder := json.NewDecoder(reader)
 	decoder.UseNumber()
 	if err := decoder.Decode(&doc); err != nil {
 		return Result{}

@@ -12,6 +12,7 @@ func Build(traceID string, items []Input, opts Options) *Timeline {
 	maxChars := opts.maxEventChars()
 
 	var prevFPs []string
+	contexts := map[string][]string{}
 	toolNames := map[string]string{} // tool_call_id -> 工具名（跨请求关联工具结果与调用）
 	enrich := func(events []Event) {
 		for i := range events {
@@ -28,6 +29,7 @@ func Build(traceID string, items []Input, opts Options) *Timeline {
 	}
 	for _, item := range items {
 		entry := RequestEntry{
+			TraceAssociation:  item.TraceAssociation,
 			LogID:             item.LogID,
 			Seq:               item.Seq,
 			CreatedAt:         item.CreatedAtMs,
@@ -50,13 +52,22 @@ func Build(traceID string, items []Input, opts Options) *Timeline {
 		}
 
 		// 跨请求最长公共前缀
+		base := prevFPs
+		if item.TraceAssociation != nil && item.TraceAssociation.Source != "explicit" {
+			base = nil
+			// Parallel branches inherit their own parent context. Without a
+			// unique parent, retain all messages rather than hiding a sibling.
+			if len(item.TraceAssociation.Parents) == 1 {
+				base = contexts[item.TraceAssociation.Parents[0]]
+			}
+		}
 		carried := 0
 		if len(reqMsgs) > 0 {
-			limit := len(prevFPs)
+			limit := len(base)
 			if len(reqMsgs) < limit {
 				limit = len(reqMsgs)
 			}
-			for carried < limit && prevFPs[carried] == reqMsgs[carried].fp {
+			for carried < limit && base[carried] == reqMsgs[carried].fp {
 				carried++
 			}
 		}
@@ -87,6 +98,7 @@ func Build(traceID string, items []Input, opts Options) *Timeline {
 			fps = append(fps, m.fp)
 		}
 		prevFPs = fps
+		contexts[item.LogID] = fps
 
 		tl.Summary.TotalCarried += carried
 		tl.Summary.TotalNewEvents += len(entry.NewEvents) + len(entry.ResponseEvents)

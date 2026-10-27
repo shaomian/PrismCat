@@ -7,6 +7,8 @@
 //     时间线只展示"本次新增的消息 + 本次响应"，重复的历史消息折叠为一个计数。
 package timeline
 
+import "github.com/shaomian/PrismCat/internal/trace"
+
 // Event 时间线上的一个对话事件
 type Event struct {
 	Role       string `json:"role"`                   // system / user / assistant / tool
@@ -20,15 +22,16 @@ type Event struct {
 
 // Input 构建时间线所需的单条日志输入（与 storage 层解耦）
 type Input struct {
-	LogID       string
-	Seq         int
-	CreatedAtMs int64
-	LatencyMs   int64
-	StatusCode  int
-	Error       string
-	Upstream    string
-	Path        string
-	Streaming   bool
+	TraceAssociation *trace.Assignment
+	LogID            string
+	Seq              int
+	CreatedAtMs      int64
+	LatencyMs        int64
+	StatusCode       int
+	Error            string
+	Upstream         string
+	Path             string
+	Streaming        bool
 
 	RequestBody  string
 	ResponseBody string
@@ -39,14 +42,15 @@ type Input struct {
 
 // RequestEntry 调用链中单个请求的时间线条目
 type RequestEntry struct {
-	LogID      string `json:"log_id"`
-	Seq        int    `json:"seq"`
-	CreatedAt  int64  `json:"created_at"` // unix 毫秒
-	LatencyMs  int64  `json:"latency_ms"`
-	StatusCode int    `json:"status_code"`
-	Error      string `json:"error,omitempty"`
-	Upstream   string `json:"upstream"`
-	Path       string `json:"path"`
+	TraceAssociation *trace.Assignment `json:"trace_association,omitempty"`
+	LogID            string            `json:"log_id"`
+	Seq              int               `json:"seq"`
+	CreatedAt        int64             `json:"created_at"` // unix 毫秒
+	LatencyMs        int64             `json:"latency_ms"`
+	StatusCode       int               `json:"status_code"`
+	Error            string            `json:"error,omitempty"`
+	Upstream         string            `json:"upstream"`
+	Path             string            `json:"path"`
 
 	Model  string `json:"model,omitempty"` // 从请求体解析出的模型名
 	Format string `json:"format"`          // openai-chat / anthropic / gemini / openai-responses / unknown

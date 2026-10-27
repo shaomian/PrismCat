@@ -1,4 +1,5 @@
 import i18n from '../i18n'
+import type { TraceTaskMetadata } from './experiments'
 
 // API 响应类型
 export interface RequestLog {
@@ -26,6 +27,9 @@ export interface RequestLog {
     error?: string
     truncated: boolean
     tag?: string
+    trace_association?: TraceAssociation
+    capture_run_id?: string
+    websocket?: { connection_id: string; stream_id?: string; kind: 'connection' | 'response'; observation_error?: string }
     trace_id?: string
     parent_log_id?: string
     trace_seq?: number
@@ -189,6 +193,7 @@ export interface UpstreamTarget {
 
 // 查询过滤参数
 export interface LogFilter {
+    capture_run_id?: string
     upstream?: string
     method?: string
     path?: string
@@ -206,6 +211,8 @@ export interface LogFilter {
 
 // Trace 类型
 export interface TraceSummary {
+	metadata?: TraceTaskMetadata
+    sources?: string[]
     trace_id: string
     request_count: number
     first_time: number
@@ -220,6 +227,11 @@ export interface TraceSummary {
 }
 
 export interface TraceFilter {
+	q?: string
+	archived?: boolean
+	pinned?: boolean
+	status?: string
+	label?: string
     trace_id?: string
     upstream?: string
     tag?: string
@@ -294,7 +306,7 @@ interface ErrorBody {
     error?: string
 }
 
-async function apiRequest(path: string, init: RequestInit, fallbackKey: string): Promise<Response> {
+export async function apiRequest(path: string, init: RequestInit, fallbackKey: string): Promise<Response> {
     const response = await fetch(path, init)
     if (!response.ok) {
         if (response.status === 401) {
@@ -306,7 +318,7 @@ async function apiRequest(path: string, init: RequestInit, fallbackKey: string):
     return response
 }
 
-function jsonInit(method: string, body?: unknown): RequestInit {
+export function jsonInit(method: string, body?: unknown): RequestInit {
     return {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -354,7 +366,7 @@ export async function logout(): Promise<void> {
     }
 }
 
-export async function fetchLogs(filter: LogFilter = {}): Promise<LogListResponse> {
+export async function fetchLogs(filter: LogFilter = {}, signal?: AbortSignal): Promise<LogListResponse> {
     const params = new URLSearchParams()
     Object.entries(filter).forEach(([key, value]) => {
         if (value !== undefined && value !== '') {
@@ -362,7 +374,7 @@ export async function fetchLogs(filter: LogFilter = {}): Promise<LogListResponse
         }
     })
 
-    const response = await apiRequest(`${API_BASE}/logs?${params}`, {}, 'errors.load_logs')
+    const response = await apiRequest(`${API_BASE}/logs?${params}`, { signal }, 'errors.load_logs')
     return response.json()
 }
 
@@ -379,8 +391,8 @@ export function buildLogsExportUrl(filter: LogFilter = {}, includeBody = true): 
     return `${API_BASE}/logs/export?${params}`
 }
 
-export async function fetchLog(id: string): Promise<RequestLog> {
-    const response = await apiRequest(`${API_BASE}/logs/${encodeURIComponent(id)}`, {}, 'errors.load_log_detail')
+export async function fetchLog(id: string, signal?: AbortSignal): Promise<RequestLog> {
+    const response = await apiRequest(`${API_BASE}/logs/${encodeURIComponent(id)}`, { signal }, 'errors.load_log_detail')
     return response.json()
 }
 
@@ -395,14 +407,14 @@ export async function fetchUpstreams(): Promise<Upstream[]> {
     return response.json()
 }
 
-export async function fetchTraces(filter: TraceFilter = {}): Promise<TraceListResponse> {
+export async function fetchTraces(filter: TraceFilter = {}, signal?: AbortSignal): Promise<TraceListResponse> {
     const params = new URLSearchParams()
     Object.entries(filter).forEach(([key, value]) => {
         if (value !== undefined && value !== '') {
             params.append(key, String(value))
         }
     })
-    const response = await apiRequest(`${API_BASE}/traces?${params}`, {}, 'errors.load_traces')
+    const response = await apiRequest(`${API_BASE}/traces?${params}`, { signal }, 'errors.load_traces')
     return response.json()
 }
 
@@ -423,6 +435,7 @@ export interface TimelineEvent {
 }
 
 export interface TimelineRequest {
+    trace_association?: TraceAssociation
     log_id: string
     seq: number
     created_at: number
@@ -479,8 +492,8 @@ export interface TraceDiagram {
     labels: DiagramLabel[] | null
 }
 
-export async function fetchTraceDiagram(traceId: string): Promise<TraceDiagram> {
-    const response = await apiRequest(`${API_BASE}/traces/${encodeURIComponent(traceId)}/diagram`, {}, 'errors.load_diagram')
+export async function fetchTraceDiagram(traceId: string, view: 'sequence' | 'dependencies' = 'sequence'): Promise<TraceDiagram> {
+    const response = await apiRequest(`${API_BASE}/traces/${encodeURIComponent(traceId)}/diagram?view=${view}`, {}, 'errors.load_diagram')
     return response.json()
 }
 
@@ -636,6 +649,7 @@ export async function removeUpstream(name: string): Promise<void> {
 
 // 应用配置类型
 export interface AppConfig {
+    trace_correlation: { enabled: boolean }
     version: string
     server: {
         proxy_domains: string[]
@@ -675,6 +689,7 @@ export interface AppConfig {
     }
     analysis: {
         enabled: boolean
+        protocol?: 'openai' | 'anthropic'
         base_url: string
         model: string
         has_api_key: boolean
@@ -694,12 +709,14 @@ export async function updateLogAnnotation(
 }
 
 export interface ConfigUpdate {
+    trace_correlation?: { enabled: boolean }
     server?: {
         enable_path_routing?: boolean
         path_routing_prefix?: string
     }
     analysis?: {
         enabled?: boolean
+        protocol?: 'openai' | 'anthropic'
         base_url?: string
         api_key?: string
         model?: string
@@ -738,6 +755,17 @@ export interface ConfigUpdate {
 
 export async function fetchConfig(): Promise<AppConfig> {
     const response = await apiRequest(`${API_BASE}/config`, {}, 'errors.load_config')
+    return response.json()
+}
+
+export async function fetchAnalysisConfig(): Promise<AppConfig['analysis']> {
+    const response = await apiRequest(`${API_BASE}/analysis/config`, {}, 'errors.load_config')
+    return response.json()
+}
+
+export interface AnalysisModel { id: string; name: string }
+export async function syncAnalysisModels(draft: { protocol: 'openai' | 'anthropic'; base_url: string; api_key?: string }, signal: AbortSignal): Promise<{ models: AnalysisModel[]; truncated: boolean }> {
+    const response = await apiRequest(`${API_BASE}/analysis/models`, { ...jsonInit('POST', draft), signal }, 'analysis.models_failed')
     return response.json()
 }
 
@@ -855,4 +883,74 @@ export interface ReplayResponse {
 export async function sendReplay(req: ReplayRequest): Promise<ReplayResponse> {
     const response = await apiRequest(`${API_BASE}/replay`, jsonInit('POST', req), 'errors.send_replay')
     return response.json()
+}
+
+export interface TraceAssociation {
+    trace_id: string
+    session_id?: string
+    client?: string
+    source: 'auto' | 'explicit' | 'manual' | 'capture'
+    reason: string
+    state: string
+    parents?: string[]
+    revision: number
+    locked: boolean
+}
+
+export interface CaptureRun {
+    id: string
+    name: string
+    upstream: string
+    started_at: string
+    stopped_at?: string
+    single_task: boolean
+    archived?: boolean
+    revision?: number
+    request_count: number
+    total_latency_ms: number
+    wall_time_ms: number
+    usage_input_tokens?: number
+    usage_output_tokens?: number
+    usage_missing_count: number
+}
+
+export async function fetchCaptureRuns(page: { limit?: number; offset?: number; archived?: boolean } = {}, signal?: AbortSignal): Promise<{ runs: CaptureRun[]; total?: number }> {
+    const params = new URLSearchParams()
+    if (page.limit !== undefined) params.set('limit', String(page.limit))
+    if (page.offset !== undefined) params.set('offset', String(page.offset))
+    params.set('archived', String(page.archived ?? false))
+    const response = await apiRequest(API_BASE + '/capture-runs?' + params, { signal }, 'correlation.failed')
+    return response.json()
+}
+
+export async function startCaptureRun(name: string, upstream: string, single_task: boolean): Promise<CaptureRun> {
+    const response = await apiRequest(API_BASE + '/capture-runs', jsonInit('POST', { name, upstream, single_task }), 'correlation.failed')
+    return response.json()
+}
+
+export async function stopCaptureRun(id: string): Promise<void> {
+    await apiRequest(API_BASE + '/capture-runs/' + encodeURIComponent(id) + '/stop', jsonInit('POST'), 'correlation.failed')
+}
+
+export async function assignLogTrace(id: string, trace_id: string, revision: number): Promise<TraceAssociation> {
+    const response = await apiRequest(API_BASE + '/logs/' + encodeURIComponent(id) + '/trace', jsonInit('PATCH', { trace_id, revision }), 'correlation.failed')
+    return response.json()
+}
+
+export interface CorrelationStatus {
+    enabled: boolean
+    queued_bytes: number
+    dropped_observations: number
+    active_captures: { id: string; upstream: string }[]
+}
+
+export async function fetchCorrelationStatus(signal?: AbortSignal): Promise<CorrelationStatus> {
+ const response = await apiRequest(API_BASE + '/trace-correlation/status', { signal }, 'correlation.failed')
+ return response.json()
+}
+
+export type TraceMetadata = Pick<RequestLog, 'trace_id' | 'trace_seq' | 'trace_association' | 'capture_run_id'>
+export async function fetchTraceMetadata(id: string): Promise<TraceMetadata> {
+ const response = await apiRequest(API_BASE + '/logs/' + encodeURIComponent(id) + '/trace', {}, 'correlation.failed')
+ return response.json()
 }

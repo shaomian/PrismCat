@@ -6,6 +6,8 @@
 
 > 基于 [PrismCat](https://github.com/paopaoandlingyia/PrismCat) 独立维护的分支 —— 沿用同一 MIT License。
 
+v2.1.0 新增自动调用链、录制批次、AI 对比复盘与任务管理，详见 [更新记录](CHANGELOG.md)。
+
 > **你永远不知道 SDK 在你的 Prompt 里偷偷塞了多少东西 —— 直到你用了 PrismCat。**
 
 PrismCat 是一个**自托管的 LLM API 透明代理与调试控制台**。
@@ -112,6 +114,12 @@ PrismCat 使用**子域名路由**实现透明代理。当你在 Settings 里添
 ### Trace 关联 & 用量追踪
 自动将相关请求关联为 Trace 链路，并从响应中提取 Token 用量。内置 OpenAI、Anthropic、Gemini 提取规则，也支持自定义。
 
+调用链 AI 分析和对比实验共用分析模型设置，支持 OpenAI 兼容与 Anthropic 原生协议。可同步接口提供的模型列表后选择，也可手动填写模型 ID；详细用法见 [对比实验与 AI 任务复盘](EXPERIMENTS_CN.md)。
+
+支持无自定义请求头的自动任务关联、测试批次录制和人工纠正，参见 [自动调用链使用说明](./AUTO_TRACE_CN.md)。
+调用链、录制批次、复盘与模板的归档、删除及手动过期清理，见 [任务管理与清理](TASK_MANAGEMENT_CN.md)。
+
+
 ### 目标预设
 一个稳定的代理入口，背后挂多组完整目标，在 Settings 里一键切换，客户端不用动。
 
@@ -153,6 +161,34 @@ PrismCat 使用**子域名路由**实现透明代理。当你在 Settings 里添
 | 数据归属 | 完全本地 | 完全本地 | 依赖外部服务 |
 | 流式响应回看 | ✅ 原始流 + 合并视图 | 体验差 | 部分支持 |
 | 长期运行 | ✅ 自动清理、静默常驻 | 临时调试工具 | ✅ 但依赖外部基础设施 |
+
+---
+
+## 从源码快速编译并运行
+
+安装 Go（版本要求见 `go.mod`）和 Node.js（建议 24），然后使用仓库根目录的入口：
+
+| 平台 | 入口 |
+|------|------|
+| macOS | 双击 `快速编译并运行.command`，或执行 `bash ./快速编译并运行.command` |
+| Windows | 双击 `快速编译并运行.bat` |
+| 终端通用入口 | `node scripts/build-and-run.mjs` |
+
+两个启动入口共用 `scripts/build-and-run.mjs`：依赖变化时执行 `npm ci`，构建前端、同步嵌入页面（保留 `internal/server/ui/README.md`），再编译后端。全部构建成功后才停止旧实例并替换根目录的程序；构建失败时旧实例继续运行。macOS 只重启 PID 文件记录且可执行路径匹配的实例，Windows 只停止可执行路径属于本仓库的 `prismcat.exe`。
+
+工作目录固定为仓库根目录，默认沿用 `data/config.yaml` 和 `data/` 数据。macOS 在当前终端显示日志，按 Ctrl+C 停止；Windows 启动为系统托盘程序，通过托盘菜单退出。构建脚本支持转发后端参数：
+
+```sh
+node scripts/build-and-run.mjs -config "data/my config.yaml"
+```
+
+如需仅验证构建，不停止或替换正在运行的程序：
+
+```sh
+node scripts/build-and-run.mjs --build-only
+```
+
+仅构建的程序保存在 `.cache/local-debug/build-*/`，命令会输出具体路径。构建仍会更新本地前端和嵌入资源。Windows 根目录的 `start-prismcat.bat` 和 `restart-prismcat.bat` 分别用于启动、重启已有程序，不执行构建。
 
 ---
 
@@ -419,3 +455,5 @@ PrismCat 使用异步日志写入，代理本身的延迟通常在 1ms 以内。
 ## License
 
 [MIT License](LICENSE)
+
+Agent/模型实验对比、复盘模板与 AI 复盘：[使用说明](EXPERIMENTS_CN.md)。

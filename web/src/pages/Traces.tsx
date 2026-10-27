@@ -1,65 +1,114 @@
+import { CaptureRecordingDialog, TraceCapturePanel } from '@/components/TraceCapturePanel'
 import { useState, useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Network, AlertCircle, Copy, Search, X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Network, AlertCircle, Copy, Search, X, ChevronLeft, ChevronRight, Plus, Loader2 } from 'lucide-react'
 import { copyText } from '@/lib/clipboard'
-import { fetchTraces, fetchUpstreams, type TraceSummary, type TraceFilter, type Upstream } from '@/lib/api'
+import { fetchTraces, fetchUpstreams, type TraceSummary, type Upstream } from '@/lib/api'
 import { cn, formatLatency } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { CopyTraceIdButton } from '@/components/CopyTraceIdButton'
+import { TracePinButton } from '@/components/TraceTaskManager'
+import { TaskActions, TaskBatchActions, TaskSelectionToggle } from '@/components/TaskManagement'
+import { TraceFilters } from '@/components/TraceFilters'
+import { countTraceFilters, defaultTraceFilters, traceListQuery, type TraceListFilters } from '@/lib/trace-filters'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { correlationSettingsPath, useCorrelationStatus } from '@/lib/trace-capture'
 import { toast } from 'sonner'
 
 export function Traces() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab = searchParams.get('tab') === 'captures' ? 'captures' : 'traces'
+  const { status, error: statusError, refresh: refreshStatus } = useCorrelationStatus()
+  const [recordingOpen, setRecordingOpen] = useState(false)
+  const [captureRevision, setCaptureRevision] = useState(0)
+  const [captureCreation, setCaptureCreation] = useState(0)
+  const activeCaptures = status?.active_captures.length ?? 0
 
-  const [traces, setTraces] = useState<TraceSummary[]>([])
-  const [total, setTotal] = useState(0)
+  function selectTab(value: string) {
+    exitSelection()
+    setSearchParams(previous => {
+      const next = new URLSearchParams(previous)
+      if (value === 'captures') next.set('tab', 'captures')
+      else next.delete('tab')
+      return next
+    }, { replace: true })
+  }
+
+  function captureChanged() {
+    setCaptureRevision(previous => previous + 1)
+    void refreshStatus()
+  }
+
+  const [page, setPage] = useState<{ scope: string; traces: TraceSummary[]; total: number; failed?: boolean } | null>(null)
   const [upstreams, setUpstreams] = useState<Upstream[]>([])
-  const [filter, setFilter] = useState<TraceFilter>({
-    trace_id: searchParams.get('trace_id') || '',
-    upstream: '',
-    offset: 0,
-    limit: 20,
-  })
-  const [draftFilter, setDraftFilter] = useState<TraceFilter>({ ...filter })
+  const [filter, setFilter] = useState<TraceListFilters>(() => defaultTraceFilters(searchParams.get('trace_id') || ''))
+  const [draftQuery, setDraftQuery] = useState(filter.query)
+  const [composing, setComposing] = useState(false)
+  const [reload, setReload] = useState(0)
+  const [selection, setSelection] = useState<{ scope: string; ids: string[]; active: boolean }>({ scope: '', ids: [], active: false })
+  const selectionScope = JSON.stringify({ filter, tab, reload })
+  const currentPage = page?.scope === selectionScope ? page : null
+  const traces = currentPage?.traces ?? []
+  const total = currentPage?.total ?? 0
+  const loading = tab === 'traces' && !currentPage
+  const selecting = selection.scope === selectionScope && selection.active
+  const selected = selecting ? selection.ids : []
+  const selectedItems = traces.filter(trace => selected.includes(trace.trace_id)).map(trace => ({ id: trace.trace_id }))
+  function exitSelection() { setSelection({ scope: '', ids: [], active: false }) }
+  function managementChanged() { exitSelection(); setReload(previous => previous + 1) }
+  function toggleSelected(id: string, checked: boolean) {
+    setSelection({ scope: selectionScope, active: true, ids: checked ? [...selected.filter(value => value !== id), id] : selected.filter(value => value !== id) })
+  }
 
   useEffect(() => {
-    let cancelled = false
+    if (tab !== 'traces') return
+    const controller = new AbortController()
 
     async function load() {
       try {
-        const res = await fetchTraces(filter)
-        if (cancelled) return
-        setTraces(res.traces || [])
-        setTotal(res.total)
+        const res = await fetchTraces(traceListQuery(filter), controller.signal)
+        if (controller.signal.aborted) return
+        if (!res.traces?.length && (filter.offset ?? 0) > 0) {
+          setFilter(previous => ({ ...previous, offset: Math.max(0, Math.ceil(res.total / (previous.limit || 20)) - 1) * (previous.limit || 20) }))
+          return
+        }
+        setPage({ scope: selectionScope, traces: res.traces || [], total: res.total })
       } catch {
-        if (!cancelled) toast.error(i18n.t('traces.load_failed'))
+        if (!controller.signal.aborted) {
+          setPage({ scope: selectionScope, traces: [], total: 0, failed: true })
+          toast.error(i18n.t('traces.load_failed'))
+        }
       }
     }
 
     void load()
 
     return () => {
-      cancelled = true
+      controller.abort()
     }
-  }, [filter, i18n])
+  }, [filter, i18n, tab, reload, selectionScope])
+
+  useEffect(() => {
+    if (composing || draftQuery.trim() === filter.query) return
+    const timer = window.setTimeout(() => setFilter(previous => ({ ...previous, query: draftQuery.trim(), offset: 0 })), 300)
+    return () => window.clearTimeout(timer)
+  }, [draftQuery, filter.query, composing])
 
   useEffect(() => {
     fetchUpstreams().then(setUpstreams).catch(() => {})
   }, [])
 
   const handleSearch = () => {
-    setFilter({ ...draftFilter, offset: 0 })
+    exitSelection()
+    if (draftQuery.trim() === filter.query) setReload(previous => previous + 1)
+    else setFilter(previous => ({ ...previous, query: draftQuery.trim(), offset: 0 }))
   }
 
-  const handleReset = () => {
-    const reset: TraceFilter = { offset: 0, limit: 20 }
-    setDraftFilter(reset)
-    setFilter(reset)
-  }
+  const narrowed = !!filter.query || countTraceFilters({ ...filter, archived: false }) > 0
 
   const maxLatency = traces.reduce((max, t) => Math.max(max, t.total_latency_ms), 1)
 
@@ -69,61 +118,55 @@ export function Traces() {
   const traceExample = '-H "X-PrismCat-Trace-ID: my-task-001"'
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className={cn('inline-flex items-center gap-1.5 text-xs', status?.enabled ? 'text-success' : 'text-muted-foreground')}>
+            <span className={cn('size-1.5 rounded-full', status?.enabled ? 'bg-success' : 'bg-muted-foreground/50')} />
+            {t(status ? status.enabled ? 'correlation.status_enabled' : 'correlation.status_disabled' : statusError ? 'correlation.status_unavailable' : 'common.loading')}
+          </span>
+          <Link className="text-xs text-primary hover:underline" to={correlationSettingsPath}>{t('correlation.settings_link')}</Link>
+        </div>
+        <Button size="sm" onClick={() => setRecordingOpen(true)}><Plus className="size-4" />{t('correlation.new_capture')}</Button>
+      </div>
+      <Tabs value={tab} onValueChange={selectTab} className="gap-4">
+        <TabsList variant="line" className="w-full justify-start rounded-none border-b border-border pb-1">
+          <TabsTrigger value="traces" className="flex-none px-3">{t('nav.traces')}</TabsTrigger>
+          <TabsTrigger value="captures" className="flex-none px-3">{t('correlation.capture_title')}{activeCaptures > 0 && <span className="ml-1 inline-flex items-center gap-1 text-xs text-danger"><span className="size-1.5 rounded-full bg-danger" />{t('correlation.active_captures', { count: activeCaptures })}</span>}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="traces" className="space-y-4">
       {/* Filter bar */}
       <div className="space-y-2 rounded-lg border border-border bg-card p-2 md:p-3">
-        {/* 与日志页工具条同构:输入框占满,控件定宽,操作按钮只留图标 */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Input
-            placeholder={t('traces.search_placeholder')}
-            value={draftFilter.trace_id || ''}
-            onChange={e => setDraftFilter(prev => ({ ...prev, trace_id: e.target.value }))}
-            onKeyDown={e => e.key === 'Enter' && handleSearch()}
-            className="h-8 flex-1 text-xs"
-          />
-          <Select
-            value={draftFilter.upstream || '_all'}
-            onValueChange={v => setDraftFilter(prev => ({ ...prev, upstream: v === '_all' ? '' : v }))}
-          >
-            <SelectTrigger className="h-8 w-full text-xs sm:w-[160px]">
-              <SelectValue placeholder={t('filters.upstream_placeholder')} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="_all">{t('common.all')}</SelectItem>
-              {upstreams.map(u => (
-                <SelectItem key={u.name} value={u.name}>{u.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <Button
-              size="icon"
-              variant="outline"
-              onClick={handleSearch}
-              className="h-8 w-8 border border-input bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label={t('common.search')}
-            >
-              <Search className="h-4 w-4" />
-            </Button>
-            <Button
-              size="icon"
-              variant="outline"
-              onClick={handleReset}
-              className="h-8 w-8 border border-input bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label={t('common.reset')}
-            >
-              <X className="h-4 w-4" />
-            </Button>
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              aria-label={t('trace_manager.search_hint')}
+              placeholder={t('trace_manager.search_hint')}
+              value={draftQuery}
+              onChange={event => { setDraftQuery(event.target.value); exitSelection() }}
+              onCompositionStart={() => setComposing(true)}
+              onCompositionEnd={event => { setComposing(false); setDraftQuery(event.currentTarget.value) }}
+              onKeyDown={event => { if (event.key === 'Enter' && !composing && !event.nativeEvent.isComposing) { event.preventDefault(); handleSearch() } }}
+              className="h-9 pl-9 pr-8 text-sm [&::-webkit-search-cancel-button]:appearance-none"
+            />
+            {draftQuery && <Button type="button" size="icon-xs" variant="ghost" className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={t('trace_filters.clear_search')} onClick={() => { exitSelection(); setDraftQuery(''); setFilter(previous => ({ ...previous, query: '', offset: 0 })) }}><X className="size-3.5" /></Button>}
           </div>
+          <TraceFilters value={filter} upstreams={upstreams} onChange={next => { exitSelection(); setFilter({ ...next, query: composing ? filter.query : draftQuery.trim(), offset: 0 }) }} />
         </div>
         {/* Pagination */}
         <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-          <span>{t('traces.total_count', { count: total })}</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span>{t('traces.total_count', { count: total })}</span>
+            {selecting && traces.length > 0 && <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={selectedItems.length === traces.length} onChange={event => setSelection({ scope: selectionScope, active: true, ids: event.target.checked ? traces.map(trace => trace.trace_id) : [] })} />{t('task_management.select_page')}</label>}
+            {(traces.length > 0 || selecting) && <TaskSelectionToggle active={selecting} disabled={loading} onToggle={() => selecting ? exitSelection() : setSelection({ scope: selectionScope, ids: [], active: true })} />}
+          </div>
           <div className="flex items-center gap-2">
             <Button
               variant="ghost" size="sm" className="h-7 w-7 p-0"
-              disabled={filter.offset === 0}
-              onClick={() => setFilter(prev => ({ ...prev, offset: Math.max(0, (prev.offset || 0) - (prev.limit || 20)) }))}
+              disabled={loading || !filter.offset}
+              onClick={() => { exitSelection(); setFilter(prev => ({ ...prev, offset: Math.max(0, (prev.offset || 0) - (prev.limit || 20)) })) }}
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
@@ -132,8 +175,8 @@ export function Traces() {
             </span>
             <Button
               variant="ghost" size="sm" className="h-7 w-7 p-0"
-              disabled={(filter.offset || 0) + (filter.limit || 20) >= total}
-              onClick={() => setFilter(prev => ({ ...prev, offset: (prev.offset || 0) + (prev.limit || 20) }))}
+              disabled={loading || (filter.offset || 0) + (filter.limit || 20) >= total}
+              onClick={() => { exitSelection(); setFilter(prev => ({ ...prev, offset: (prev.offset || 0) + (prev.limit || 20) })) }}
             >
               <ChevronRight className="h-4 w-4" />
             </Button>
@@ -141,18 +184,25 @@ export function Traces() {
         </div>
       </div>
 
+      <TaskBatchActions kind="trace" items={selectedItems} archived={filter.archived} onChanged={managementChanged} />
+
       {/* Traces table */}
-      {traces.length === 0 ? (
+      {loading ? (
+        <div role="status" className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground"><Loader2 className="size-5 animate-spin" />{t('common.loading')}</div>
+      ) : currentPage?.failed ? (
+        <div role="alert" className="flex flex-col items-center justify-center gap-3 py-20 text-sm text-muted-foreground"><AlertCircle className="size-6" /><p>{t('traces.load_failed')}</p><Button variant="outline" size="sm" onClick={() => setReload(previous => previous + 1)}>{t('common.refresh')}</Button></div>
+      ) : traces.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20">
           <Network className="mb-4 h-10 w-10 text-muted-foreground/40" />
-          <p className="text-sm font-medium text-foreground">{t('traces.no_traces')}</p>
-          <p className="mt-1 max-w-md text-center text-xs text-muted-foreground">
+          <p className="text-sm font-medium text-foreground">{t(narrowed ? 'trace_filters.no_matches' : filter.archived ? 'task_management.empty_archived' : 'traces.no_traces')}</p>
+          {narrowed && <p className="mt-1 text-xs text-muted-foreground">{t('trace_filters.no_matches_hint')}</p>}
+          {!narrowed && !filter.archived && <p className="mt-1 max-w-md text-center text-xs text-muted-foreground">
             {t('traces.no_traces_hint')}
-          </p>
+          </p>}
 
           {/* 空状态负责教会用户怎么触发这个功能 —— 不知道要发这个请求头的人
               永远看不到这页有内容,会以为功能坏了 */}
-          <div className="mt-6 w-full max-w-xl">
+          {!narrowed && !filter.archived && <div className="mt-6 w-full max-w-xl">
             <p className="mb-2 text-xs text-muted-foreground">{t('traces.no_traces_example')}</p>
             <div className="flex items-start gap-2 rounded-lg border border-border bg-muted p-3">
               <pre className="min-w-0 flex-1 overflow-x-auto font-mono text-xs leading-5 text-foreground">
@@ -171,7 +221,7 @@ export function Traces() {
                 <Copy className="h-3.5 w-3.5" />
               </Button>
             </div>
-          </div>
+          </div>}
         </div>
       ) : (
         <>
@@ -180,6 +230,7 @@ export function Traces() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b bg-muted/30">
+                  {selecting && <th className="w-10 px-3" aria-label={t('task_management.selection')} />}
                   <th className="px-4 py-3 text-left font-medium text-xs text-muted-foreground">{t('traces.trace_id')}</th>
                   <th className="px-3 py-3 text-center font-medium text-xs text-muted-foreground">{t('traces.requests')}</th>
                   <th className="px-3 py-3 text-left font-medium text-xs text-muted-foreground">{t('traces.upstreams')}</th>
@@ -187,19 +238,24 @@ export function Traces() {
                   <th className="px-3 py-3 text-right font-medium text-xs text-muted-foreground">{t('traces.tokens')}</th>
                   <th className="px-3 py-3 text-center font-medium text-xs text-muted-foreground">{t('traces.errors')}</th>
                   <th className="px-3 py-3 text-right font-medium text-xs text-muted-foreground">{t('traces.time')}</th>
+                  {!selecting && <th className="w-24 px-2" aria-label={t('task_management.actions')} />}
                 </tr>
               </thead>
               <tbody>
                 {traces.map(trace => (
                   <tr
                     key={trace.trace_id}
-                    onClick={() => navigate(`/traces/${encodeURIComponent(trace.trace_id)}`)}
-                    className="border-b transition-colors hover:bg-muted/40 cursor-pointer"
+                    onClick={() => selecting ? toggleSelected(trace.trace_id, !selected.includes(trace.trace_id)) : navigate(`/traces/${encodeURIComponent(trace.trace_id)}`)}
+                    className={cn('group/trace border-b transition-colors hover:bg-muted/40 cursor-pointer', selecting && selected.includes(trace.trace_id) && 'bg-primary/5')}
                   >
+                    {selecting && <td className="px-3" onClick={event => event.stopPropagation()}><input type="checkbox" aria-label={t('task_management.select_item', { name: trace.metadata?.name || trace.trace_id })} checked={selected.includes(trace.trace_id)} onChange={event => toggleSelected(trace.trace_id, event.target.checked)} /></td>}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <Network className="h-3.5 w-3.5 shrink-0 text-info" />
-                        <span className="font-mono text-foreground/90 truncate max-w-[200px]">{trace.trace_id}</span>
+                        <div className="min-w-0">{selecting ? <p className="max-w-[240px] truncate font-medium">{trace.metadata?.name || t('trace_manager.unnamed')}</p> : <Link to={`/traces/${encodeURIComponent(trace.trace_id)}`} onClick={event => event.stopPropagation()} className="block max-w-[240px] truncate rounded-sm font-medium transition-colors group-hover/trace:text-primary focus-visible:outline-2 focus-visible:outline-primary">{trace.metadata?.name || t('trace_manager.unnamed')}</Link>}<span className="font-mono text-muted-foreground truncate block max-w-[200px]" title={trace.trace_id}>{trace.trace_id}</span></div>
+                        <CopyTraceIdButton traceId={trace.trace_id} />
+                        <TracePinButton trace={trace} onChange={metadata => setPage(previous => previous?.scope === selectionScope ? { ...previous, traces: previous.traces.map(item => item.trace_id === trace.trace_id ? { ...item, metadata } : item) } : previous)} />
+ <span className="flex gap-1 text-xs text-muted-foreground">{trace.sources?.map(source => <span key={source} className="rounded border border-border px-1">{t(`correlation.sources.${source}`)}</span>)}</span>
                       </div>
                       {/* Latency bar */}
                       <div className="mt-1.5 h-1.5 w-full rounded-full bg-muted/50">
@@ -240,6 +296,7 @@ export function Traces() {
                     <td className="px-3 py-3 text-right text-muted-foreground">
                       {new Date(trace.last_time).toLocaleTimeString()}
                     </td>
+                    {!selecting && <td className="px-2 text-right" onClick={event => event.stopPropagation()}><TaskActions kind="trace" items={[{ id: trace.trace_id }]} name={trace.metadata?.name || trace.trace_id} archived={!!trace.metadata?.archived} onChanged={managementChanged} /></td>}
                   </tr>
                 ))}
               </tbody>
@@ -249,29 +306,31 @@ export function Traces() {
           {/* Mobile cards */}
           <div className="md:hidden space-y-2">
             {traces.map(trace => (
-              <button
+              <div
                 key={trace.trace_id}
-                onClick={() => navigate(`/traces/${encodeURIComponent(trace.trace_id)}`)}
-                className="w-full rounded-lg p-4 text-left transition-all active:scale-[0.99] bg-card hover:bg-card/40 border border-border"
+                className={cn('relative w-full rounded-lg p-4 text-left transition-all active:scale-[0.99] bg-card hover:bg-card/40 border border-border', selecting && selected.includes(trace.trace_id) && 'border-primary/50 bg-primary/5')}
               >
                 <div className="flex items-center gap-2 mb-2">
+                  {selecting && <input type="checkbox" className="relative z-10" aria-label={t('task_management.select_item', { name: trace.metadata?.name || trace.trace_id })} checked={selected.includes(trace.trace_id)} onChange={event => toggleSelected(trace.trace_id, event.target.checked)} />}
                   <Network className="h-3.5 w-3.5 text-info shrink-0" />
-                  <span className="font-mono text-xs text-foreground/90 truncate flex-1">{trace.trace_id}</span>
+                  {selecting ? <button type="button" aria-pressed={selected.includes(trace.trace_id)} onClick={() => toggleSelected(trace.trace_id, !selected.includes(trace.trace_id))} className="min-w-0 flex-1 truncate text-left text-xs text-foreground/90 after:absolute after:inset-0 after:rounded-lg">{trace.metadata?.name || trace.trace_id}</button> : <Link to={`/traces/${encodeURIComponent(trace.trace_id)}`} className="min-w-0 flex-1 truncate text-xs text-foreground/90 after:absolute after:inset-0 after:rounded-lg" title={trace.trace_id}>{trace.metadata?.name || trace.trace_id}</Link>}
+                  <span className="relative z-10"><CopyTraceIdButton traceId={trace.trace_id} /></span>
+                </div>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  {(trace.upstreams || []).map(u => (
+                    <span key={u} className="text-xs font-semibold tracking-tight bg-muted text-muted-foreground px-1.5 py-0.5 rounded-md">{u}</span>
+                  ))}
                   <span className="text-xs font-medium bg-muted text-muted-foreground px-1.5 py-0.5 rounded">{trace.request_count} reqs</span>
                   {trace.error_count > 0 && (
                     <span className="text-xs font-medium bg-danger/10 text-danger px-1.5 py-0.5 rounded flex items-center gap-0.5">
                       <AlertCircle className="h-2.5 w-2.5" />{trace.error_count}
                     </span>
                   )}
-                </div>
-                <div className="flex items-center gap-2 mb-2 flex-wrap">
-                  {(trace.upstreams || []).map(u => (
-                    <span key={u} className="text-xs font-semibold tracking-tight bg-muted text-muted-foreground px-1.5 py-0.5 rounded-md">{u}</span>
-                  ))}
                   <span className="text-xs font-mono text-muted-foreground ml-auto">{formatLatency(trace.total_latency_ms)}</span>
                 </div>
-                <div className="mb-2 text-xs font-mono text-muted-foreground/70">
-                  {t('traces.tokens')}: {typeof trace.usage_total_tokens === 'number' ? trace.usage_total_tokens.toLocaleString() : '-'}
+                <div className="mb-2 flex min-h-8 items-center justify-between gap-2">
+                  <span className="text-xs font-mono text-muted-foreground/70">{t('traces.tokens')}: {typeof trace.usage_total_tokens === 'number' ? trace.usage_total_tokens.toLocaleString() : '-'}</span>
+                  {!selecting && <span className="relative z-10"><TaskActions kind="trace" items={[{ id: trace.trace_id }]} name={trace.metadata?.name || trace.trace_id} archived={!!trace.metadata?.archived} onChanged={managementChanged} /></span>}
                 </div>
                 <div className="h-1.5 w-full rounded-full bg-muted/50">
                   <div
@@ -286,11 +345,17 @@ export function Traces() {
                   <span>{new Date(trace.first_time).toLocaleString()}</span>
                   <span>{new Date(trace.last_time).toLocaleTimeString()}</span>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </>
       )}
+        </TabsContent>
+        <TabsContent value="captures">
+          <TraceCapturePanel key={captureCreation} revision={captureRevision} recording={activeCaptures > 0} onChanged={captureChanged} />
+        </TabsContent>
+      </Tabs>
+      {recordingOpen && <CaptureRecordingDialog upstreams={upstreams} status={status} onClose={() => setRecordingOpen(false)} onStarted={() => { setCaptureCreation(previous => previous + 1); captureChanged(); selectTab('captures') }} />}
     </div>
   )
 }

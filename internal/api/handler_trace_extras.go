@@ -32,6 +32,9 @@ func (h *Handler) handleTraceDiagram(w http.ResponseWriter, r *http.Request, tra
 		}
 	}
 	src, labels := timeline.Diagram(tl, opts)
+	if r.URL.Query().Get("view") == "dependencies" {
+		src, labels = timeline.Dependencies(tl), nil
+	}
 	h.jsonResponse(w, map[string]interface{}{"mermaid": src, "labels": labels})
 }
 
@@ -103,8 +106,8 @@ func (h *Handler) buildTraceTimeline(w http.ResponseWriter, r *http.Request, tra
 
 // buildTraceTimelineOpts 同 buildTraceTimeline，但允许自定义构建选项。
 //
-// 实际构建带缓存：每次读取前用 GetTraceFingerprint（条数 + 最新创建
-// 时间，走索引）判断失效；完整构建（不截断）按 traceID 缓存（LRU），
+// 实际构建带缓存：每次读取前用 GetTraceFingerprint（条数、最新创建
+// 时间及修订，走索引）判断失效；完整构建（不截断）按 traceID 缓存（LRU），
 // 各种截断级别用 timeline.TruncateEvents 派生。此前每次查看时间线/
 // 流程图/分析对话都会对每条日志做全量 blob 恢复 + 解压 + JSON 解析，
 // 大调用链上一次点击可达 GB 级 IO。
@@ -145,15 +148,16 @@ func (h *Handler) traceTimelineInputs(r *http.Request, requests []*storage.Reque
 	inputs := make([]timeline.Input, 0, len(requests))
 	for _, req := range requests {
 		inputs = append(inputs, timeline.Input{
-			LogID:       req.ID,
-			Seq:         req.TraceSeq,
-			CreatedAtMs: req.CreatedAt.UnixMilli(),
-			LatencyMs:   req.Latency,
-			StatusCode:  req.StatusCode,
-			Error:       req.Error,
-			Upstream:    req.Upstream,
-			Path:        req.Path,
-			Streaming:   req.Streaming,
+			TraceAssociation: req.TraceAssociation,
+			LogID:            req.ID,
+			Seq:              req.TraceSeq,
+			CreatedAtMs:      req.CreatedAt.UnixMilli(),
+			LatencyMs:        req.Latency,
+			StatusCode:       req.StatusCode,
+			Error:            req.Error,
+			Upstream:         req.Upstream,
+			Path:             req.Path,
+			Streaming:        req.Streaming,
 			RequestBody: h.recoverBody(r.Context(), req.RequestBody, req.RequestBodyRef,
 				req.RequestHeaders, logging.MaxRequestBody),
 			ResponseBody: h.recoverBody(r.Context(), req.ResponseBody, req.ResponseBodyRef,

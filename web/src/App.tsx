@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { Globe, LayoutDashboard, LogOut, Network, Settings as SettingsIcon, Zap } from 'lucide-react'
+import { FlaskConical, Globe, LayoutDashboard, LogOut, Network, Settings as SettingsIcon, Zap } from 'lucide-react'
 import { PrismCatLogo } from '@/components/PrismCatLogo'
 import { useTranslation } from 'react-i18next'
 import { Dashboard } from '@/pages/Dashboard'
@@ -33,6 +33,8 @@ const TraceDetailPage = lazy(async () => {
   return { default: module.TraceDetail }
 })
 
+const ExperimentsPage = lazy(async () => { const module = await import('@/pages/Experiments'); return { default: module.Experiments } })
+
 interface AppLayoutProps {
   onSignOut: () => void
 }
@@ -61,6 +63,7 @@ function AppLayout({ onSignOut }: AppLayoutProps) {
     { to: '/', labelKey: 'nav.dashboard', icon: LayoutDashboard },
     { to: '/playground', labelKey: 'nav.playground', icon: Zap },
     { to: '/traces', labelKey: 'nav.traces', icon: Network },
+    { to: '/experiments', labelKey: 'experiments.title', icon: FlaskConical },
     { to: '/settings', labelKey: 'nav.settings', icon: SettingsIcon },
   ]
 
@@ -256,6 +259,8 @@ function AppLayout({ onSignOut }: AppLayoutProps) {
                 <Route path={logRequestDiffRoute} element={<LogDiffPage />} />
                 <Route path="/traces" element={<Traces />} />
                 <Route path="/traces/:traceId" element={<TraceDetailPage />} />
+                <Route path="/experiments" element={<ExperimentsPage />} />
+                <Route path="/experiments/:experimentId" element={<ExperimentsPage />} />
                 <Route path="/playground" element={<PlaygroundPage />} />
                 <Route path="/logging-rules" element={<Navigate to="/settings/logging/models" replace />} />
                 <Route path="/logging-rules/models" element={<Navigate to="/settings/logging/models" replace />} />

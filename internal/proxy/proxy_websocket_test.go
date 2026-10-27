@@ -16,6 +16,14 @@ import (
 )
 
 func TestProxyWebSocketUpgradeSurvivesRequestTimeout(t *testing.T) {
+	testWebSocketTunnelSurvivesTimeout(t, false)
+}
+
+func TestProxyWebSocketObservationFailureKeepsTunnelRunning(t *testing.T) {
+	testWebSocketTunnelSurvivesTimeout(t, true)
+}
+
+func testWebSocketTunnelSurvivesTimeout(t *testing.T, correlation bool) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isWebSocketUpgrade(r.Header) {
 			http.Error(w, "missing websocket upgrade", http.StatusBadRequest)
@@ -49,7 +57,8 @@ func TestProxyWebSocketUpgradeSurvivesRequestTimeout(t *testing.T) {
 	defer upstream.Close()
 
 	cfg := &config.Config{
-		Server: config.ServerConfig{ProxyDomains: []string{"localhost"}},
+		Correlation: config.CorrelationConfig{Enabled: correlation},
+		Server:      config.ServerConfig{ProxyDomains: []string{"localhost"}},
 		Upstreams: map[string]config.UpstreamConfig{
 			"openai": {
 				Target:  upstream.URL,

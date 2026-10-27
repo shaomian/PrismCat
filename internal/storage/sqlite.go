@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,12 +16,18 @@ import (
 
 // SQLiteRepository implements Repository using SQLite.
 type SQLiteRepository struct {
-	db *sql.DB
+	writeMu  sync.Mutex
+	db       *sql.DB
+	captures captureRegistry
 }
 
 // NewSQLiteRepository creates a new SQLite repository.
 func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	separator := "?"
+	if strings.Contains(dbPath, "?") {
+		separator = "&"
+	}
+	db, err := sql.Open("sqlite", dbPath+separator+"_pragma=busy_timeout%3D5000")
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -214,7 +221,10 @@ func (r *SQLiteRepository) migrate() error {
 	if _, err := r.db.Exec("CREATE INDEX IF NOT EXISTS idx_logs_trace_id_seq ON request_logs(trace_id, trace_seq)"); err != nil {
 		return fmt.Errorf("create trace_id_seq index: %w", err)
 	}
-	return nil
+	if err := r.migrateCorrelation(); err != nil {
+		return err
+	}
+	return r.migrateExperiments()
 }
 
 func (r *SQLiteRepository) ensureLogColumn(colName, colDef string) error {
@@ -377,6 +387,8 @@ func parseTimeString(s string) (time.Time, error) {
 
 // SaveLog inserts or updates a log entry (upsert by id).
 func (r *SQLiteRepository) SaveLog(log *RequestLog) error {
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
 	if log.ID == "" {
 		log.ID = uuid.New().String()
 	}
@@ -385,6 +397,10 @@ func (r *SQLiteRepository) SaveLog(log *RequestLog) error {
 	}
 	log.CreatedAt = log.CreatedAt.UTC()
 
+	explicitID := log.TraceID
+	if log.TraceAssociation != nil && log.TraceAssociation.Source != "explicit" {
+		explicitID = ""
+	}
 	reqHeaders, _ := json.Marshal(log.RequestHeaders)
 	respHeaders, _ := json.Marshal(log.ResponseHeaders)
 	overrideRules, _ := json.Marshal(log.RequestOverrideRules)
@@ -403,8 +419,8 @@ func (r *SQLiteRepository) SaveLog(log *RequestLog) error {
 		request_override_applied, request_override_rules, request_override_error,
 		request_header_override_applied, request_header_override_changes, request_headers_original,
 		trace_id, parent_log_id, trace_seq,
-		usage_input_tokens, usage_output_tokens, usage_total_tokens, usage_raw, usage_source
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		usage_input_tokens, usage_output_tokens, usage_total_tokens, usage_raw, usage_source, explicit_trace_id, capture_run_id, websocket_info
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		created_at = excluded.created_at,
 		created_at_unix_ms = excluded.created_at_unix_ms,
@@ -443,9 +459,17 @@ func (r *SQLiteRepository) SaveLog(log *RequestLog) error {
 		usage_output_tokens = excluded.usage_output_tokens,
 		usage_total_tokens = excluded.usage_total_tokens,
 		usage_raw = excluded.usage_raw,
-		usage_source = excluded.usage_source
+		usage_source = excluded.usage_source,
+		explicit_trace_id = excluded.explicit_trace_id,
+		capture_run_id = excluded.capture_run_id,
+		websocket_info = excluded.websocket_info
 	`
 
+	websocketInfo := ""
+	if log.WebSocket != nil {
+		b, _ := json.Marshal(log.WebSocket)
+		websocketInfo = string(b)
+	}
 	_, err := r.db.Exec(query,
 		log.ID, log.CreatedAt, log.CreatedAt.UnixMilli(), log.Upstream, log.UpstreamTarget, log.TargetURL, log.Method, log.Path, log.Query,
 		string(reqHeaders), log.RequestBody, log.RequestBodyOriginal, log.RequestBodyFinal, log.RequestBodyRef, log.RequestBodySize,
@@ -454,7 +478,7 @@ func (r *SQLiteRepository) SaveLog(log *RequestLog) error {
 		log.RequestOverrideApplied, string(overrideRules), log.RequestOverrideError,
 		log.RequestHeaderOverrideApplied, string(log.RequestHeaderOverrideChanges), reqHeadersOriginal,
 		log.TraceID, log.ParentLogID, log.TraceSeq,
-		log.UsageInputTokens, log.UsageOutputTokens, log.UsageTotalTokens, log.UsageRaw, log.UsageSource,
+		log.UsageInputTokens, log.UsageOutputTokens, log.UsageTotalTokens, log.UsageRaw, log.UsageSource, explicitID, log.CaptureRunID, websocketInfo,
 	)
 	return err
 }
@@ -467,7 +491,7 @@ func (r *SQLiteRepository) GetLog(id string) (*RequestLog, error) {
 		streaming, latency_ms, error, truncated, tag,
 		request_override_applied, request_override_rules, request_override_error,
 		request_header_override_applied, request_header_override_changes, request_headers_original,
-		trace_id, parent_log_id, trace_seq,
+		trace_id, parent_log_id, trace_seq, trace_info, capture_run_id, websocket_info,
 		usage_input_tokens, usage_output_tokens, usage_total_tokens, usage_raw, usage_source
 	FROM request_logs WHERE id = ?
 	`
@@ -507,7 +531,7 @@ func (r *SQLiteRepository) ListLogs(filter LogFilter) ([]*RequestLog, int64, err
 		l.streaming, l.latency_ms, l.error, l.truncated, l.tag, l.request_override_applied,
 		COALESCE(a.saved, 0), COALESCE(a.status, 'none'), COALESCE(a.note, ''), COALESCE(a.labels, '[]'),
 		COALESCE(a.created_at_unix_ms, 0), COALESCE(a.updated_at_unix_ms, 0),
-		l.trace_id, l.parent_log_id, l.trace_seq,
+		l.trace_id, l.parent_log_id, l.trace_seq, l.trace_info, l.capture_run_id, l.websocket_info,
 		l.usage_input_tokens, l.usage_output_tokens, l.usage_total_tokens
 	FROM request_logs l
 	LEFT JOIN log_annotations a ON a.log_id = l.id
@@ -581,6 +605,10 @@ func buildLogWhereClause(filter LogFilter) (string, []interface{}) {
 		conditions = append(conditions, "l.tag = ?")
 		args = append(args, filter.Tag)
 	}
+	if filter.CaptureRunID != "" {
+		conditions = append(conditions, "l.capture_run_id = ?")
+		args = append(args, filter.CaptureRunID)
+	}
 	if filter.TraceID != "" {
 		conditions = append(conditions, "l.trace_id = ?")
 		args = append(args, filter.TraceID)
@@ -620,7 +648,7 @@ func (r *SQLiteRepository) ExportLogs(ctx context.Context, filter LogFilter, eac
 		l.streaming, l.latency_ms, l.error, l.truncated, l.tag,
 		l.request_override_applied, l.request_override_rules, l.request_override_error,
 		l.request_header_override_applied, l.request_header_override_changes, l.request_headers_original,
-		l.trace_id, l.parent_log_id, l.trace_seq,
+		l.trace_id, l.parent_log_id, l.trace_seq, l.trace_info, l.capture_run_id, l.websocket_info,
 		l.usage_input_tokens, l.usage_output_tokens, l.usage_total_tokens, l.usage_raw, l.usage_source,
 		COALESCE(a.saved, 0), COALESCE(a.status, 'none'), COALESCE(a.note, ''), COALESCE(a.labels, '[]'),
 		COALESCE(a.created_at_unix_ms, 0), COALESCE(a.updated_at_unix_ms, 0)
@@ -651,92 +679,11 @@ func (r *SQLiteRepository) ExportLogs(ctx context.Context, filter LogFilter, eac
 const deleteBatchSize = 2000
 
 func (r *SQLiteRepository) DeleteLogsBefore(before time.Time) (int64, error) {
-	cutoffMS := before.UTC().UnixMilli()
-	var totalDeleted int64
-	for {
-		tx, err := r.db.Begin()
-		if err != nil {
-			return totalDeleted, err
-		}
-
-		result, err := tx.Exec(`
-			DELETE FROM request_logs
-			WHERE id IN (
-				SELECT id FROM request_logs
-				WHERE created_at_unix_ms < ?
-				  AND id NOT IN (SELECT log_id FROM log_annotations WHERE saved = 1)
-				LIMIT ?
-			)
-		`, cutoffMS, deleteBatchSize)
-		if err != nil {
-			_ = tx.Rollback()
-			return totalDeleted, err
-		}
-		if _, err := tx.Exec(`
-			DELETE FROM log_annotations
-			WHERE log_id NOT IN (SELECT id FROM request_logs)
-		`); err != nil {
-			_ = tx.Rollback()
-			return totalDeleted, err
-		}
-		if err := tx.Commit(); err != nil {
-			return totalDeleted, err
-		}
-		n, _ := result.RowsAffected()
-		totalDeleted += n
-		if n < deleteBatchSize {
-			break
-		}
-	}
-	return totalDeleted, nil
+	return r.deleteTraceGroups(&before, 0)
 }
 
-// DeleteOldestLogs removes the oldest unsaved logs, up to count records.
 func (r *SQLiteRepository) DeleteOldestLogs(count int) (int64, error) {
-	if count <= 0 {
-		return 0, nil
-	}
-	var totalDeleted int64
-	for count > 0 {
-		batch := count
-		if batch > deleteBatchSize {
-			batch = deleteBatchSize
-		}
-		tx, err := r.db.Begin()
-		if err != nil {
-			return totalDeleted, err
-		}
-		result, err := tx.Exec(`
-			DELETE FROM request_logs
-			WHERE id IN (
-				SELECT id FROM request_logs
-				WHERE id NOT IN (SELECT log_id FROM log_annotations WHERE saved = 1)
-				ORDER BY created_at_unix_ms ASC
-				LIMIT ?
-			)
-		`, batch)
-		if err != nil {
-			_ = tx.Rollback()
-			return totalDeleted, err
-		}
-		if _, err := tx.Exec(`
-			DELETE FROM log_annotations
-			WHERE log_id NOT IN (SELECT id FROM request_logs)
-		`); err != nil {
-			_ = tx.Rollback()
-			return totalDeleted, err
-		}
-		if err := tx.Commit(); err != nil {
-			return totalDeleted, err
-		}
-		n, _ := result.RowsAffected()
-		totalDeleted += n
-		count -= batch
-		if n < int64(batch) {
-			break
-		}
-	}
-	return totalDeleted, nil
+	return r.deleteTraceGroups(nil, int64(count))
 }
 
 // WALCheckpoint truncates the WAL file to reclaim disk space.
@@ -748,10 +695,7 @@ func (r *SQLiteRepository) WALCheckpoint() error {
 // CountDeletableLogs returns the number of logs not marked as saved.
 func (r *SQLiteRepository) CountDeletableLogs() (int64, error) {
 	var count int64
-	err := r.db.QueryRow(`
-		SELECT COUNT(*) FROM request_logs
-		WHERE id NOT IN (SELECT log_id FROM log_annotations WHERE saved = 1)
-	`).Scan(&count)
+	err := r.db.QueryRow("SELECT COALESCE(SUM(log_count),0) FROM trace_retention_groups").Scan(&count)
 	return count, err
 }
 
@@ -899,127 +843,7 @@ func (r *SQLiteRepository) GetStats(since *time.Time) (*LogStats, error) {
 }
 
 func (r *SQLiteRepository) ListTraces(filter TraceFilter) ([]TraceSummary, int64, error) {
-	var havingConds []string
-	var havingArgs []interface{}
-	var whereConds []string
-	var whereArgs []interface{}
-
-	whereConds = append(whereConds, "trace_id != ''")
-
-	if filter.TraceID != "" {
-		whereConds = append(whereConds, "trace_id LIKE ?")
-		whereArgs = append(whereArgs, "%"+filter.TraceID+"%")
-	}
-	if filter.Upstream != "" {
-		whereConds = append(whereConds, "upstream = ?")
-		whereArgs = append(whereArgs, filter.Upstream)
-	}
-	if filter.Tag != "" {
-		whereConds = append(whereConds, "tag = ?")
-		whereArgs = append(whereArgs, filter.Tag)
-	}
-	if filter.StartTime != nil {
-		whereConds = append(whereConds, "created_at_unix_ms >= ?")
-		whereArgs = append(whereArgs, filter.StartTime.UTC().UnixMilli())
-	}
-	if filter.EndTime != nil {
-		whereConds = append(whereConds, "created_at_unix_ms <= ?")
-		whereArgs = append(whereArgs, filter.EndTime.UTC().UnixMilli())
-	}
-
-	if filter.HasError != nil {
-		if *filter.HasError {
-			havingConds = append(havingConds, "error_count > 0")
-		} else {
-			havingConds = append(havingConds, "error_count = 0")
-		}
-	}
-
-	where := "WHERE " + strings.Join(whereConds, " AND ")
-	having := ""
-	if len(havingConds) > 0 {
-		having = "HAVING " + strings.Join(havingConds, " AND ")
-	}
-
-	allArgs := append([]interface{}{}, whereArgs...)
-	allArgs = append(allArgs, havingArgs...)
-
-	var countQuery string
-	var countArgs []interface{}
-	if having == "" {
-		countQuery = fmt.Sprintf("SELECT COUNT(DISTINCT trace_id) FROM request_logs %s", where)
-		countArgs = whereArgs
-	} else {
-		countQuery = fmt.Sprintf(`
-			SELECT COUNT(*) FROM (
-				SELECT trace_id FROM request_logs %s GROUP BY trace_id %s
-			)
-		`, where, having)
-		countArgs = allArgs
-	}
-	var total int64
-	if err := r.db.QueryRow(countQuery, countArgs...).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-
-	if filter.Limit <= 0 {
-		filter.Limit = 50
-	}
-	if filter.Limit > 1000 {
-		filter.Limit = 1000
-	}
-
-	query := fmt.Sprintf(`
-		SELECT trace_id,
-			COUNT(*) as request_count,
-			MIN(created_at_unix_ms) as first_time,
-			MAX(created_at_unix_ms) as last_time,
-			SUM(latency_ms) as total_latency,
-			SUM(CASE WHEN (error IS NOT NULL AND error != '') OR status_code >= 400 THEN 1 ELSE 0 END) as error_count,
-			SUM(usage_input_tokens) as usage_input_tokens,
-			SUM(usage_output_tokens) as usage_output_tokens,
-			SUM(usage_total_tokens) as usage_total_tokens,
-			GROUP_CONCAT(DISTINCT upstream) as upstreams,
-			GROUP_CONCAT(DISTINCT CASE WHEN tag != '' THEN tag END) as tags
-		FROM request_logs
-		%s
-		GROUP BY trace_id
-		%s
-		ORDER BY MAX(created_at_unix_ms) DESC
-		LIMIT ? OFFSET ?
-	`, where, having)
-
-	pagArgs := append(allArgs, filter.Limit, filter.Offset)
-	rows, err := r.db.Query(query, pagArgs...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	var traces []TraceSummary
-	for rows.Next() {
-		var t TraceSummary
-		var upstreamsCSV, tagsCSV sql.NullString
-		var usageInput, usageOutput, usageTotal sql.NullInt64
-		if err := rows.Scan(&t.TraceID, &t.RequestCount, &t.FirstTime, &t.LastTime,
-			&t.TotalLatency, &t.ErrorCount, &usageInput, &usageOutput, &usageTotal, &upstreamsCSV, &tagsCSV); err != nil {
-			return nil, 0, err
-		}
-		t.UsageInputTokens = nullIntPtr(usageInput)
-		t.UsageOutputTokens = nullIntPtr(usageOutput)
-		t.UsageTotalTokens = nullIntPtr(usageTotal)
-		if upstreamsCSV.Valid && upstreamsCSV.String != "" {
-			t.Upstreams = strings.Split(upstreamsCSV.String, ",")
-		}
-		if tagsCSV.Valid && tagsCSV.String != "" {
-			t.Tags = strings.Split(tagsCSV.String, ",")
-		}
-		traces = append(traces, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
-	return traces, total, nil
+	return r.listTraceCatalog(filter)
 }
 
 func (r *SQLiteRepository) GetTraceRequests(traceID string) ([]*RequestLog, error) {
@@ -1031,7 +855,7 @@ func (r *SQLiteRepository) GetTraceRequests(traceID string) ([]*RequestLog, erro
 		l.streaming, l.latency_ms, l.error, l.truncated, l.tag,
 		l.request_override_applied, l.request_override_rules, l.request_override_error,
 		l.request_header_override_applied, l.request_header_override_changes, l.request_headers_original,
-		l.trace_id, l.parent_log_id, l.trace_seq,
+		l.trace_id, l.parent_log_id, l.trace_seq, l.trace_info, l.capture_run_id, l.websocket_info,
 		l.usage_input_tokens, l.usage_output_tokens, l.usage_total_tokens, l.usage_raw, l.usage_source,
 		COALESCE(a.saved, 0), COALESCE(a.status, 'none'), COALESCE(a.note, ''), COALESCE(a.labels, '[]'),
 		COALESCE(a.created_at_unix_ms, 0), COALESCE(a.updated_at_unix_ms, 0)
@@ -1060,16 +884,17 @@ func (r *SQLiteRepository) GetTraceRequests(traceID string) ([]*RequestLog, erro
 	return logs, nil
 }
 
-// GetTraceFingerprint 返回调用链的低成本变更信号（条数 + 最新创建时间），
+// GetTraceFingerprint includes the persisted revision for body and membership updates.
+// 条数、最新创建时间和修订版本共同决定缓存失效，
 // 走 idx_logs_trace_id 索引，用于调用链级缓存的失效判断。
 func (r *SQLiteRepository) GetTraceFingerprint(traceID string) (TraceFingerprint, error) {
 	const query = `
-	SELECT COUNT(*), COALESCE(MAX(created_at_unix_ms), 0)
+	SELECT COUNT(*), COALESCE(MAX(created_at_unix_ms), 0), COALESCE((SELECT revision FROM trace_revisions WHERE trace_id=?),0)
 	FROM request_logs
 	WHERE trace_id = ?
 	`
 	var fp TraceFingerprint
-	err := r.db.QueryRow(query, traceID).Scan(&fp.Count, &fp.LastMs)
+	err := r.db.QueryRow(query, traceID, traceID).Scan(&fp.Count, &fp.LastMs, &fp.Revision)
 	if err != nil {
 		return TraceFingerprint{}, err
 	}
@@ -1115,6 +940,7 @@ func (r *SQLiteRepository) ListBlobRefs() ([]string, error) {
 
 func (r *SQLiteRepository) scanLogSummary(scanner interface{ Scan(...interface{}) error }) (*RequestLog, error) {
 	var log RequestLog
+	var traceInfo, websocketInfo string
 	var streaming, truncated, overrideApplied int
 	var annotationSaved int
 	var annotationLabels string
@@ -1127,7 +953,7 @@ func (r *SQLiteRepository) scanLogSummary(scanner interface{ Scan(...interface{}
 		&streaming, &log.Latency, &log.Error, &truncated, &log.Tag, &overrideApplied,
 		&annotationSaved, &log.Annotation.Status, &log.Annotation.Note, &annotationLabels,
 		&annotationCreatedMS, &annotationUpdatedMS,
-		&log.TraceID, &log.ParentLogID, &log.TraceSeq,
+		&log.TraceID, &log.ParentLogID, &log.TraceSeq, &traceInfo, &log.CaptureRunID, &websocketInfo,
 		&usageInput, &usageOutput, &usageTotal,
 	)
 	if err != nil {
@@ -1151,11 +977,16 @@ func (r *SQLiteRepository) scanLogSummary(scanner interface{ Scan(...interface{}
 		log.Annotation.UpdatedAt = time.UnixMilli(annotationUpdatedMS).UTC()
 	}
 
+	decodeTraceInfo(&log, traceInfo)
+	if websocketInfo != "" {
+		_ = json.Unmarshal([]byte(websocketInfo), &log.WebSocket)
+	}
 	return &log, nil
 }
 
 func (r *SQLiteRepository) scanLog(scanner interface{ Scan(...interface{}) error }) (*RequestLog, error) {
 	var log RequestLog
+	var traceInfo, websocketInfo string
 	var reqHeaders, respHeaders, overrideRules string
 	var streaming, truncated, overrideApplied int
 	var headerOverrideApplied int
@@ -1170,7 +1001,7 @@ func (r *SQLiteRepository) scanLog(scanner interface{ Scan(...interface{}) error
 		&streaming, &log.Latency, &log.Error, &truncated, &log.Tag,
 		&overrideApplied, &overrideRules, &log.RequestOverrideError,
 		&headerOverrideApplied, &headerOverrideChanges, &reqHeadersOriginal,
-		&log.TraceID, &log.ParentLogID, &log.TraceSeq,
+		&log.TraceID, &log.ParentLogID, &log.TraceSeq, &traceInfo, &log.CaptureRunID, &websocketInfo,
 		&usageInput, &usageOutput, &usageTotal, &usageRaw, &usageSource,
 	)
 	if err != nil {
@@ -1208,11 +1039,16 @@ func (r *SQLiteRepository) scanLog(scanner interface{ Scan(...interface{}) error
 		log.RequestHeadersOriginal = unmarshalHeaders(reqHeadersOriginal)
 	}
 
+	decodeTraceInfo(&log, traceInfo)
+	if websocketInfo != "" {
+		_ = json.Unmarshal([]byte(websocketInfo), &log.WebSocket)
+	}
 	return &log, nil
 }
 
 func (r *SQLiteRepository) scanLogWithAnnotation(scanner interface{ Scan(...interface{}) error }) (*RequestLog, error) {
 	var log RequestLog
+	var traceInfo, websocketInfo string
 	var reqHeaders, respHeaders, overrideRules string
 	var streaming, truncated, overrideApplied int
 	var headerOverrideApplied int
@@ -1230,7 +1066,7 @@ func (r *SQLiteRepository) scanLogWithAnnotation(scanner interface{ Scan(...inte
 		&streaming, &log.Latency, &log.Error, &truncated, &log.Tag,
 		&overrideApplied, &overrideRules, &log.RequestOverrideError,
 		&headerOverrideApplied, &headerOverrideChanges, &reqHeadersOriginal,
-		&log.TraceID, &log.ParentLogID, &log.TraceSeq,
+		&log.TraceID, &log.ParentLogID, &log.TraceSeq, &traceInfo, &log.CaptureRunID, &websocketInfo,
 		&usageInput, &usageOutput, &usageTotal, &usageRaw, &usageSource,
 		&annotationSaved, &log.Annotation.Status, &log.Annotation.Note, &annotationLabels,
 		&annotationCreatedMS, &annotationUpdatedMS,
@@ -1280,6 +1116,10 @@ func (r *SQLiteRepository) scanLogWithAnnotation(scanner interface{ Scan(...inte
 		log.Annotation.UpdatedAt = time.UnixMilli(annotationUpdatedMS).UTC()
 	}
 
+	decodeTraceInfo(&log, traceInfo)
+	if websocketInfo != "" {
+		_ = json.Unmarshal([]byte(websocketInfo), &log.WebSocket)
+	}
 	return &log, nil
 }
 

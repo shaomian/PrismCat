@@ -83,6 +83,9 @@ func FormatText(tl *Timeline, opts FormatOptions) string {
 // requestDigest 生成单个请求的单行摘要（用于省略段，保留 drill-down 所需的日志 ID）
 func requestDigest(req RequestEntry) string {
 	var b strings.Builder
+	if a := req.TraceAssociation; a != nil {
+		fmt.Fprintf(&b, "[归属 source=%s reason=%s state=%s parents=%v；分组不等于已证明因果关系] ", a.Source, a.Reason, a.State, a.Parents)
+	}
 	fmt.Fprintf(&b, "[请求 #%d](日志ID=%s) 状态=%d", req.Seq, req.LogID, req.StatusCode)
 	if req.Model != "" {
 		fmt.Fprintf(&b, " 模型=%s", req.Model)
@@ -133,6 +136,9 @@ func truncateOneLine(s string, maxChars int) string {
 
 func formatRequest(req RequestEntry, maxEvent int) string {
 	var b strings.Builder
+	if a := req.TraceAssociation; a != nil {
+		fmt.Fprintf(&b, "归属：来源=%s，依据=%s，状态=%s，前序日志=%v；分组不等于已证明因果关系。\n", a.Source, a.Reason, a.State, a.Parents)
+	}
 
 	fmt.Fprintf(&b, "[请求 #%d](日志ID=%s) 上游=%s %s", req.Seq, req.LogID, req.Upstream, req.Path)
 	if req.Model != "" {

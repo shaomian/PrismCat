@@ -180,6 +180,118 @@ func TestRunChatNoFallbackOnServerError(t *testing.T) {
 	}
 }
 
+// 复现 DeepSeek 在第七轮工具被撤掉后仍输出 DSML 的情况。
+// 收尾必须保留查证结果、清掉临时文本，并且最多额外整理一次。
+func TestRunChatFinalizesToolEvidenceAndRecoversDSML(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var payload struct {
+			Tools    json.RawMessage  `json:"tools"`
+			Messages []map[string]any `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if calls <= maxToolRounds {
+			if len(payload.Tools) == 0 {
+				t.Error("tools withdrawn before the collection limit")
+			}
+			raw, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{
+				"content":    "Reading evidence…",
+				"tool_calls": []any{map[string]any{"index": 0, "id": fmt.Sprintf("call-%d", calls), "function": map[string]any{"name": ToolGetRequestDetail, "arguments": fmt.Sprintf(`{"log_id":"log-%d"}`, calls)}}},
+			}}}})
+			sse(w, string(raw))
+		} else {
+			if len(payload.Tools) != 0 {
+				t.Error("finalization can still request tools")
+			}
+			for _, m := range payload.Messages {
+				if m["role"] == "tool" || m["tool_calls"] != nil {
+					t.Error("finalization still uses the tool conversation format")
+				}
+			}
+			raw, _ := json.Marshal(payload.Messages)
+			for _, want := range []string{"Original question", "Return JSON", "READ_EVIDENCE", "log-1", "log-6", "untrusted data"} {
+				if !strings.Contains(string(raw), want) {
+					t.Errorf("finalization lost %q", want)
+				}
+			}
+			last := payload.Messages[len(payload.Messages)-1]
+			if last["role"] != "user" || last["content"] != finalAnswerInstruction {
+				t.Error("finalization missing explicit final-answer instruction")
+			}
+			text := `<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="get_request_detail"></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>`
+			if calls > maxToolRounds+1 {
+				text = `{"summary":"Based on the evidence already read"}`
+			}
+			raw, _ = json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": text}, "finish_reason": "stop"}}})
+			sse(w, string(raw))
+		}
+		sse(w, `{"choices":[],"usage":{"total_tokens":10}}`)
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+	var body strings.Builder
+	result, err := RunChat(context.Background(), config.AnalysisConfig{BaseURL: server.URL, Model: "mock"},
+		[]Message{{Role: "system", Content: "Return JSON"}, {Role: "user", Content: "Original question"}}, StreamOptions{}, funcExecutor{result: "READ_EVIDENCE"},
+		Callbacks{OnDelta: func(s string) error { body.WriteString(s); return nil }, OnReset: func() error { body.Reset(); return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Rounds != maxToolRounds+2 || result.ToolCalls != maxToolRounds || calls != maxToolRounds+2 {
+		t.Fatalf("unexpected collection or retry count: %+v, requests=%d", result, calls)
+	}
+	if result.Content != body.String() || !json.Valid([]byte(result.Content)) {
+		t.Fatalf("tool markup or provisional text leaked into final output: %q / %q", result.Content, body.String())
+	}
+	if result.Usage["total_tokens"] != float64(calls*10) {
+		t.Fatalf("finalization usage not counted: %v", result.Usage)
+	}
+}
+
+func TestRunChatToolTextRetryIsBounded(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		t.Run(fmt.Sprint("native=", native), func(t *testing.T) {
+			var calls int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				w.Header().Set("Content-Type", "text/event-stream")
+				if native {
+					sse(w, `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"unexpected","function":{"name":"get_request_detail","arguments":"{}"}}]}}]}`)
+				} else {
+					sse(w, `{"choices":[{"delta":{"content":"<｜｜DSML｜｜ calls>unexecuted</｜｜DSML｜｜ calls>"},"finish_reason":"stop"}]}`)
+				}
+				sse(w, `{"choices":[],"usage":{"total_tokens":10}}`)
+				fmt.Fprint(w, "data: [DONE]\n\n")
+			}))
+			defer server.Close()
+			result, err := RunChat(context.Background(), config.AnalysisConfig{BaseURL: server.URL, Model: "mock"},
+				[]Message{{Role: "user", Content: "Answer now"}}, StreamOptions{}, nil, Callbacks{})
+			if !errors.Is(err, ErrNoFinalAnswer) || calls != 2 || result.ToolCalls != 0 || result.Content != "" {
+				t.Fatalf("unexpected tool text was accepted or retried indefinitely: result=%+v calls=%d err=%v", result, calls, err)
+			}
+			if result.Usage["total_tokens"] != float64(20) {
+				t.Fatalf("failed finalization usage lost: %v", result.Usage)
+			}
+		})
+	}
+}
+
+func TestRunChatNonStreamingFinalContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"complete answer"}}]}`)
+	}))
+	defer server.Close()
+	result, err := RunChat(context.Background(), config.AnalysisConfig{BaseURL: server.URL, Model: "mock"},
+		[]Message{{Role: "user", Content: "Question"}}, StreamOptions{}, nil, Callbacks{})
+	if err != nil || result.Content != "complete answer" {
+		t.Fatalf("non-streaming output lost: %+v %v", result, err)
+	}
+}
+
 type funcExecutor struct {
 	result string
 }

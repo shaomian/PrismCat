@@ -23,7 +23,7 @@ type tlCacheEntry struct {
 
 // traceTimelineCache 按 traceID 缓存完整构建的时间线。
 // 读取前用 GetTraceFingerprint 做一次低成本查询判断失效
-// （request_logs 只有插入没有在位内容更新，条数+最新创建时间即可覆盖），
+// （包含日志内容与归属修订，覆盖异步快照及人工/自动分组变化），
 // 命中后用 timeline.TruncateEvents 派生各种截断级别，
 // blob 恢复与 JSON 解析对每条调用链只发生一次。
 type traceTimelineCache struct {
@@ -72,6 +72,17 @@ func (c *traceTimelineCache) put(traceID string, fp storage.TraceFingerprint, fu
 			break
 		}
 		c.removeLocked(oldest.Value.(*tlCacheEntry))
+	}
+}
+
+// Drop deleted trace bodies promptly instead of waiting for the next lookup.
+func (c *traceTimelineCache) invalidate(traceIDs []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, id := range traceIDs {
+		if entry := c.entries[id]; entry != nil {
+			c.removeLocked(entry)
+		}
 	}
 }
 

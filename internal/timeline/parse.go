@@ -411,7 +411,7 @@ func geminiPartEvents(role string, parts []any) []message {
 			if fc, ok := part["functionCall"].(map[string]any); ok {
 				out = append(out, makeMessage(Event{
 					Role: "assistant", Kind: "tool_call",
-					ToolName: asString(fc["name"]), ToolArgs: canonicalJSON(fc["args"]),
+					ToolName: asString(fc["name"]), ToolArgs: canonicalJSON(fc["args"]), ToolCallID: asString(fc["id"]),
 				}))
 			}
 		case part["functionResponse"] != nil:
@@ -419,7 +419,7 @@ func geminiPartEvents(role string, parts []any) []message {
 			if fr, ok := part["functionResponse"].(map[string]any); ok {
 				out = append(out, makeMessage(Event{
 					Role: "tool", Kind: "tool_result",
-					Content: canonicalJSON(fr["response"]), ToolName: asString(fr["name"]),
+					Content: canonicalJSON(fr["response"]), ToolName: asString(fr["name"]), ToolCallID: asString(fr["id"]),
 				}))
 			}
 		case part["inlineData"] != nil || part["inline_data"] != nil:
