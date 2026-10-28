@@ -1,5 +1,33 @@
 # Release notes / 更新记录
 
+## v2.2.0
+
+### 新增与改进
+
+- **调用链人工整理**：支持整条调用链合并、多选请求移入或拆分为新 Trace；显式指定 Trace ID 的任务支持拆分。合并后旧链接可定位到目标任务，已有复盘保留原始请求范围与证据。
+- **任务管理与标签**：新增置顶，保留收藏和归档；手动拆分任务显示来源标记。标签支持输入、逐项移除、列表展示、搜索及点击筛选。
+- **调用链列表与预览**：长 ID 以首尾片段显示，可查看和复制完整值；错误按需显示数量标记，最近请求包含日期。悬停预览补充名称、备注、上游与首次／最近请求时间。
+- **复盘工作页与 Markdown 导出**：按任务、观测点和结果分区组织；AI 建议观测点入口更清晰，报告支持导出 Markdown。
+- **统一交互与视觉**：任务操作按悬停或键盘聚焦出现，简化重复操作；统一标签、按钮、输入框、页签和卡片样式。
+- **日志收藏与使用体验**：日志“保存”改为“收藏”，移除待处理／已处理入口并保留旧数据；返回列表恢复筛选、页码和滚动位置，区分空列表与筛选无结果，改进 AI 连接、超时和失败重试提示。
+
+### 升级说明
+
+- 兼容现有配置和 SQLite 数据，沿用原始请求、显式 Trace ID 和日志正文；人工整理改变有效归组。
+- 日志旧处理状态不再显示，已有收藏及保留保护继续有效；取消收藏时同步清除该日志的旧处理状态。
+- 操作说明：[任务管理与清理](TASK_MANAGEMENT_CN.md)、[自动调用链](AUTO_TRACE_CN.md)、[对比实验与 AI 复盘](EXPERIMENTS_CN.md)。
+
+### English
+
+- Add whole-trace merging, multi-request moves and splitting, including splits of explicitly identified traces. Preserve historical review evidence and redirect merged trace links.
+- Add task pinning, split provenance, editable label chips, label search and exact label filters.
+- Refine trace lists with abbreviated IDs, full-ID viewing/copying, contextual error counts, dated timestamps and previews with notes, upstreams and request time ranges.
+- Organize review pages into task, observation and report sections, and export reports as Markdown.
+- Unify controls and contextual task actions; simplify log favorites while retaining existing annotations and retention protections.
+- Restore list navigation state, distinguish filtered empty results, and improve AI timeout, connection and retry feedback.
+
+Existing configuration and SQLite data remain compatible. Original request bodies and explicit trace identifiers are preserved when regrouping tasks. See [Task management](TASK_MANAGEMENT.md) and [Automatic traces](AUTO_TRACE.md).
+
 ## v2.1.0
 
 ### 新增与改进
