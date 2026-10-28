@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { DropdownMenu } from 'radix-ui'
-import { Archive, ArchiveRestore, ChevronDown, ListChecks, Loader2, Trash2, X } from 'lucide-react'
+import { Archive, ArchiveRestore, Ellipsis, ListChecks, Loader2, Pencil, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
 import { applyTaskChange, previewTaskChange, type TaskAction, type TaskChange, type TaskItem, type TaskKind, type TaskPreview } from '@/lib/task-management'
 import { Button } from '@/components/ui/button'
+import { TaskIconButton } from '@/components/TaskHover'
+import { cn } from '@/lib/utils'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 interface ManagementProps {
@@ -25,7 +27,11 @@ export function TaskSelectionToggle({ active, onToggle, disabled = false }: { ac
   </Button>
 }
 
-export function TaskActions({ name, ...props }: ManagementProps & { name: string }) {
+export function TaskMenuItem({ className, ...props }: ComponentProps<typeof DropdownMenu.Item>) {
+  return <DropdownMenu.Item {...props} className={cn('task-menu-item flex cursor-default select-none items-center gap-2 rounded px-3 py-2 text-sm outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:opacity-50', className)} />
+}
+
+export function TaskActions({ name, onEdit, editLabel, editShortcut = false, inline = false, deleteDisabled = false, extraItems, ...props }: ManagementProps & { name: string; onEdit?: () => void; editLabel?: string; editShortcut?: boolean; inline?: boolean; deleteDisabled?: boolean; extraItems?: ReactNode }) {
   const { t } = useTranslation()
   const [deleting, setDeleting] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -39,22 +45,25 @@ export function TaskActions({ name, ...props }: ManagementProps & { name: string
       toast.error(t(error instanceof ApiError && error.status === 409 ? 'task_management.blocked_notice' : 'task_management.failed'))
     } finally { setBusy(false) }
   }
-  const menuItem = 'flex cursor-default select-none items-center gap-2 rounded px-3 py-2 text-sm outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:opacity-50'
-  return <span className="relative inline-flex shrink-0" onClick={event => event.stopPropagation()}>
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild><Button type="button" variant="ghost" size="sm" className="group h-8 gap-1 px-2 text-xs font-normal text-muted-foreground hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground pointer-coarse:min-h-11" aria-label={t('task_management.actions_for', { name })} disabled={props.disabled || busy || !props.items.length}>
-        {t('task_management.manage')}{busy ? <Loader2 className="size-3.5 animate-spin" /> : <ChevronDown aria-hidden="true" className="size-3.5 transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none" />}
-      </Button></DropdownMenu.Trigger>
+  const disabled = props.disabled || busy || !props.items.length
+  return <span className="relative inline-flex shrink-0 items-center gap-0.5" aria-busy={busy} onClick={event => event.stopPropagation()}>
+    {onEdit && (inline || editShortcut) && <TaskIconButton label={editLabel || t('common.edit')} className={inline ? 'task-direct-action' : 'task-secondary-action'} disabled={disabled} onClick={onEdit}><Pencil className="size-3.5" /></TaskIconButton>}
+    {inline && props.kind !== 'run' && <TaskIconButton label={t(props.archived ? 'task_management.restore' : 'task_management.archive')} className="task-direct-action" disabled={disabled} onClick={() => void change(props.archived ? 'restore' : 'archive')}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : props.archived ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}</TaskIconButton>}
+    {inline ? <TaskIconButton label={t(`task_management.delete_label.${props.kind}`)} className="task-direct-action hover:bg-destructive/10 hover:text-destructive" disabled={disabled || deleteDisabled} onClick={() => setDeleting(true)}><Trash2 className="size-3.5" /></TaskIconButton> : <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild><TaskIconButton label={t('task_management.more_for', { name })} className="task-menu-trigger data-[state=open]:bg-accent data-[state=open]:text-accent-foreground" disabled={disabled}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Ellipsis className="size-4" />}</TaskIconButton></DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={5} className="z-50 min-w-40 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md">
-          {props.kind !== 'run' && <DropdownMenu.Item className={menuItem} onSelect={() => void change(props.archived ? 'restore' : 'archive')}>
+          {onEdit && <TaskMenuItem onSelect={onEdit}><Pencil className="size-4" />{editLabel || t('common.edit')}</TaskMenuItem>}
+          {extraItems}
+          {(onEdit || extraItems) && <DropdownMenu.Separator className="my-1 h-px bg-border" />}
+          {props.kind !== 'run' && <TaskMenuItem onSelect={() => void change(props.archived ? 'restore' : 'archive')}>
             {props.archived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />}{t(props.archived ? 'task_management.restore' : 'task_management.archive')}
-          </DropdownMenu.Item>}
+          </TaskMenuItem>}
           {props.kind !== 'run' && <DropdownMenu.Separator className="my-1 h-px bg-border" />}
-          <DropdownMenu.Item className={`${menuItem} text-destructive data-[highlighted]:text-destructive`} onSelect={() => setDeleting(true)}><Trash2 className="size-4" />{t(`task_management.delete_label.${props.kind}`)}</DropdownMenu.Item>
+          <TaskMenuItem disabled={deleteDisabled} className="text-destructive data-[highlighted]:text-destructive" onSelect={() => setDeleting(true)}><Trash2 className="size-4" />{t(`task_management.delete_label.${props.kind}`)}</TaskMenuItem>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+    </DropdownMenu.Root>}
     {deleting && <TaskDeleteDialog {...props} name={name} onClose={() => setDeleting(false)} />}
   </span>
 }

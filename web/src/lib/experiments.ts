@@ -2,8 +2,10 @@ import { apiRequest, jsonInit } from './api'
 import type { ReviewConfig, ReviewSummary } from './review'
 
 export interface TraceTaskMetadata {
-  trace_id: string; name: string; notes: string; labels: string[]; pinned: boolean; archived: boolean; status: string; revision: number
+  origin?: TraceOrigin
+  trace_id: string; name: string; notes: string; labels: string[]; pinned: boolean; top_at?: number; archived: boolean; status: string; revision: number
 }
+export interface TraceOrigin { kind: 'manual_split'; source_trace_ids: string[]; request_count: number; created_at: number }
 export interface Criterion { id: string; name: string; weight: number }
 export interface ExperimentTask { prompt: string; repository: string; base_commit: string; environment: string; acceptance: string; test_command: string; rubric: Criterion[] }
 export interface Experiment { review?: ReviewConfig; review_summary?: ReviewSummary; id: string; name: string; notes: string; task: ExperimentTask; keep: boolean; archived: boolean; revision: number; created_at: string; updated_at: string; run_count: number }
@@ -34,7 +36,7 @@ export const stopExperimentRun = (r: ExperimentRun) => request<ExperimentRun>(`$
 const comparisonURL = (id: string, ids: string[]) => `${base}/${encodeURIComponent(id)}/compare?runs=${ids.map(encodeURIComponent).join(',')}`
 export const fetchExperimentComparison = (id: string, ids: string[]) => request<ExperimentComparison>(comparisonURL(id, ids))
 export const fetchTraceTaskMetadata = (id: string) => request<TraceTaskMetadata>(`/api/traces/${encodeURIComponent(id)}/metadata`)
-export const saveTraceTaskMetadata = (m: TraceTaskMetadata) => request<TraceTaskMetadata>(`/api/traces/${encodeURIComponent(m.trace_id)}/metadata`, jsonInit('PUT', m))
+export const saveTraceTaskMetadata = (m: TraceTaskMetadata) => request<TraceTaskMetadata>(`/api/traces/${encodeURIComponent(m.trace_id)}/metadata`, jsonInit('PUT', { ...m, origin: undefined }))
 export const emptyTraceMetadata = (id: string): TraceTaskMetadata => ({ trace_id: id, name: '', notes: '', labels: [], pinned: false, archived: false, status: 'none', revision: 0 })
 export const emptyExperiment = (): Experiment => ({ id: '', name: '', notes: '', keep: true, archived: false, revision: 0, created_at: '', updated_at: '', run_count: 0, task: { prompt: '', repository: '', base_commit: '', environment: '', acceptance: '', test_command: '', rubric: [] } })
 export const emptyRun = (experiment: Experiment): ExperimentRun => ({ id: '', experiment_id: experiment.id, name: '', conditions: { agent: '', agent_version: '', model: '', configuration: '', environment: '', base_commit: '', seed: '' }, task: experiment.task, task_hash: '', state: 'planned', capture_run_id: '', trace_ids: [], assessment: { verdict: 'unknown', scores: {}, result_commit: '', artifacts: '', verification: '', notes: '', diff: '' }, revision: 0, created_at: '', updated_at: '' })

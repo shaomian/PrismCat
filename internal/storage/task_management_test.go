@@ -59,16 +59,20 @@ func TestTraceManagementPreservesMetadataAndRejectsChangedDeleteScope(t *testing
 	r := mustNewSQLiteRepoForTest(t)
 	defer r.Close()
 	entry := managementLog(t, r, "one", "trace-a", "")
-	_, err := r.SaveTraceMetadata(TraceMetadata{TraceID: "trace-a", Name: "Important task", Notes: "keep notes", Labels: []string{"coding"}, Status: "todo", Pinned: true})
+	_, err := r.SaveTraceMetadata(TraceMetadata{TraceID: "trace-a", Name: "Important task", Notes: "keep notes", Labels: []string{"coding"}, Status: "todo", Pinned: true, TopAt: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	applyManagement(t, r, manageRequest("trace", "archive", "trace-a"))
 	metadata, err := r.GetTraceMetadataDocument("trace-a")
-	if err != nil || !metadata.Archived || metadata.Notes != "keep notes" || !metadata.Pinned || metadata.Status != "todo" {
+	if err != nil || !metadata.Archived || metadata.TopAt != 0 || metadata.Notes != "keep notes" || !metadata.Pinned || metadata.Status != "todo" {
 		t.Fatalf("archive overwrote metadata: %+v %v", metadata, err)
 	}
 	applyManagement(t, r, manageRequest("trace", "restore", "trace-a"))
+	metadata, err = r.GetTraceMetadataDocument("trace-a")
+	if err != nil || metadata.Archived || metadata.TopAt != 0 || !metadata.Pinned {
+		t.Fatalf("restore changed favorite or reinstated top position: %+v %v", metadata, err)
+	}
 	before, preview := previewManagement(t, r, manageRequest("trace", "delete", "trace-a"))
 	if !preview.CanApply || preview.LogCount != 1 {
 		t.Fatal(preview)

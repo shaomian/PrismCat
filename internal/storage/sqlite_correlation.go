@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -240,9 +241,6 @@ func (r *SQLiteRepository) storeObservation(o trace.Observation, manual bool) (t
 	if err := tx.QueryRow("SELECT explicit_trace_id FROM request_logs WHERE id=?", o.LogID).Scan(&explicit); err != nil {
 		return trace.Assignment{}, err
 	}
-	if explicit != "" && o.Assignment.Source != "explicit" {
-		return trace.Assignment{}, ErrCorrelationConflict
-	}
 	var old trace.Assignment
 	var oldJSON, oldFeatures string
 	var seq int
@@ -255,10 +253,22 @@ func (r *SQLiteRepository) storeObservation(o trace.Observation, manual bool) (t
 	if locked && !manual {
 		o.Assignment = old
 	}
+	if explicit != "" && o.Assignment.Source != "explicit" && !(locked && !manual) {
+		return trace.Assignment{}, ErrCorrelationConflict
+	}
+	if o.Assignment.Source != "explicit" {
+		o.Assignment.TraceID, err = resolveTrace(context.Background(), tx, o.Assignment.TraceID)
+		if err != nil {
+			return trace.Assignment{}, err
+		}
+	}
 	if manual && old.Revision != o.Assignment.Revision {
 		return trace.Assignment{}, ErrCorrelationConflict
 	}
 	if manual {
+		if err = freezeTraceSamples(context.Background(), tx, []string{old.TraceID, o.Assignment.TraceID}); err != nil {
+			return trace.Assignment{}, err
+		}
 		o.Assignment.Locked = true
 	}
 	if old.TraceID != o.Assignment.TraceID || seq == 0 {
@@ -296,7 +306,7 @@ func (r *SQLiteRepository) storeObservation(o trace.Observation, manual bool) (t
 	if _, err = tx.Exec(`INSERT INTO trace_assignments(log_id,trace_id,trace_seq,parent_log_id,info,locked,features,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(log_id) DO UPDATE SET trace_id=excluded.trace_id,trace_seq=excluded.trace_seq,parent_log_id=excluded.parent_log_id,info=excluded.info,locked=excluded.locked,features=CASE WHEN excluded.features='' THEN trace_assignments.features ELSE excluded.features END,updated_at=excluded.updated_at`, o.LogID, o.Assignment.TraceID, seq, parent, string(info), o.Assignment.Locked, string(features), time.Now().UnixMilli()); err != nil {
 		return trace.Assignment{}, err
 	}
-	if _, err = tx.Exec("UPDATE request_logs SET trace_id=?,trace_seq=?,parent_log_id=?,trace_info=? WHERE id=? AND (explicit_trace_id='' OR explicit_trace_id=?)", o.Assignment.TraceID, seq, parent, string(info), o.LogID, o.Assignment.TraceID); err != nil {
+	if _, err = tx.Exec("UPDATE request_logs SET trace_id=?,trace_seq=?,parent_log_id=?,trace_info=? WHERE id=?", o.Assignment.TraceID, seq, parent, string(info), o.LogID); err != nil {
 		return trace.Assignment{}, err
 	}
 	if manual {

@@ -1,15 +1,16 @@
 import { useState, useEffect, useMemo, useCallback, useRef, startTransition } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   Network, ArrowLeft, Clock, AlertCircle, Layers, Activity,
-  ChevronRight, MessagesSquare, ListTree, GitBranch, FileDown, Sparkles,
+  MessagesSquare, ListTree, GitBranch, FileDown, Sparkles, ListChecks, X, ChevronLeft, ChevronRight,
 } from 'lucide-react'
-import { fetchTraceDetail, fetchTraceTimeline, fetchTraceTimelineEntry, fetchTraceDiagram, fetchLog, traceExportUrl, type TraceDetail as TraceDetailType, type TraceTimeline, type RequestLog, type TraceDiagram as TraceDiagramData } from '@/lib/api'
+import { fetchTraceDetail, fetchTraceTimeline, fetchTraceTimelineEntry, fetchTraceDiagram, fetchLog, traceExportUrl, type TraceDetail as TraceDetailType, type TraceTimeline, type RequestLog, type TraceMetadata, type TraceDiagram as TraceDiagramData } from '@/lib/api'
 import { cn, formatLatency, formatDate, getStatusColor, METHOD_CLASS } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { CopyTraceIdButton } from '@/components/CopyTraceIdButton'
-import { TraceTaskManager } from '@/components/TraceTaskManager'
+import { TraceTaskManager } from '@/components/TraceTaskMetadata'
+import { TraceGroupingDialog } from '@/components/TraceGroupingDialog'
+import type { GroupingAction } from '@/lib/trace-grouping'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { LogDetail } from '@/components/LogDetail'
@@ -22,6 +23,8 @@ export function TraceDetail() {
   const { t, i18n } = useTranslation()
   const { traceId } = useParams<{ traceId: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState(searchParams.get('view') === 'requests' ? 'requests' : 'conversation')
 
   const [detail, setDetail] = useState<TraceDetailType | null>(null)
   const [timeline, setTimeline] = useState<TraceTimeline | null>(null)
@@ -30,6 +33,13 @@ export function TraceDetail() {
   const [loading, setLoading] = useState(true)
   const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null)
   const [analysisOpen, setAnalysisOpen] = useState(false)
+  const [requestPage, setRequestPage] = useState({ traceId, offset: 0 })
+  const [groupingAction, setGroupingAction] = useState<GroupingAction | null>(null)
+  const [selection, setSelection] = useState({ traceId, active: searchParams.get('organize') === '1', ids: [] as string[] })
+  const organizing = selection.traceId === traceId && selection.active
+  const chosen = selection.traceId === traceId ? selection.ids : []
+  const toggleRequest = (id: string) => setSelection({ traceId, active: true, ids: chosen.includes(id) ? chosen.filter(value => value !== id) : [...chosen, id] })
+  const [assignmentRevision, setAssignmentRevision] = useState(0)
   const [loadingFullLogIds, setLoadingFullLogIds] = useState<Set<string>>(new Set())
 
   const loadDetail = useCallback(async () => {
@@ -37,13 +47,18 @@ export function TraceDetail() {
     setLoading(true)
     try {
       const res = await fetchTraceDetail(traceId)
+      if (res.trace_id !== traceId) {
+        toast.info(i18n.t('trace_grouping.redirected'))
+        navigate(`/traces/${encodeURIComponent(res.trace_id)}`, { replace: true })
+        return
+      }
       setDetail(res)
     } catch {
       toast.error(i18n.t('traces.load_detail_failed'))
     } finally {
       setLoading(false)
     }
-  }, [traceId, i18n])
+  }, [traceId, i18n, navigate])
 
   const loadTimeline = useCallback(async () => {
     if (!traceId) return
@@ -90,9 +105,12 @@ export function TraceDetail() {
       if (!cancelled) toast.error(i18n.t('timeline.diagram.load_failed'))
     })
     return () => { cancelled = true }
-  }, [traceId, diagramView, i18n])
+  }, [traceId, diagramView, assignmentRevision, i18n])
 
   const requests = useMemo(() => detail?.requests ?? [], [detail?.requests])
+  const requestOffset = Math.min(requestPage.traceId === traceId ? requestPage.offset : 0, Math.max(0, Math.ceil(requests.length / 50) - 1) * 50)
+  const visibleRequests = requests.slice(requestOffset, requestOffset + 50)
+  const pageIds = visibleRequests.map(request => request.id)
   const summary = detail?.summary
 
   const maxLatency = useMemo(
@@ -158,6 +176,18 @@ export function TraceDetail() {
     if (log) void openLog(log)
   }, [requests, openLog])
 
+  const handleAssignmentChanged = (metadata: TraceMetadata) => {
+    handleCloseLog()
+    if (requests.length === 1 && metadata.trace_id && metadata.trace_id !== traceId) {
+      navigate(`/traces/${encodeURIComponent(metadata.trace_id)}`)
+      return
+    }
+    setDiagram(null)
+    setAssignmentRevision(previous => previous + 1)
+    void loadDetail()
+    void loadTimeline()
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4">
@@ -188,9 +218,6 @@ export function TraceDetail() {
           <ArrowLeft className="h-3.5 w-3.5" />
           {t('traces.title')}
         </Button>
-        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />
-        <span className="font-mono text-xs text-foreground/80 truncate max-w-[300px]" title={traceId}>{traceId}</span>
-        {traceId && <CopyTraceIdButton traceId={traceId} />}
       </div>
 
       {/* Summary strip */}
@@ -258,7 +285,7 @@ export function TraceDetail() {
       </div>
 
       {/* 视图切换：对话时间线 / 请求列表 */}
-      <Tabs defaultValue="conversation">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="conversation" className="gap-1.5">
             <MessagesSquare className="h-3.5 w-3.5" />
@@ -307,16 +334,27 @@ export function TraceDetail() {
           )}
         </TabsContent>
 
-        <TabsContent value="requests" className="pt-4">
+        <TabsContent value="requests" className="space-y-3 pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-3">
+              {organizing && <><label className="flex items-center gap-1.5"><input type="checkbox" className="accent-primary" checked={pageIds.length > 0 && pageIds.every(id => chosen.includes(id))} onChange={event => setSelection({ traceId, active: true, ids: [...chosen.filter(id => !pageIds.includes(id)), ...(event.target.checked ? pageIds : [])] })} />{t('task_management.select_page')}</label><span className="text-muted-foreground">{t('trace_grouping.selected_requests', { count: chosen.length })}</span>
+              <Button size="xs" variant="outline" disabled={!chosen.length || requests.some(request => chosen.includes(request.id) && (request.trace_association?.source === 'explicit' || (!request.trace_association && !!request.trace_id)))} onClick={() => setGroupingAction('move')}>{t('trace_grouping.move')}</Button>
+              <Button size="xs" variant="outline" disabled={!chosen.length} onClick={() => setGroupingAction('split')}>{t('trace_grouping.split')}</Button></>}
+            </div>
+            <Button size="sm" variant="ghost" aria-pressed={organizing} onClick={() => setSelection({ traceId, active: !organizing, ids: [] })}>{organizing ? <X className="size-3.5" /> : <ListChecks className="size-3.5" />}{t(organizing ? 'trace_grouping.exit' : 'trace_grouping.organize')}</Button>
+          </div>
+          {organizing && <p className="text-xs text-muted-foreground">{t('trace_grouping.request_hint')}</p>}
       {/* Timeline */}
       <div className="space-y-0">
-        {requests.map((req, idx) => {
-          const isLast = idx === requests.length - 1
+        {visibleRequests.map((req, pageIndex) => {
+          const idx = requestOffset + pageIndex
+          const isLast = pageIndex === visibleRequests.length - 1
           const offsetMs = new Date(req.created_at).getTime() - summary.first_time
           const offsetPct = Math.min(100, (offsetMs / traceSpanMs) * 100)
 
           return (
             <div key={req.id} className="flex gap-3 group">
+              {organizing && <input type="checkbox" className="mt-5 shrink-0 accent-primary" aria-label={t('trace_grouping.select_request', { seq: req.trace_seq ?? idx + 1 })} checked={chosen.includes(req.id)} onChange={() => toggleRequest(req.id)} />}
               {/* Timeline connector */}
               <div className="flex flex-col items-center w-8 shrink-0">
                 <div
@@ -338,12 +376,13 @@ export function TraceDetail() {
               {/* Request card */}
               <button
                 type="button"
-                onClick={() => void openLog(req)}
+                onClick={() => organizing ? toggleRequest(req.id) : void openLog(req)}
                 className={cn(
                   'flex-1 rounded-md p-3 mb-1 text-left transition-all',
                   'bg-card hover:bg-card/50 border border-border hover:border-border',
                   'active:scale-[0.995]',
                   selectedLog?.id === req.id && 'ring-1 ring-info/40 bg-card',
+                  organizing && chosen.includes(req.id) && 'ring-1 ring-primary/40',
                 )}
               >
                 <div className="flex items-center gap-2 flex-wrap">
@@ -417,6 +456,10 @@ export function TraceDetail() {
         })}
       </div>
 
+      {requests.length > 50 && <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>{t('correlation.requests_count', { count: requests.length })}</span>
+        <div className="flex items-center gap-2"><Button size="icon-sm" variant="ghost" aria-label={t('correlation.previous')} disabled={requestOffset === 0} onClick={() => setRequestPage({ traceId, offset: requestOffset - 50 })}><ChevronLeft className="size-4" /></Button><span>{Math.floor(requestOffset / 50) + 1} / {Math.ceil(requests.length / 50)}</span><Button size="icon-sm" variant="ghost" aria-label={t('correlation.next')} disabled={requestOffset + 50 >= requests.length} onClick={() => setRequestPage({ traceId, offset: requestOffset + 50 })}><ChevronRight className="size-4" /></Button></div>
+      </div>}
       {/* Time range footer */}
       {requests.length > 0 && (
         <div className="flex items-center justify-between text-xs text-muted-foreground/60 px-1">
@@ -429,6 +472,12 @@ export function TraceDetail() {
       </Tabs>
 
       {/* Log detail Sheet */}
+      {groupingAction && traceId && <TraceGroupingDialog action={groupingAction} traceIds={[traceId]} logIds={chosen} onClose={() => setGroupingAction(null)} onApplied={result => {
+        const all = chosen.length === requests.length
+        setSelection({ traceId, active: false, ids: [] })
+        if (all) { handleCloseLog(); navigate(`/traces/${encodeURIComponent(result.target_trace_id)}`) }
+        else handleAssignmentChanged({ trace_id: traceId })
+      }} />}
       <LogDetail
         log={selectedLog}
         loading={selectedLogLoading}
@@ -437,6 +486,10 @@ export function TraceDetail() {
         canNavigatePreviousLog={selectedLogIndex > 0}
         canNavigateNextLog={selectedLogIndex >= 0 && selectedLogIndex < requests.length - 1}
         onLogChange={(updated) => {
+          if (updated.trace_id !== selectedLog?.trace_id || (updated.trace_association?.revision ?? 0) !== (selectedLog?.trace_association?.revision ?? 0)) {
+            handleAssignmentChanged(updated)
+            return
+          }
           setSelectedLog(updated)
           setDetail(prev => {
             if (!prev) return prev

@@ -52,6 +52,7 @@ func (c *ReviewConfig) validate(required bool) error {
 }
 
 type ReviewSummary struct {
+	TemplateID   string `json:"template_id,omitempty"`
 	TemplateName string `json:"template_name"`
 	PointCount   int    `json:"point_count"`
 	Status       string `json:"status"`

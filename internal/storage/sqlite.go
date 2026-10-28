@@ -401,6 +401,14 @@ func (r *SQLiteRepository) SaveLog(log *RequestLog) error {
 	if log.TraceAssociation != nil && log.TraceAssociation.Source != "explicit" {
 		explicitID = ""
 	}
+	effectiveID := log.TraceID
+	if explicitID == "" && effectiveID != "" {
+		var err error
+		effectiveID, err = r.ResolveTrace(effectiveID)
+		if err != nil {
+			return err
+		}
+	}
 	reqHeaders, _ := json.Marshal(log.RequestHeaders)
 	respHeaders, _ := json.Marshal(log.ResponseHeaders)
 	overrideRules, _ := json.Marshal(log.RequestOverrideRules)
@@ -460,7 +468,7 @@ func (r *SQLiteRepository) SaveLog(log *RequestLog) error {
 		usage_total_tokens = excluded.usage_total_tokens,
 		usage_raw = excluded.usage_raw,
 		usage_source = excluded.usage_source,
-		explicit_trace_id = excluded.explicit_trace_id,
+		explicit_trace_id = CASE WHEN request_logs.explicit_trace_id!='' THEN request_logs.explicit_trace_id ELSE excluded.explicit_trace_id END,
 		capture_run_id = excluded.capture_run_id,
 		websocket_info = excluded.websocket_info
 	`
@@ -477,7 +485,7 @@ func (r *SQLiteRepository) SaveLog(log *RequestLog) error {
 		log.Streaming, log.Latency, log.Error, log.Truncated, log.Tag,
 		log.RequestOverrideApplied, string(overrideRules), log.RequestOverrideError,
 		log.RequestHeaderOverrideApplied, string(log.RequestHeaderOverrideChanges), reqHeadersOriginal,
-		log.TraceID, log.ParentLogID, log.TraceSeq,
+		effectiveID, log.ParentLogID, log.TraceSeq,
 		log.UsageInputTokens, log.UsageOutputTokens, log.UsageTotalTokens, log.UsageRaw, log.UsageSource, explicitID, log.CaptureRunID, websocketInfo,
 	)
 	return err

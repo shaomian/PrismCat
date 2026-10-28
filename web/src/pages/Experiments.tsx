@@ -1,9 +1,10 @@
+import { useListMemory } from '@/hooks/useListMemory'
 import { useCallback, useEffect, useState, useRef, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { ArrowLeft, FlaskConical, Plus, RefreshCw } from 'lucide-react'
-import { fetchCaptureRuns, fetchUpstreams, type CaptureRun, type Upstream } from '@/lib/api'
+import { ArrowLeft, Code2, FileText, Plus, RefreshCw, ScanSearch, Shield } from 'lucide-react'
+import { ApiError, fetchCaptureRuns, fetchUpstreams, type CaptureRun, type Upstream } from '@/lib/api'
 import {
   emptyExperiment, emptyRun, fetchExperiment, fetchExperimentComparison,
   fetchExperimentList, saveExperiment, saveExperimentRun, startExperimentRun,
@@ -13,19 +14,21 @@ import {
 import { copyText } from '@/lib/clipboard'
 import { cn, formatLatency } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { TraceSearch } from '@/components/TraceTaskManager'
 import { CopyTraceIdButton } from '@/components/CopyTraceIdButton'
 import { TaskActions, TaskBatchActions, TaskSelectionToggle } from '@/components/TaskManagement'
+import { TaskActionBar, TaskIconButton, TaskPreviewTrigger } from '@/components/TaskHover'
 import { getReviewSession, subscribeReview } from '@/lib/review-stream'
 import type { ReviewTemplate } from '@/lib/review'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 const ReviewPanel = lazy(() => import('@/components/review/ReviewPanel'))
 const ReviewTemplates = lazy(() => import('@/components/review/ReviewTemplates'))
 
 const panel = 'space-y-3 rounded-lg border border-border bg-card p-4'
-const selectClass = 'h-9 rounded-md border border-input bg-background px-2 text-sm'
+const selectClass = 'h-8 rounded-md border border-input bg-background px-2 text-sm'
 
 function runLabel(run: ExperimentRun) {
   return `${run.conditions.agent} / ${run.conditions.model || '—'}`
@@ -46,9 +49,21 @@ function useReviewRunning(id: string) {
 }
 
 function ExperimentCardActions({ item, archived, disabled, onChanged }: { item: Experiment; archived: boolean; disabled: boolean; onChanged: () => void }) {
+  const { t } = useTranslation()
   const running = useReviewRunning(item.id)
   const serverRunning = item.review_summary?.status === 'running' && getReviewSession(item.id).version === 0
-  return <TaskActions kind="experiment" items={[{ id: item.id, revision: item.revision }]} name={item.name} archived={archived} disabled={disabled || running || serverRunning} onChanged={onChanged} />
+  const [editing, setEditing] = useState<Experiment | null>(null)
+  const [loading, setLoading] = useState(false)
+  const edit = async () => {
+    setLoading(true)
+    try { setEditing((await fetchExperiment(item.id)).experiment) }
+    catch (error) { toast.error((error as Error).message) }
+    finally { setLoading(false) }
+  }
+  return <>
+    <TaskActionBar><TaskActions kind="experiment" items={[{ id: item.id, revision: item.revision }]} name={item.name} archived={archived} disabled={disabled || loading || running || serverRunning} onChanged={onChanged} onEdit={() => void edit()} editLabel={t('experiments.edit')} inline /></TaskActionBar>
+    {editing && <ExperimentEditor experiment={editing} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); onChanged() }} />}
+  </>
 }
 
 export function Experiments() {
@@ -60,12 +75,12 @@ function ExperimentList() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const [page, setPage] = useState<{ key: string; items: Experiment[]; total: number } | null>(null)
-  const [query, setQuery] = useState('')
-  const [draftQuery, setDraftQuery] = useState('')
-  const [archived, setArchived] = useState(false)
-  const [offset, setOffset] = useState(0)
+  const [query, setQuery] = useListMemory('reviews.query', '')
+  const [draftQuery, setDraftQuery] = useListMemory('reviews.draftQuery', '')
+  const [archived, setArchived] = useListMemory('reviews.archived', false)
+  const [offset, setOffset] = useListMemory('reviews.offset', 0)
   const [picker, setPicker] = useState(false)
-  const [view, setView] = useState('cards')
+  const [view, setView] = useListMemory('reviews.view', 'cards')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
@@ -81,9 +96,10 @@ function ExperimentList() {
   const toggleSelected = (id: string, checked: boolean) => setSelection({ key: pageKey, active: true, ids: checked ? [...selected.filter(value => value !== id), id] : selected.filter(value => value !== id) })
   const changed = () => { exitSelection(); setRefresh(value => value + 1) }
   useEffect(() => {
+    if (draftQuery === query) return
     const timer = window.setTimeout(() => { setQuery(draftQuery); setOffset(0) }, 250)
     return () => window.clearTimeout(timer)
-  }, [draftQuery])
+  }, [draftQuery, query, setQuery, setOffset])
   useEffect(() => {
     let cancelled = false
     void fetchExperimentList(query, archived, offset).then(data => {
@@ -93,7 +109,7 @@ function ExperimentList() {
       }
     }).catch(reason => { if (!cancelled) setError((reason as Error).message) })
     return () => { cancelled = true }
-  }, [query, archived, offset, pageKey])
+  }, [query, archived, offset, pageKey, setOffset])
   const create = async (template: ReviewTemplate) => {
     if (busy) return
     setBusy(true)
@@ -109,9 +125,11 @@ function ExperimentList() {
       <p className="text-sm text-muted-foreground">{t('review.intro')}</p>
       <Button onClick={() => setPicker(true)}><Plus className="size-4" />{t('review.create_card')}</Button>
     </div>
-    <div role="tablist" aria-label={t('review.workspace')} className="flex gap-2 border-b border-border pb-2">
-      {['cards', 'templates'].map(key => <Button key={key} role="tab" aria-selected={view === key} variant={view === key ? 'secondary' : 'ghost'} size="sm" onClick={() => { exitSelection(); setView(key) }}>{t(`review.tabs.${key}`)}</Button>)}
-    </div>
+    <Tabs value={view} onValueChange={value => { exitSelection(); setView(value) }}>
+      <TabsList variant="line" aria-label={t('review.workspace')} className="w-full justify-start rounded-none border-b border-border pb-1">
+        {['cards', 'templates'].map(key => <TabsTrigger key={key} value={key} className="flex-none px-3">{t(`review.tabs.${key}`)}</TabsTrigger>)}
+      </TabsList>
+    </Tabs>
     <ErrorMessage error={error} />
     {view === 'cards' ? <>
       <div className="flex flex-wrap items-center gap-3">
@@ -126,16 +144,17 @@ function ExperimentList() {
         {selectedItems.length > 0 && <TaskBatchActions kind="experiment" items={selectedItems} archived={archived} onChanged={changed} />}
       </div>}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{items.map(item => {
+        const Icon = item.review_summary?.template_id === 'builtin:pentest' ? Shield : item.review_summary?.template_id === 'builtin:coding' ? Code2 : item.review_summary?.template_id === 'builtin:reverse' ? ScanSearch : FileText
         const content = <>
-          <div className="flex items-start gap-2"><FlaskConical className="mt-0.5 size-4 shrink-0 text-primary" /><h3 className="break-words font-medium transition-colors group-hover/review:text-primary group-focus-visible/review:text-primary">{item.name}</h3></div>
-          <p className="text-xs text-muted-foreground">{item.review_summary?.template_name || t('review.basic_card')}</p>
+          <h3 className="break-words font-medium transition-colors group-hover/review:text-foreground group-focus-visible/review:text-primary">{item.name}</h3>
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Icon className="size-3.5 shrink-0" />{item.review_summary?.template_name || t('review.basic_card')}</p>
           <div className="flex flex-wrap gap-3 text-xs text-muted-foreground"><span>{t('review.task_count', { count: item.run_count })}</span>{!!item.review_summary?.point_count && <span>{t('review.point_count', { count: item.review_summary.point_count })}</span>}{item.review_summary?.status && <span>{t(`review.status.${item.review_summary.status}`)}</span>}</div>
         </>
         const contentClass = 'group/review block min-w-0 flex-1 space-y-3 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-primary'
-        return <article className={cn('flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/50', selecting && selected.includes(item.id) && 'border-primary/50 bg-primary/5')} key={item.id}>
+        return <article className={cn('task-item flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-4 transition-colors hover:border-border', selecting && selected.includes(item.id) && 'border-primary/50 bg-primary/5')} key={item.id}>
           <div className="flex min-w-0 items-start gap-3">
             {selecting && <input className="mt-1" type="checkbox" aria-label={t('task_management.select_item', { name: item.name })} checked={selected.includes(item.id)} onChange={event => toggleSelected(item.id, event.target.checked)} />}
-            {selecting ? <button type="button" className={contentClass} aria-pressed={selected.includes(item.id)} onClick={() => toggleSelected(item.id, !selected.includes(item.id))}>{content}</button> : <Link className={contentClass} to={`/experiments/${item.id}`}>{content}</Link>}
+            {selecting ? <button type="button" className={contentClass} aria-pressed={selected.includes(item.id)} onClick={() => toggleSelected(item.id, !selected.includes(item.id))}>{content}</button> : <TaskPreviewTrigger name={item.name} summary={item.review_summary?.template_name || t('review.basic_card')} details={[t('review.task_count', { count: item.run_count }), item.review_summary?.point_count ? t('review.point_count', { count: item.review_summary.point_count }) : '', item.review_summary?.status ? t(`review.status.${item.review_summary.status}`) : ''].filter(Boolean).join(' · ')}><Link className={contentClass} to={`/experiments/${item.id}`}>{content}</Link></TaskPreviewTrigger>}
           </div>
           <div className="mt-auto flex min-h-8 flex-wrap items-center justify-between gap-x-2 gap-y-1">
             <time className="text-xs text-muted-foreground" dateTime={item.updated_at}>{new Date(item.updated_at).toLocaleString()}</time>
@@ -143,7 +162,7 @@ function ExperimentList() {
           </div>
         </article>
       })}</div>
-      {!items.length && <div className="space-y-3 rounded-xl border border-dashed border-border p-8 text-center"><p className="text-sm text-muted-foreground">{t(loading ? 'common.loading' : archived ? 'task_management.empty_archived' : 'review.empty_cards')}</p>{!loading && !archived && <Button variant="outline" onClick={() => setPicker(true)}>{t('review.create_first')}</Button>}</div>}
+      {!items.length && <div className="space-y-3 rounded-lg border border-dashed border-border p-8 text-center"><p className="text-sm text-muted-foreground">{t(loading ? 'common.loading' : archived ? 'task_management.empty_archived' : 'review.empty_cards')}</p>{!loading && !archived && <Button variant="outline" onClick={() => setPicker(true)}>{t('review.create_first')}</Button>}</div>}
       <Pagination offset={offset} total={total} disabled={loading} onChange={value => { setOffset(value); exitSelection() }} />
     </> : <Suspense fallback={<p>{t('common.loading')}</p>}><ReviewTemplates manage disabled={busy} onChoose={template => void create(template)} /></Suspense>}
     <Dialog open={picker} onOpenChange={open => { if (!busy) setPicker(open) }}><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{t('review.choose_template')}</DialogTitle><DialogDescription>{t('review.choose_template_hint')}</DialogDescription></DialogHeader><Suspense fallback={<p>{t('common.loading')}</p>}><ReviewTemplates disabled={busy} onChoose={template => void create(template)} /></Suspense></DialogContent></Dialog>
@@ -164,25 +183,23 @@ function ExperimentEditor({ experiment, onCancel, onSaved }: { experiment: Exper
   const [draft, setDraft] = useState(() => structuredClone(experiment))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [conflict, setConflict] = useState(false)
   const save = async () => {
     setBusy(true)
     try { await saveExperiment(draft); onSaved() }
-    catch (reason) { setError((reason as Error).message) }
+    catch (reason) { const changed = reason instanceof ApiError && reason.status === 409; setConflict(changed); setError(changed ? t('trace_manager.conflict') : (reason as Error).message) }
     finally { setBusy(false) }
   }
-  return <section className={panel}>
-    <h3 className="font-medium">{t(experiment.id ? 'experiments.edit' : 'experiments.create')}</h3>
-    <Field label={t('experiments.name')}><Input value={draft.name} maxLength={200} onChange={e => setDraft(p => ({ ...p, name: e.target.value }))} /></Field>
-    <Field label={t('experiments.prompt')}><Textarea value={draft.task.prompt} rows={3} maxLength={65536} onChange={e => setDraft(p => ({ ...p, task: { ...p.task, prompt: e.target.value } }))} /></Field>
-    <div className="flex flex-wrap gap-5 text-xs">
-      <label className="flex items-center gap-2"><input type="checkbox" checked={draft.keep} onChange={e => setDraft(p => ({ ...p, keep: e.target.checked }))} />{t('experiments.keep')}</label>
-    </div>
+  return <Dialog open onOpenChange={open => { if (!open && !busy) onCancel() }}><DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-lg" onInteractOutside={event => event.preventDefault()} onEscapeKeyDown={event => { if (busy) event.preventDefault() }}>
+    <DialogHeader><DialogTitle>{t(experiment.id ? 'experiments.edit' : 'experiments.create')}</DialogTitle><DialogDescription>{t('experiments.edit_hint')}</DialogDescription></DialogHeader>
+    <Field label={t('experiments.name')}><Input autoFocus disabled={busy} value={draft.name} maxLength={200} onChange={e => setDraft(p => ({ ...p, name: e.target.value }))} /></Field>
+    <Field label={t('experiments.prompt')}><Textarea disabled={busy} value={draft.task.prompt} rows={3} maxLength={65536} onChange={e => setDraft(p => ({ ...p, task: { ...p.task, prompt: e.target.value } }))} /></Field>
+    <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">{t('task_management.more_settings')}</summary><div className="mt-3 flex flex-wrap gap-5 text-xs">
+      <label className="flex items-center gap-2"><input type="checkbox" disabled={busy} checked={draft.keep} onChange={e => setDraft(p => ({ ...p, keep: e.target.checked }))} />{t('experiments.keep')}</label>
+    </div></details>
     <ErrorMessage error={error} />
-    <div className="flex gap-2">
-      <Button disabled={busy || !draft.name.trim()} onClick={() => void save()}>{t('common.save')}</Button>
-      <Button variant="outline" onClick={onCancel}>{t('common.cancel')}</Button>
-    </div>
-  </section>
+    <DialogFooter><Button variant="outline" disabled={busy} onClick={onCancel}>{t('common.cancel')}</Button><Button disabled={busy || conflict || !draft.name.trim()} onClick={() => void save()}>{t('common.save')}</Button></DialogFooter>
+  </DialogContent></Dialog>
 }
 
 function ExperimentDetail({ id }: { id: string }) {
@@ -246,52 +263,51 @@ function ExperimentDetail({ id }: { id: string }) {
 
   return <div className="space-y-4">
     <Link to="/experiments" className="inline-flex items-center gap-1 text-sm text-muted-foreground"><ArrowLeft className="size-4" />{t('experiments.back')}</Link>
-    <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="task-item flex flex-wrap items-center justify-between gap-2">
       <div className="min-w-0"><h2 className="break-words text-lg font-semibold">{experiment.name}</h2>{experiment.archived && <p className="mt-1 text-xs text-muted-foreground">{t('task_management.archived')}</p>}</div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" onClick={() => setEditingTask(!editingTask)}>{t('experiments.edit')}</Button>
-        <Button aria-label={t('experiments.refresh')} variant="ghost" size="icon-sm" disabled={busy} onClick={() => void action(async () => {})}><RefreshCw className="size-4" /></Button>
-        <TaskActions kind="experiment" items={[{ id: experiment.id, revision: experiment.revision }]} name={experiment.name} archived={experiment.archived} disabled={busy || reviewRunning || !!editingTask || !!editingRun} onChanged={changedAction => {
+      <TaskActionBar>
+        <TaskIconButton label={t('experiments.refresh')} className="task-direct-action" disabled={busy} onClick={() => void action(async () => {})}><RefreshCw className="size-4" /></TaskIconButton>
+        <TaskActions kind="experiment" items={[{ id: experiment.id, revision: experiment.revision }]} name={experiment.name} archived={experiment.archived} disabled={busy || reviewRunning || !!editingTask || !!editingRun} onEdit={() => setEditingTask(true)} editLabel={t('experiments.edit')} inline onChanged={changedAction => {
           if (changedAction === 'delete') navigate('/experiments')
           else saved()
         }} />
-      </div>
+      </TaskActionBar>
     </div>
-    {experiment.task.prompt && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{experiment.task.prompt}</p>}
     <ErrorMessage error={error} />
     {editingTask && <ExperimentEditor key={experiment.revision} experiment={experiment} onCancel={() => setEditingTask(false)} onSaved={saved} />}
-    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium">{t('review.step_tasks')}</h3><div className="flex flex-wrap gap-2"><Button size="sm" onClick={() => { setImportExisting(true); setEditingRun(emptyRun(experiment)) }}>{t('review.add_existing')}</Button><Button size="sm" variant="outline" onClick={() => { setImportExisting(false); setEditingRun(emptyRun(experiment)) }}>{t('review.record_task')}</Button></div></div>
+    <Suspense fallback={<p className="py-4 text-sm text-muted-foreground">{t('common.loading')}</p>}><ReviewPanel key={experiment.id} experiment={experiment} selected={selected} onSaved={setExperiment} onRestoreSelection={restoreSelection} preparationLocked={!!editingRun} disabled={busy} taskPicker={<section className="space-y-3">
+    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium">{t('review.step_tasks')}</h3><div className="flex flex-wrap gap-2"><Button size="sm" variant="ghost" disabled={busy || reviewRunning} onClick={() => { setImportExisting(true); setEditingRun(emptyRun(experiment)) }}>{t('review.add_existing')}</Button><Button size="sm" variant="ghost" disabled={busy || reviewRunning} onClick={() => { setImportExisting(false); setEditingRun(emptyRun(experiment)) }}>{t('review.record_task')}</Button></div></div>
+    {experiment.task.prompt && <details className="text-xs text-muted-foreground"><summary className="w-fit cursor-pointer">{t('experiments.prompt')}</summary><p className="mt-2 whitespace-pre-wrap break-words leading-relaxed">{experiment.task.prompt}</p></details>}
     {editingRun && <RunEditor key={(editingRun.id || 'new') + String(importExisting)} run={editingRun} importExisting={importExisting} onCancel={() => setEditingRun(null)} onSaved={run => { selectionTouched.current = true; setSelected(previous => previous.includes(run.id) || previous.length >= 8 ? previous : [...previous, run.id]); saved() }} />}
-    <div className="flex flex-wrap items-center gap-3">
-      <Button variant="outline" disabled={busy || selected.length < 2} onClick={() => void action(async () => setComparison(await fetchExperimentComparison(id, selected)))}>{t('review.basic_compare')} ({selected.length}/8)</Button>
-      {selected.length > 0 && <Button variant="ghost" size="sm" onClick={() => { selectionTouched.current = true; setSelected([]); setComparison(null) }}>{t('experiments.clear_selection')}</Button>}
-      <label className="ml-auto text-xs">{t('experiments.record_upstream')} <select aria-label={t('experiments.record_upstream')} className={selectClass} value={upstream} onChange={e => setUpstream(e.target.value)}>
+    {(editingRun && !importExisting || runs.some(run => run.state === 'planned' && !run.capture_run_id)) && <div className="flex flex-wrap items-center gap-3">
+      <label className="text-xs">{t('experiments.record_upstream')} <select aria-label={t('experiments.record_upstream')} className={selectClass} value={upstream} onChange={e => setUpstream(e.target.value)}>
         <option value="">—</option>{upstreams.map(u => <option key={u.name} value={u.name}>{u.name}</option>)}
       </select></label>
-    </div>
+    </div>}
     <p className="text-xs text-muted-foreground">{t('review.tasks_hint')}</p>
-    <div className="space-y-2">{runs.map(run => <div key={run.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs">
-      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-1"><input aria-label={t('experiments.select_run', { name: run.name })} type="checkbox" checked={selected.includes(run.id)} disabled={!selected.includes(run.id) && selected.length >= 8} onChange={e => {
+    <div className="divide-y divide-border border-y border-border">{runs.map(run => <div key={run.id} className="task-item flex flex-wrap items-center gap-3 py-3 text-xs">
+      <TaskPreviewTrigger name={run.name} summary={runLabel(run)} details={t(`experiments.states.${run.state}`)}><label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-1"><input className="accent-primary" aria-label={t('experiments.select_run', { name: run.name })} type="checkbox" checked={selected.includes(run.id)} disabled={busy || reviewRunning || (!selected.includes(run.id) && selected.length >= 8)} onChange={e => {
         selectionTouched.current = true
         setSelected(previous => e.target.checked ? [...previous, run.id] : previous.filter(v => v !== run.id))
         setComparison(null)
       }} />
       <div className="min-w-0 flex-1">
-        <p className="font-medium">{run.name}</p>
-        <p className="mt-1 text-muted-foreground">{run.name !== runLabel(run) && run.conditions.agent !== t('review.unlabelled_agent') ? `${runLabel(run)} · ` : ''}{t(`experiments.states.${run.state}`)}</p>
+        <p className="break-words font-medium">{run.name}</p>
+        <p className="mt-1 break-words text-muted-foreground">{run.name !== runLabel(run) && run.conditions.agent !== t('review.unlabelled_agent') ? `${runLabel(run)} · ` : ''}{t(`experiments.states.${run.state}`)}</p>
       </div>
-      </label><Button size="xs" variant="outline" disabled={busy} onClick={() => { setImportExisting(false); setEditingRun(run) }}>{t('experiments.edit_run')}</Button>
-      {run.state === 'planned' && !run.capture_run_id && <Button size="xs" disabled={busy || !upstream} onClick={() => void action(() => startExperimentRun(run, upstream))}>{t('experiments.start')}</Button>}
-      {run.state === 'running' && run.capture_run_id && <Button size="xs" variant="outline" disabled={busy} onClick={() => void action(() => stopExperimentRun(run))}>{t('experiments.stop')}</Button>}
-      <TaskActions kind="run" items={[{ id: run.id, revision: run.revision }]} experimentId={experiment.id} name={run.name} disabled={busy || reviewRunning || run.state === 'running' || !!editingTask || !!editingRun} onChanged={() => {
+      </label></TaskPreviewTrigger><TaskActionBar>
+      {run.state === 'planned' && !run.capture_run_id && <Button className="task-primary-action" size="xs" disabled={busy || !upstream} onClick={() => void action(() => startExperimentRun(run, upstream))}>{t('experiments.start')}</Button>}
+      {run.state === 'running' && run.capture_run_id && <Button className="task-primary-action" size="xs" variant="outline" disabled={busy} onClick={() => void action(() => stopExperimentRun(run))}>{t('experiments.stop')}</Button>}
+      <TaskActions kind="run" items={[{ id: run.id, revision: run.revision }]} experimentId={experiment.id} name={run.name} disabled={busy || reviewRunning || !!editingTask || !!editingRun} deleteDisabled={run.state === 'running'} onEdit={() => { setImportExisting(false); setEditingRun(run) }} editLabel={t('experiments.edit_run')} inline onChanged={() => {
         selectionTouched.current = true
         setSelected(previous => previous.filter(id => id !== run.id))
         saved()
-      }} />
+      }} /></TaskActionBar>
     </div>)}</div>
-    <Pagination offset={offset} total={total} onChange={setOffset} />
+    {total > 20 && <Pagination offset={offset} total={total} onChange={setOffset} />}
+    <div className="flex flex-wrap items-center gap-2"><Button size="sm" variant="ghost" className="text-muted-foreground" disabled={busy || reviewRunning || selected.length < 2} onClick={() => void action(async () => setComparison(await fetchExperimentComparison(id, selected)))}>{t('review.basic_compare')} ({selected.length}/8)</Button>{selected.length > 0 && <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={busy || reviewRunning} onClick={() => { selectionTouched.current = true; setSelected([]); setComparison(null) }}>{t('experiments.clear_selection')}</Button>}</div>
     {comparison && <ComparisonView comparison={comparison} />}
-    <Suspense fallback={<p className="py-4 text-sm text-muted-foreground">{t('common.loading')}</p>}><ReviewPanel key={experiment.id} experiment={experiment} selected={selected} onSaved={setExperiment} onRestoreSelection={restoreSelection} /></Suspense>
+    </section>} /></Suspense>
   </div>
 }
 

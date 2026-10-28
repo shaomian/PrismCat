@@ -58,9 +58,10 @@ export function TraceFilters({ value, upstreams, onChange }: {
           <fieldset className="space-y-2">
             <legend className="text-xs text-muted-foreground">{t('trace_filters.conditions')}</legend>
             <div className="flex flex-wrap gap-x-4 gap-y-1">
-              {([['hasError', 'errors'], ['pinned', 'pinned'], ['todo', 'todo']] as const).map(([field, label]) => <label key={field} className="flex min-h-8 cursor-pointer items-center gap-1.5 text-xs"><input type="checkbox" className="accent-primary" checked={value[field]} onChange={event => change({ [field]: event.target.checked })} />{t(`trace_manager.views.${label}`)}</label>)}
+              {([['hasError', 'errors'], ['pinned', 'pinned']] as const).map(([field, label]) => <label key={field} className="flex min-h-8 cursor-pointer items-center gap-1.5 text-xs"><input type="checkbox" className="accent-primary" checked={value[field]} onChange={event => change({ [field]: event.target.checked })} />{t(`trace_manager.views.${label}`)}</label>)}
             </div>
           </fieldset>
+          {value.label && <div className="space-y-2"><p className="text-xs text-muted-foreground">{t('trace_manager.labels')}</p><button type="button" className="inline-flex max-w-full items-center gap-1.5 rounded bg-muted px-2 py-1 text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-primary" aria-label={t('trace_labels.clear_filter', { label: value.label })} onClick={() => change({ label: '' })}><span className="min-w-0 truncate">{value.label}</span><X className="size-3 shrink-0" /></button></div>}
         </div>
         <div className="mt-4 border-t border-border pt-3">
           <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs text-muted-foreground" disabled={!count} onClick={() => onChange(defaultTraceFilters(value.query))}>{t('trace_filters.clear')}</Button>

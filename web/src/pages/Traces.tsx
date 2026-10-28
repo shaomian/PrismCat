@@ -1,21 +1,41 @@
+import { useListMemory } from '@/hooks/useListMemory'
 import { CaptureRecordingDialog, TraceCapturePanel } from '@/components/TraceCapturePanel'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Network, AlertCircle, Copy, Search, X, ChevronLeft, ChevronRight, Plus, Loader2 } from 'lucide-react'
+import { Network, AlertCircle, Copy, Search, Star, Pin, X, ChevronLeft, ChevronRight, Plus, Loader2, GitMerge } from 'lucide-react'
 import { copyText } from '@/lib/clipboard'
 import { fetchTraces, fetchUpstreams, type TraceSummary, type Upstream } from '@/lib/api'
-import { cn, formatLatency } from '@/lib/utils'
+import { cn, formatDate, formatLatency } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { CopyTraceIdButton } from '@/components/CopyTraceIdButton'
-import { TracePinButton } from '@/components/TraceTaskManager'
-import { TaskActions, TaskBatchActions, TaskSelectionToggle } from '@/components/TaskManagement'
+import { TraceGroupingDialog } from '@/components/TraceGroupingDialog'
+import { TraceTaskControls } from '@/components/TraceTaskMetadata'
+import { TraceIdReference } from '@/components/TraceIdReference'
+import { TraceSourceBadges } from '@/components/TraceOriginBadge'
+import { TaskBatchActions, TaskSelectionToggle } from '@/components/TaskManagement'
+import { TaskPreviewTrigger } from '@/components/TaskHover'
+import type { TraceTaskMetadata } from '@/lib/experiments'
 import { TraceFilters } from '@/components/TraceFilters'
+import { TraceLabels } from '@/components/TraceLabels'
 import { countTraceFilters, defaultTraceFilters, traceListQuery, type TraceListFilters } from '@/lib/trace-filters'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { correlationSettingsPath, useCorrelationStatus } from '@/lib/trace-capture'
 import { toast } from 'sonner'
+
+function traceListTime(timestamp: number) {
+  const date = new Date(timestamp)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function TraceErrorBadge({ count }: { count: number }) {
+  const { t } = useTranslation()
+  if (count <= 0) return null
+  return <span className="inline-flex shrink-0 items-center gap-1 rounded bg-danger/10 px-1.5 py-0.5 text-xs text-danger" title={t('traces.error_count', { count })}>
+    <AlertCircle className="size-3" aria-hidden="true" /><span className="sr-only">{t('traces.errors')}: </span>{count}
+  </span>
+}
 
 export function Traces() {
   const { t, i18n } = useTranslation()
@@ -45,11 +65,22 @@ export function Traces() {
 
   const [page, setPage] = useState<{ scope: string; traces: TraceSummary[]; total: number; failed?: boolean } | null>(null)
   const [upstreams, setUpstreams] = useState<Upstream[]>([])
-  const [filter, setFilter] = useState<TraceListFilters>(() => defaultTraceFilters(searchParams.get('trace_id') || ''))
+  const [filter, setFilter] = useListMemory<TraceListFilters>(`traces.${searchParams.get('trace_id') || ''}.${searchParams.get('label') || ''}`, () => defaultTraceFilters(searchParams.get('trace_id') || '', searchParams.get('label') || ''))
   const [draftQuery, setDraftQuery] = useState(filter.query)
   const [composing, setComposing] = useState(false)
   const [reload, setReload] = useState(0)
+  const [merging, setMerging] = useState<string[] | null>(null)
   const [selection, setSelection] = useState<{ scope: string; ids: string[]; active: boolean }>({ scope: '', ids: [], active: false })
+  const syncFilterURL = useCallback((query: string, label: string) => {
+    setSearchParams(previous => {
+      const params = new URLSearchParams(previous)
+      if (query) params.set('trace_id', query)
+      else params.delete('trace_id')
+      if (label) params.set('label', label)
+      else params.delete('label')
+      return params
+    }, { replace: true })
+  }, [setSearchParams])
   const selectionScope = JSON.stringify({ filter, tab, reload })
   const currentPage = page?.scope === selectionScope ? page : null
   const traces = currentPage?.traces ?? []
@@ -63,6 +94,29 @@ export function Traces() {
   function toggleSelected(id: string, checked: boolean) {
     setSelection({ scope: selectionScope, active: true, ids: checked ? [...selected.filter(value => value !== id), id] : selected.filter(value => value !== id) })
   }
+  function metadataChanged(id: string, metadata: TraceTaskMetadata) {
+    const previousTop = traces.find(item => item.trace_id === id)?.metadata?.top_at || 0
+    if (previousTop !== (metadata.top_at || 0)) {
+      exitSelection()
+      if (metadata.top_at) setFilter(previous => ({ ...previous, offset: 0 }))
+      setReload(previous => previous + 1)
+      return
+    }
+    setPage(previous => previous?.scope === selectionScope ? { ...previous, traces: previous.traces.map(item => item.trace_id === id ? { ...item, metadata } : item) } : previous)
+    if (filter.query || filter.pinned || filter.label) setReload(previous => previous + 1)
+  }
+  function changeFilters(next: TraceListFilters) {
+    exitSelection()
+    const query = composing ? filter.query : draftQuery.trim()
+    setFilter({ ...next, query, offset: 0 })
+    syncFilterURL(query, next.label)
+  }
+  function selectLabel(label: string) { changeFilters({ ...filter, label: filter.label === label ? '' : label }) }
+  const previewFacts = (trace: TraceSummary) => [
+    ...(trace.upstreams?.length ? [{ label: t('traces.upstreams'), value: trace.upstreams.join(', ') }] : []),
+    { label: t('traces.first_request'), value: formatDate(new Date(trace.first_time), i18n.language.startsWith('zh') ? 'zh' : 'en') },
+    { label: t('traces.last_request'), value: formatDate(new Date(trace.last_time), i18n.language.startsWith('zh') ? 'zh' : 'en') },
+  ]
 
   useEffect(() => {
     if (tab !== 'traces') return
@@ -90,13 +144,16 @@ export function Traces() {
     return () => {
       controller.abort()
     }
-  }, [filter, i18n, tab, reload, selectionScope])
+  }, [filter, i18n, tab, reload, selectionScope, setFilter])
 
   useEffect(() => {
     if (composing || draftQuery.trim() === filter.query) return
-    const timer = window.setTimeout(() => setFilter(previous => ({ ...previous, query: draftQuery.trim(), offset: 0 })), 300)
+    const timer = window.setTimeout(() => {
+      setFilter(previous => ({ ...previous, query: draftQuery.trim(), offset: 0 }))
+      syncFilterURL(draftQuery.trim(), filter.label)
+    }, 300)
     return () => window.clearTimeout(timer)
-  }, [draftQuery, filter.query, composing])
+  }, [draftQuery, filter.query, filter.label, composing, syncFilterURL, setFilter])
 
   useEffect(() => {
     fetchUpstreams().then(setUpstreams).catch(() => {})
@@ -104,6 +161,7 @@ export function Traces() {
 
   const handleSearch = () => {
     exitSelection()
+    syncFilterURL(draftQuery.trim(), filter.label)
     if (draftQuery.trim() === filter.query) setReload(previous => previous + 1)
     else setFilter(previous => ({ ...previous, query: draftQuery.trim(), offset: 0 }))
   }
@@ -119,6 +177,7 @@ export function Traces() {
 
   return (
     <div className="space-y-5">
+      {merging && <TraceGroupingDialog action="merge" traceIds={merging} onClose={() => setMerging(null)} onApplied={() => managementChanged()} />}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <span className={cn('inline-flex items-center gap-1.5 text-xs', status?.enabled ? 'text-success' : 'text-muted-foreground')}>
@@ -151,9 +210,9 @@ export function Traces() {
               onKeyDown={event => { if (event.key === 'Enter' && !composing && !event.nativeEvent.isComposing) { event.preventDefault(); handleSearch() } }}
               className="h-9 pl-9 pr-8 text-sm [&::-webkit-search-cancel-button]:appearance-none"
             />
-            {draftQuery && <Button type="button" size="icon-xs" variant="ghost" className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={t('trace_filters.clear_search')} onClick={() => { exitSelection(); setDraftQuery(''); setFilter(previous => ({ ...previous, query: '', offset: 0 })) }}><X className="size-3.5" /></Button>}
+            {draftQuery && <Button type="button" size="icon-xs" variant="ghost" className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={t('trace_filters.clear_search')} onClick={() => { exitSelection(); setDraftQuery(''); setFilter(previous => ({ ...previous, query: '', offset: 0 })); syncFilterURL('', filter.label) }}><X className="size-3.5" /></Button>}
           </div>
-          <TraceFilters value={filter} upstreams={upstreams} onChange={next => { exitSelection(); setFilter({ ...next, query: composing ? filter.query : draftQuery.trim(), offset: 0 }) }} />
+          <TraceFilters value={filter} upstreams={upstreams} onChange={changeFilters} />
         </div>
         {/* Pagination */}
         <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
@@ -184,7 +243,11 @@ export function Traces() {
         </div>
       </div>
 
-      <TaskBatchActions kind="trace" items={selectedItems} archived={filter.archived} onChanged={managementChanged} />
+      <div className="flex flex-wrap items-center gap-2">
+        {selectedItems.length > 1 && <Button size="sm" variant="outline" title={traces.some(trace => selected.includes(trace.trace_id) && trace.sources?.includes('explicit')) ? t('trace_grouping.reasons.explicit_split_only') : undefined} disabled={traces.some(trace => selected.includes(trace.trace_id) && trace.sources?.includes('explicit'))} onClick={() => setMerging([...selected])}><GitMerge className="size-3.5" />{t('trace_grouping.merge')}</Button>}
+        {selectedItems.length > 1 && traces.some(trace => selected.includes(trace.trace_id) && trace.sources?.includes('explicit')) && <span className="text-xs text-muted-foreground">{t('trace_grouping.reasons.explicit_split_only')}</span>}
+        <TaskBatchActions kind="trace" items={selectedItems} archived={filter.archived} onChanged={managementChanged} />
+      </div>
 
       {/* Traces table */}
       {loading ? (
@@ -231,14 +294,13 @@ export function Traces() {
               <thead>
                 <tr className="border-b bg-muted/30">
                   {selecting && <th className="w-10 px-3" aria-label={t('task_management.selection')} />}
-                  <th className="px-4 py-3 text-left font-medium text-xs text-muted-foreground">{t('traces.trace_id')}</th>
+                  <th className="px-4 py-3 text-left font-medium text-xs text-muted-foreground">{t('traces.task')}</th>
                   <th className="px-3 py-3 text-center font-medium text-xs text-muted-foreground">{t('traces.requests')}</th>
                   <th className="px-3 py-3 text-left font-medium text-xs text-muted-foreground">{t('traces.upstreams')}</th>
                   <th className="px-3 py-3 text-right font-medium text-xs text-muted-foreground">{t('traces.duration')}</th>
                   <th className="px-3 py-3 text-right font-medium text-xs text-muted-foreground">{t('traces.tokens')}</th>
-                  <th className="px-3 py-3 text-center font-medium text-xs text-muted-foreground">{t('traces.errors')}</th>
-                  <th className="px-3 py-3 text-right font-medium text-xs text-muted-foreground">{t('traces.time')}</th>
-                  {!selecting && <th className="w-24 px-2" aria-label={t('task_management.actions')} />}
+                  <th className="px-3 py-3 text-right font-medium text-xs text-muted-foreground">{t('traces.last_request')}</th>
+                  {!selecting && <th className="w-12 px-2" aria-label={t('task_management.actions')} />}
                 </tr>
               </thead>
               <tbody>
@@ -246,16 +308,25 @@ export function Traces() {
                   <tr
                     key={trace.trace_id}
                     onClick={() => selecting ? toggleSelected(trace.trace_id, !selected.includes(trace.trace_id)) : navigate(`/traces/${encodeURIComponent(trace.trace_id)}`)}
-                    className={cn('group/trace border-b transition-colors hover:bg-muted/40 cursor-pointer', selecting && selected.includes(trace.trace_id) && 'bg-primary/5')}
+                    className={cn('task-item group/trace border-b transition-colors hover:bg-muted/40 cursor-pointer', selecting && selected.includes(trace.trace_id) && 'bg-primary/5')}
                   >
                     {selecting && <td className="px-3" onClick={event => event.stopPropagation()}><input type="checkbox" aria-label={t('task_management.select_item', { name: trace.metadata?.name || trace.trace_id })} checked={selected.includes(trace.trace_id)} onChange={event => toggleSelected(trace.trace_id, event.target.checked)} /></td>}
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Network className="h-3.5 w-3.5 shrink-0 text-info" />
-                        <div className="min-w-0">{selecting ? <p className="max-w-[240px] truncate font-medium">{trace.metadata?.name || t('trace_manager.unnamed')}</p> : <Link to={`/traces/${encodeURIComponent(trace.trace_id)}`} onClick={event => event.stopPropagation()} className="block max-w-[240px] truncate rounded-sm font-medium transition-colors group-hover/trace:text-primary focus-visible:outline-2 focus-visible:outline-primary">{trace.metadata?.name || t('trace_manager.unnamed')}</Link>}<span className="font-mono text-muted-foreground truncate block max-w-[200px]" title={trace.trace_id}>{trace.trace_id}</span></div>
-                        <CopyTraceIdButton traceId={trace.trace_id} />
-                        <TracePinButton trace={trace} onChange={metadata => setPage(previous => previous?.scope === selectionScope ? { ...previous, traces: previous.traces.map(item => item.trace_id === trace.trace_id ? { ...item, metadata } : item) } : previous)} />
- <span className="flex gap-1 text-xs text-muted-foreground">{trace.sources?.map(source => <span key={source} className="rounded border border-border px-1">{t(`correlation.sources.${source}`)}</span>)}</span>
+                      <div className="trace-copy-scope flex min-w-0 items-start gap-2">
+                        <Network className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                            {selecting ? <p className="max-w-[240px] truncate font-medium">{trace.metadata?.name || t('trace_manager.unnamed')}</p> : <TaskPreviewTrigger name={trace.metadata?.name || trace.trace_id} summary={trace.metadata?.notes} facts={previewFacts(trace)}><Link to={`/traces/${encodeURIComponent(trace.trace_id)}`} onClick={event => event.stopPropagation()} className="block max-w-[240px] truncate rounded-sm font-medium transition-colors group-hover/trace:text-foreground focus-visible:outline-2 focus-visible:outline-primary">{trace.metadata?.name || t('trace_manager.unnamed')}</Link></TaskPreviewTrigger>}
+                            <TraceErrorBadge count={trace.error_count} />
+                            {!!trace.metadata?.top_at && <Pin className="size-3 shrink-0 text-primary" aria-label={t('trace_manager.top')} />}
+                            {trace.metadata?.pinned && <Star className="size-3 shrink-0 fill-warning text-warning" aria-label={t('trace_manager.pinned')} />}
+                            <TraceLabels labels={trace.metadata?.labels ?? []} limit={2} activeLabel={filter.label} onSelect={selecting ? undefined : selectLabel} />
+                          </div>
+                          <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                            <TraceIdReference traceId={trace.trace_id} showCopy={!selecting} />
+                            <TraceSourceBadges sources={trace.sources} origin={trace.origin} />
+                          </div>
+                        </div>
                       </div>
                       {/* Latency bar */}
                       <div className="mt-1.5 h-1.5 w-full rounded-full bg-muted/50">
@@ -271,32 +342,27 @@ export function Traces() {
                       </div>
                     </td>
                     <td className="px-3 py-3 text-center">
-                      <span className="font-mono font-semibold text-foreground/80">{trace.request_count}</span>
+                      <span className="tabular-nums font-medium text-foreground/80">{trace.request_count}</span>
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex flex-wrap gap-1">
                         {(trace.upstreams || []).map(u => (
-                          <span key={u} className="inline-flex items-center h-[18px] px-1.5 rounded-md text-xs font-semibold tracking-tight bg-muted text-muted-foreground">
+                          <span key={u} className="inline-flex items-center min-h-5 px-1.5 py-0.5 rounded text-xs font-normal bg-muted text-muted-foreground">
                             {u}
                           </span>
                         ))}
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-right font-mono text-muted-foreground">
+                    <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">
                       {formatLatency(trace.total_latency_ms)}
                     </td>
-                    <td className="px-3 py-3 text-right font-mono text-muted-foreground">
+                    <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">
                       {typeof trace.usage_total_tokens === 'number' ? trace.usage_total_tokens.toLocaleString() : '-'}
                     </td>
-                    <td className="px-3 py-3 text-center">
-                      <span className={cn('font-mono font-semibold', trace.error_count > 0 ? 'text-danger' : 'text-muted-foreground/60')}>
-                        {trace.error_count}
-                      </span>
-                    </td>
                     <td className="px-3 py-3 text-right text-muted-foreground">
-                      {new Date(trace.last_time).toLocaleTimeString()}
+                      {traceListTime(trace.last_time)}
                     </td>
-                    {!selecting && <td className="px-2 text-right" onClick={event => event.stopPropagation()}><TaskActions kind="trace" items={[{ id: trace.trace_id }]} name={trace.metadata?.name || trace.trace_id} archived={!!trace.metadata?.archived} onChanged={managementChanged} /></td>}
+                    {!selecting && <td className="px-2 text-right" onClick={event => event.stopPropagation()}><TraceTaskControls traceId={trace.trace_id} metadata={trace.metadata} onChange={metadata => metadataChanged(trace.trace_id, metadata)} onManaged={managementChanged} onMerge={trace.sources?.includes('explicit') ? undefined : () => setMerging([trace.trace_id])} onOrganize={() => navigate(`/traces/${encodeURIComponent(trace.trace_id)}?view=requests&organize=1`)} /></td>}
                   </tr>
                 ))}
               </tbody>
@@ -308,29 +374,33 @@ export function Traces() {
             {traces.map(trace => (
               <div
                 key={trace.trace_id}
-                className={cn('relative w-full rounded-lg p-4 text-left transition-all active:scale-[0.99] bg-card hover:bg-card/40 border border-border', selecting && selected.includes(trace.trace_id) && 'border-primary/50 bg-primary/5')}
+                className={cn('task-item relative w-full rounded-lg p-4 text-left transition-all active:scale-[0.99] bg-card hover:bg-card/40 border border-border', selecting && selected.includes(trace.trace_id) && 'border-primary/50 bg-primary/5')}
               >
+                <div className="trace-copy-scope">
                 <div className="flex items-center gap-2 mb-2">
                   {selecting && <input type="checkbox" className="relative z-10" aria-label={t('task_management.select_item', { name: trace.metadata?.name || trace.trace_id })} checked={selected.includes(trace.trace_id)} onChange={event => toggleSelected(trace.trace_id, event.target.checked)} />}
                   <Network className="h-3.5 w-3.5 text-info shrink-0" />
-                  {selecting ? <button type="button" aria-pressed={selected.includes(trace.trace_id)} onClick={() => toggleSelected(trace.trace_id, !selected.includes(trace.trace_id))} className="min-w-0 flex-1 truncate text-left text-xs text-foreground/90 after:absolute after:inset-0 after:rounded-lg">{trace.metadata?.name || trace.trace_id}</button> : <Link to={`/traces/${encodeURIComponent(trace.trace_id)}`} className="min-w-0 flex-1 truncate text-xs text-foreground/90 after:absolute after:inset-0 after:rounded-lg" title={trace.trace_id}>{trace.metadata?.name || trace.trace_id}</Link>}
-                  <span className="relative z-10"><CopyTraceIdButton traceId={trace.trace_id} /></span>
+                  {selecting ? <button type="button" aria-pressed={selected.includes(trace.trace_id)} onClick={() => toggleSelected(trace.trace_id, !selected.includes(trace.trace_id))} className="min-w-0 flex-1 truncate text-left text-xs text-foreground/90 after:absolute after:inset-0 after:rounded-lg">{trace.metadata?.name || t('trace_manager.unnamed')}</button> : <TaskPreviewTrigger name={trace.metadata?.name || trace.trace_id} summary={trace.metadata?.notes} facts={previewFacts(trace)}><Link to={`/traces/${encodeURIComponent(trace.trace_id)}`} className="min-w-0 flex-1 truncate text-xs text-foreground/90 after:absolute after:inset-0 after:rounded-lg">{trace.metadata?.name || t('trace_manager.unnamed')}</Link></TaskPreviewTrigger>}
+                  <TraceErrorBadge count={trace.error_count} />
+                  {!!trace.metadata?.top_at && <Pin className="size-3 shrink-0 text-primary" aria-label={t('trace_manager.top')} />}
+                  {trace.metadata?.pinned && <Star className="size-3 shrink-0 fill-warning text-warning" aria-label={t('trace_manager.pinned')} />}
+                  {!selecting && <TraceTaskControls traceId={trace.trace_id} metadata={trace.metadata} onChange={metadata => metadataChanged(trace.trace_id, metadata)} onManaged={managementChanged} onMerge={trace.sources?.includes('explicit') ? undefined : () => setMerging([trace.trace_id])} onOrganize={() => navigate(`/traces/${encodeURIComponent(trace.trace_id)}?view=requests&organize=1`)} />}
+                </div>
+                <TraceLabels labels={trace.metadata?.labels ?? []} limit={2} activeLabel={filter.label} onSelect={selecting ? undefined : selectLabel} className="mb-2" />
+                <div className="mb-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <TraceIdReference traceId={trace.trace_id} showCopy={!selecting} />
+                  <TraceSourceBadges sources={trace.sources} origin={trace.origin} />
+                </div>
                 </div>
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                   {(trace.upstreams || []).map(u => (
-                    <span key={u} className="text-xs font-semibold tracking-tight bg-muted text-muted-foreground px-1.5 py-0.5 rounded-md">{u}</span>
+                    <span key={u} className="text-xs font-normal bg-muted text-muted-foreground px-1.5 py-0.5 rounded-md">{u}</span>
                   ))}
                   <span className="text-xs font-medium bg-muted text-muted-foreground px-1.5 py-0.5 rounded">{trace.request_count} reqs</span>
-                  {trace.error_count > 0 && (
-                    <span className="text-xs font-medium bg-danger/10 text-danger px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                      <AlertCircle className="h-2.5 w-2.5" />{trace.error_count}
-                    </span>
-                  )}
-                  <span className="text-xs font-mono text-muted-foreground ml-auto">{formatLatency(trace.total_latency_ms)}</span>
+                  <span className="text-xs tabular-nums text-muted-foreground ml-auto">{formatLatency(trace.total_latency_ms)}</span>
                 </div>
                 <div className="mb-2 flex min-h-8 items-center justify-between gap-2">
-                  <span className="text-xs font-mono text-muted-foreground/70">{t('traces.tokens')}: {typeof trace.usage_total_tokens === 'number' ? trace.usage_total_tokens.toLocaleString() : '-'}</span>
-                  {!selecting && <span className="relative z-10"><TaskActions kind="trace" items={[{ id: trace.trace_id }]} name={trace.metadata?.name || trace.trace_id} archived={!!trace.metadata?.archived} onChanged={managementChanged} /></span>}
+                  <span className="text-xs tabular-nums text-muted-foreground">{t('traces.tokens')}: {typeof trace.usage_total_tokens === 'number' ? trace.usage_total_tokens.toLocaleString() : '-'}</span>
                 </div>
                 <div className="h-1.5 w-full rounded-full bg-muted/50">
                   <div
@@ -342,8 +412,7 @@ export function Traces() {
                   />
                 </div>
                 <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground/60">
-                  <span>{new Date(trace.first_time).toLocaleString()}</span>
-                  <span>{new Date(trace.last_time).toLocaleTimeString()}</span>
+                  <span>{t('traces.last_request')}: {traceListTime(trace.last_time)}</span>
                 </div>
               </div>
             ))}

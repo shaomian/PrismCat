@@ -25,14 +25,15 @@ test('trace defaults show all unarchived history without a silent time cutoff', 
 })
 
 test('time, entry, archive and task conditions remain independent and combine in one query', () => {
-  const filters = { ...defaultTraceFilters('login'), period: '7d', upstream: 'agent-a', archived: true, hasError: true, pinned: true, todo: true, offset: 20 }
+  const filters = { ...defaultTraceFilters('login'), period: '7d', upstream: 'agent-a', archived: true, hasError: true, pinned: true, label: '回归测试', offset: 20 }
   const query = traceListQuery(filters, new Date('2026-10-27T06:30:00Z'))
   assert.equal(query.start_time, '2026-10-20T06:30:00.000Z')
   assert.equal(query.upstream, 'agent-a')
   assert.equal(query.archived, true)
   assert.equal(query.has_error, true)
   assert.equal(query.pinned, true)
-  assert.equal(query.status, 'todo')
+  assert.equal(query.status, undefined)
+  assert.equal(query.label, '回归测试')
   assert.equal(query.offset, 20)
   assert.equal(countTraceFilters(filters), 6)
   const reset = defaultTraceFilters(filters.query)
@@ -58,4 +59,13 @@ test('the thirty-day option retains rolling duration without restricting other c
   assert.equal(query.start_time, '2026-09-27T12:00:00.000Z')
   assert.equal(query.has_error, true)
   assert.equal(query.archived, false)
+})
+
+test('label deep links combine with search and retired task statuses cannot silently filter results', () => {
+  const filters = defaultTraceFilters('login', '  安全验证  ')
+  assert.equal(filters.label, '安全验证')
+  assert.equal(countTraceFilters(filters), 1)
+  assert.equal(traceListQuery({ ...filters, todo: true }).status, undefined)
+  assert.equal(traceListQuery(filters).label, '安全验证')
+  assert.equal(traceListQuery(defaultTraceFilters(filters.query)).label, undefined)
 })

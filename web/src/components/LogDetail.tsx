@@ -2,7 +2,7 @@ import { TraceAssociationEditor } from '@/components/TraceAssociationEditor'
 import { toast } from 'sonner'
 import { cn, formatDate, formatLatency, formatSize, getStatusColor, METHOD_CLASS, FOCUS_RING } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
-import { Copy, Check, Zap, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, FileCode, ListTree, Layers, RotateCcw, Maximize2, Minimize2, ExternalLink, Terminal, Bookmark, BookmarkCheck, CheckCircle2, CircleDot, Tags, Search, X } from 'lucide-react'
+import { Copy, Check, Zap, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, FileCode, ListTree, Layers, RotateCcw, Maximize2, Minimize2, ExternalLink, Terminal, Bookmark, BookmarkCheck, Tags, Search, X } from 'lucide-react'
 import { fetchBlob, fetchLogBody, updateLogAnnotation } from '@/lib/api'
 import type { LiveLogEvent, RequestLog } from '@/lib/api'
 import { startTransition, createContext, useCallback, useContext, useDeferredValue, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
@@ -689,10 +689,11 @@ export function LogDetail({
             })
         } catch (err) {
             console.error('Failed to save log annotation:', err)
+            toast.error(t('log_annotation.update_failed'))
         } finally {
             setAnnotationSaving(false)
         }
-    }, [annotationSaving, displayLog, onLogChange])
+    }, [annotationSaving, displayLog, onLogChange, t])
 
     useEffect(() => {
         if (!displayLog) return
@@ -956,54 +957,26 @@ export function LogDetail({
                 <div className="custom-scrollbar flex-1 space-y-4 overflow-y-auto bg-background px-5 py-4">
                     <div className="rounded-md border border-border bg-card px-3 py-2.5">
                         <div className="flex flex-wrap items-center gap-2">
-                            <Button
-                                type="button"
-                                variant={annotation.saved ? 'default' : 'outline'}
-                                size="sm"
-                                disabled={annotationSaving}
-                                onClick={() => saveAnnotation({
-                                    saved: !annotation.saved,
-                                    status: annotation.saved ? 'none' : annotation.status,
-                                })}
-                                className="h-8 gap-1.5 rounded-lg px-3 text-xs font-semibold"
-                            >
-                                {annotation.saved ? <BookmarkCheck className="h-3.5 w-3.5" /> : <Bookmark className="h-3.5 w-3.5" />}
-                                {annotation.saved ? t('log_annotation.saved') : t('log_annotation.save')}
-                            </Button>
-                            <Button
-                                type="button"
-                                variant={annotation.status === 'todo' ? 'secondary' : 'outline'}
-                                size="sm"
-                                disabled={annotationSaving}
-                                onClick={() => saveAnnotation({
-                                    saved: true,
-                                    status: annotation.status === 'todo' ? 'none' : 'todo',
-                                })}
-                                className={cn(
-                                    "h-8 gap-1.5 rounded-lg px-3 text-xs font-semibold",
-                                    annotation.status === 'todo' && "bg-warning/10 text-warning hover:bg-warning/15 dark:text-warning"
-                                )}
-                            >
-                                <CircleDot className="h-3.5 w-3.5" />
-                                {t('log_annotation.todo')}
-                            </Button>
-                            <Button
-                                type="button"
-                                variant={annotation.status === 'done' ? 'secondary' : 'outline'}
-                                size="sm"
-                                disabled={annotationSaving}
-                                onClick={() => saveAnnotation({
-                                    saved: true,
-                                    status: annotation.status === 'done' ? 'none' : 'done',
-                                })}
-                                className={cn(
-                                    "h-8 gap-1.5 rounded-lg px-3 text-xs font-semibold",
-                                    annotation.status === 'done' && "bg-success/10 text-success hover:bg-success/15 dark:text-success"
-                                )}
-                            >
-                                <CheckCircle2 className="h-3.5 w-3.5" />
-                                {t('log_annotation.done')}
-                            </Button>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        type="button"
+                                        variant={annotation.saved ? 'default' : 'outline'}
+                                        size="sm"
+                                        aria-pressed={annotation.saved}
+                                        disabled={annotationSaving}
+                                        onClick={() => saveAnnotation({
+                                            saved: !annotation.saved,
+                                            status: annotation.saved ? 'none' : annotation.status,
+                                        })}
+                                        className="h-8 gap-1.5 rounded-lg px-3 text-xs font-semibold"
+                                    >
+                                        {annotation.saved ? <BookmarkCheck className="h-3.5 w-3.5" /> : <Bookmark className="h-3.5 w-3.5" />}
+                                        {annotation.saved ? t('log_annotation.saved') : t('log_annotation.save')}
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-72">{t('log_annotation.favorite_hint')}</TooltipContent>
+                            </Tooltip>
                             {annotationSaving && (
                                 <span className="text-xs font-medium text-muted-foreground">{t('common.loading')}</span>
                             )}

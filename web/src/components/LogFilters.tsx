@@ -126,17 +126,16 @@ export function LogFilters({
     const isTraceIdChanged = (draft.trace_id || '') !== (filter.trace_id || '')
     const isTagChanged = (draft.tag || '') !== (filter.tag || '')
     const isSavedChanged = (draft.saved ?? undefined) !== (filter.saved ?? undefined)
-    const isAnnotationStatusChanged = (draft.annotation_status || '') !== (filter.annotation_status || '')
     const isAnnotationLabelChanged = (draft.annotation_label || '') !== (filter.annotation_label || '')
     const isTimeChanged = (draft.start_time || '') !== (filter.start_time || '') ||
         (draft.end_time || '') !== (filter.end_time || '')
     const hasChanges = isPathChanged || isUpstreamChanged || isMethodChanged || isStatusCodeChanged || isTraceIdChanged || isTagChanged ||
-        isSavedChanged || isAnnotationStatusChanged || isAnnotationLabelChanged || isTimeChanged
+        isSavedChanged || isAnnotationLabelChanged || isTimeChanged
 
     // 次级筛选默认收起,但只要有生效的条件就展开,避免"筛了却看不见"
     const activeAdvancedCount = [
         draft.upstream, draft.method, draft.status_code, draft.tag,
-        draft.saved, draft.annotation_status, draft.annotation_label,
+        draft.saved, draft.annotation_label,
     ].filter(value => value !== undefined && value !== '').length
     const [showAdvanced, setShowAdvanced] = useState(activeAdvancedCount > 0)
 
@@ -337,23 +336,6 @@ export function LogFilters({
                             <SelectItem value="all">{t('filters.saved_all')}</SelectItem>
                             <SelectItem value="saved">{t('filters.saved_only')}</SelectItem>
                             <SelectItem value="unsaved">{t('filters.unsaved_only')}</SelectItem>
-                        </SelectContent>
-                    </Select>
-
-                    <Select
-                        value={draft.annotation_status || 'all'}
-                        onValueChange={(val) => setDraft({ ...draft, annotation_status: val === 'all' ? undefined : val as LogFilter['annotation_status'] })}
-                    >
-                        <SelectTrigger className={cn(
-                            "w-full h-8 bg-background border border-input hover:bg-accent",
-                            isAnnotationStatusChanged && "border-primary/50 ring-1 ring-primary/20"
-                        )}>
-                            <SelectValue placeholder={t('filters.annotation_status')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">{t('filters.annotation_status')}</SelectItem>
-                            <SelectItem value="todo">{t('log_annotation.todo')}</SelectItem>
-                            <SelectItem value="done">{t('log_annotation.done')}</SelectItem>
                         </SelectContent>
                     </Select>
 

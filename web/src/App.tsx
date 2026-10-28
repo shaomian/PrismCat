@@ -12,6 +12,7 @@ import { Suspense, lazy, useState, useEffect } from 'react'
 import { fetchAuthStatus, fetchConfig, login, logout as logoutRequest, onAuthExpired, setupPassword } from '@/lib/api'
 import { isSettingsTab, logRequestDiffRoute, settingsTabLabelKeys, settingsTabPath, settingsTabs } from '@/lib/routes'
 import { Login } from '@/pages/Login'
+import { TaskPreviewProvider } from '@/components/TaskHover'
 
 const PlaygroundPage = lazy(async () => {
   const module = await import('@/pages/Playground')
@@ -35,6 +36,8 @@ const TraceDetailPage = lazy(async () => {
 
 const ExperimentsPage = lazy(async () => { const module = await import('@/pages/Experiments'); return { default: module.Experiments } })
 
+const listScrollPositions = new Map<string, number>()
+
 interface AppLayoutProps {
   onSignOut: () => void
 }
@@ -55,8 +58,35 @@ function AppLayout({ onSignOut }: AppLayoutProps) {
   }, [])
 
   useEffect(() => {
-    window.scrollTo({ top: 0, left: 0 })
-  }, [location.pathname])
+    const key = location.pathname + location.search
+    const isList = ['/', '/traces', '/experiments'].includes(location.pathname)
+    const target = isList ? listScrollPositions.get(key) || 0 : 0
+    let restoring = target > 0
+    let lastPosition = target
+    window.scrollTo(0, target)
+    const restore = () => {
+      if (!restoring) return
+      window.scrollTo(0, target)
+      if (window.scrollY >= target) restoring = false
+    }
+    const observer = new ResizeObserver(restore)
+    if (restoring) observer.observe(document.body)
+    const cancel = () => { restoring = false }
+    const record = () => { if (!restoring) lastPosition = window.scrollY }
+    window.addEventListener('scroll', record, { passive: true })
+    window.addEventListener('wheel', cancel, { passive: true })
+    window.addEventListener('touchstart', cancel, { passive: true })
+    window.addEventListener('keydown', cancel)
+    const timer = window.setTimeout(() => { restoring = false; observer.disconnect() }, 5000)
+    return () => {
+      if (isList) listScrollPositions.set(key, lastPosition)
+      observer.disconnect(); window.clearTimeout(timer)
+      window.removeEventListener('scroll', record)
+      window.removeEventListener('wheel', cancel)
+      window.removeEventListener('touchstart', cancel)
+      window.removeEventListener('keydown', cancel)
+    }
+  }, [location.pathname, location.search])
 
   // 按实际使用频率排序:调用链是给 agent 场景准备的,多数人用不到,不占第二位
   const navItems = [
@@ -359,7 +389,7 @@ function App() {
   return (
     <BrowserRouter>
       <TooltipProvider>
-        <AppContent />
+        <TaskPreviewProvider><AppContent /></TaskPreviewProvider>
         <Toaster position="top-right" expand={true} richColors />
       </TooltipProvider>
     </BrowserRouter>

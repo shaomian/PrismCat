@@ -95,4 +95,32 @@ func TestExperimentWorkflowComparisonAndOwnership(t *testing.T) {
 	if rr.Code != 200 || !strings.Contains(rr.Body.String(), "Login task") {
 		t.Fatalf("name search failed: %s", rr.Body)
 	}
+	rr = request("GET", "/api/traces/task-a/metadata", nil)
+	var metadata storage.TraceMetadata
+	if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &metadata) != nil {
+		t.Fatalf("load metadata: %d %s", rr.Code, rr.Body)
+	}
+	metadata.TopAt = 1
+	rr = request("PUT", "/api/traces/task-a/metadata", metadata)
+	if rr.Code != 200 {
+		t.Fatalf("pin to top: %d %s", rr.Code, rr.Body)
+	}
+	var pinned storage.TraceMetadata
+	if err = json.Unmarshal(rr.Body.Bytes(), &pinned); err != nil || pinned.TopAt <= 1 || !pinned.Pinned {
+		t.Fatalf("top position changed favorite or lacks server time: %+v %v", pinned, err)
+	}
+	if rr = request("PUT", "/api/traces/task-a/metadata", metadata); rr.Code != 409 {
+		t.Fatalf("stale top update accepted: %d %s", rr.Code, rr.Body)
+	}
+	rr = request("GET", "/api/traces?limit=1&offset=0", nil)
+	var page struct {
+		Traces []storage.TraceSummary `json:"traces"`
+	}
+	if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &page) != nil || len(page.Traces) != 1 || page.Traces[0].TraceID != "task-a" {
+		t.Fatalf("top was not ordered before pagination: %d %s", rr.Code, rr.Body)
+	}
+	pinned.TopAt = -1
+	if rr = request("PUT", "/api/traces/task-a/metadata", pinned); rr.Code != 400 {
+		t.Fatalf("negative top position accepted: %d %s", rr.Code, rr.Body)
+	}
 }

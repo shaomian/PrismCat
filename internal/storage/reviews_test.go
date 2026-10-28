@@ -38,7 +38,7 @@ func TestReviewTemplateSnapshotAndLightweightCatalog(t *testing.T) {
 		t.Fatalf("stale template save accepted: %v", err)
 	}
 	cards, _, err := r.ListExperiments("", false, 0, 20)
-	if err != nil || len(cards) != 1 || cards[0].Review != nil || cards[0].ReviewSummary.PointCount != 1 {
+	if err != nil || len(cards) != 1 || cards[0].Review != nil || cards[0].ReviewSummary.PointCount != 1 || cards[0].ReviewSummary.TemplateID != loaded.Review.TemplateID {
 		t.Fatalf("catalog loaded full config: %+v %v", cards, err)
 	}
 	v.Archived = true

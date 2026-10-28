@@ -84,6 +84,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/capture-runs", h.handleCaptureRuns)
 	mux.HandleFunc("/api/capture-runs/", h.handleStopCapture)
 	mux.HandleFunc("/api/traces", h.handleTraces)
+	mux.HandleFunc("/api/trace-grouping/", h.handleTraceGrouping)
 	mux.HandleFunc("/api/traces/", h.handleTraceDetail)
 	mux.HandleFunc("/api/experiments", h.handleExperiments)
 	mux.HandleFunc("/api/experiments/", h.handleExperimentDetail)
@@ -569,7 +570,8 @@ func (h *Handler) handleTraces(w http.ResponseWriter, r *http.Request) {
 
 	query := r.URL.Query()
 	filter := storage.TraceFilter{
-		Query: query.Get("q"), Status: query.Get("status"), Label: query.Get("label"),
+		Mergeable: query.Get("mergeable") == "true",
+		Query:     query.Get("q"), Status: query.Get("status"), Label: query.Get("label"),
 		TraceID:  query.Get("trace_id"),
 		Upstream: query.Get("upstream"),
 		Tag:      query.Get("tag"),
@@ -622,6 +624,23 @@ func (h *Handler) handleTraces(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleTraceDetail(w http.ResponseWriter, r *http.Request) {
+	if repo, ok := h.repo.(interface{ ResolveTrace(string) (string, error) }); ok {
+		path := strings.TrimPrefix(r.URL.Path, "/api/traces/")
+		suffix := ""
+		for _, candidate := range []string{"/metadata", "/timeline", "/diagram", "/export"} {
+			if strings.HasSuffix(path, candidate) {
+				suffix = candidate
+				path = strings.TrimSuffix(path, candidate)
+				break
+			}
+		}
+		resolved, err := repo.ResolveTrace(path)
+		if err != nil {
+			h.jsonError(w, err.Error(), 500)
+			return
+		}
+		r.URL.Path = "/api/traces/" + resolved + suffix
+	}
 	if id, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/api/traces/"), "/metadata"); ok {
 		h.handleTraceMetadata(w, r, id)
 		return

@@ -1,3 +1,4 @@
+import { useListMemory } from '@/hooks/useListMemory'
 import { Suspense, lazy, startTransition, useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { buildLogsExportUrl, fetchLogs, fetchLog, fetchStats, fetchUpstreams } from '@/lib/api'
 import type { RequestLog, LogStats, Upstream, LogFilter, LogListResponse } from '@/lib/api'
@@ -23,7 +24,7 @@ export function Dashboard() {
     const [loading, setLoading] = useState(true)
     const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null)
     const [selectedLogLoading, setSelectedLogLoading] = useState(false)
-    const [filter, setFilter] = useState<LogFilter>({ limit: 20, offset: 0 })
+    const [filter, setFilter] = useListMemory<LogFilter>('logs.filter', { limit: 20, offset: 0 })
     const selectSeq = useRef(0)
 
     // 加载日志
@@ -165,6 +166,7 @@ export function Dashboard() {
                 {/* 日志列表 */}
                 <LogTable
                     logs={logs}
+                    filtered={Object.entries(filter).some(([key, value]) => !['limit', 'offset'].includes(key) && value !== undefined && value !== '')}
                     loading={loading}
                     onSelect={handleSelectLog}
                     selectedId={selectedLog?.id}

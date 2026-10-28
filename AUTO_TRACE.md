@@ -39,7 +39,15 @@ Traces loads lightweight status only; capture aggregates load when their tab ope
 
 ## Corrections and limits
 
-In log details, choose **Adjust assignment** to move a request to a trace or split it into a new one. Corrections are version checked, locked against automatic changes, and audited in the database. Explicit-header assignments cannot be changed here. Lists, filters, exports, timelines, and analysis use the same effective grouping, with revision-aware cache invalidation.
+In the trace list, choose **More → Merge into another trace** to move an entire source into an existing target, retaining the target ID, name, top position and archive state. Source favorite protection is preserved. Batch manage also supports merging several selected traces; the first is initially the target and can be changed by search. Traces containing explicit client IDs support splitting only, not merging or moving.
+
+In **Request view → Organize requests**, select one or more requests and move them to an existing trace or split them together into one new trace. Checkboxes remain hidden outside selection. Splitting an explicit trace preserves its original client ID, headers and bodies; manual effective grouping survives automatic inference and delayed response snapshots.
+
+Whole merges redirect old links and late requests carrying the same source trace identity to the target, while new task identities remain independent. Partial moves/splits affect only selected requests and do not redirect the source. Statistics are recomputed, display order follows real time, and only verified internal causal edges survive. Merging does not invent causal edges.
+
+A versioned preview protects against changed sources, targets and review references. Active requests, recordings and associated reviews must finish first. Each batch is transactional. Existing review trace samples freeze by log ID, including when run information is edited; removing and re-adding a trace reference explicitly selects its current membership. Historical reports remain unchanged. No AI calls are made.
+
+New split traces show a read-only “Manually split” system badge in lists and details instead of redundant assignment-source badges. Underlying source classification and merge restrictions remain intact. Hover, keyboard focus or tap reveals the source Trace IDs, request count at creation and split time. Custom labels, renaming, favorites and archiving do not alter it; merging into another trace does not transfer it. Existing recorded splits are recognized without guessing from ID prefixes, scanning bodies or calling AI.
 
 Cross-entry matching, historical rebuilds, generic compaction bridges and complex subagent relationships remain future work. Independent subagents, auxiliary calls, compressed context, and automated user-role messages may lack sufficient identity information. Capture runs and manual corrections cover those cases without inventing causal relationships.
 
@@ -53,4 +61,4 @@ Protocol references: [OpenAI WebSocket mode](https://developers.openai.com/api/d
 
 ## Managing tasks and captures
 
-Use the Manage menu to archive, restore or delete items. Click Batch manage to select items on the current page; individual menus are hidden in this mode. Trace deletion includes its logs; capture deletion preserves original logs and trace membership. Active or referenced sources must be resolved before deletion. See [Task management and cleanup](TASK_MANAGEMENT.md).
+Trace lists and details offer a copy icon next to the ID, revealed on desktop when hovering or focusing the task information area and kept visible on touch devices. List IDs and source badges share a row; copy controls reserve their space to avoid layout shifts. List editing, top positions, favorites, grouping, archive and delete live in More. Details omit that duplicate menu and reveal an edit icon next to the task name on hover or keyboard focus. Top positions affect ordering; favorites protect logs. Archive removes top positions and preserves favorites. Hover or keyboard focus reveals More on desktop; touch devices keep it visible. Batch manage hides individual actions. Trace deletion includes its logs; capture deletion preserves original logs and trace membership. Active or referenced sources must be resolved before deletion. See [Task management and cleanup](TASK_MANAGEMENT.md).

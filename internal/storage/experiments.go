@@ -13,14 +13,18 @@ import (
 )
 
 type TraceMetadata struct {
-	TraceID  string   `json:"trace_id"`
-	Name     string   `json:"name"`
-	Notes    string   `json:"notes"`
-	Labels   []string `json:"labels"`
-	Pinned   bool     `json:"pinned"`
-	Archived bool     `json:"archived"`
-	Status   string   `json:"status"`
-	Revision int64    `json:"revision"`
+	Origin  *TraceOrigin `json:"origin,omitempty"` // Read-only, derived from grouping history.
+	TraceID string       `json:"trace_id"`
+	Name    string       `json:"name"`
+	Notes   string       `json:"notes"`
+	Labels  []string     `json:"labels"`
+	Pinned  bool         `json:"pinned"`
+	// TopAt is server-assigned Unix milliseconds. A positive value requests
+	// pinning to the top; zero removes it. Pinned retains its favorite meaning.
+	TopAt    int64  `json:"top_at,omitempty"`
+	Archived bool   `json:"archived"`
+	Status   string `json:"status"`
+	Revision int64  `json:"revision"`
 }
 
 // ExperimentRepository is optional to preserve existing repository integrations.
@@ -67,6 +71,12 @@ func (r *SQLiteRepository) migrateExperiments() error {
 	if err = r.migrateTaskManagement(); err != nil {
 		return err
 	}
+	if err = r.migrateTraceOrdering(); err != nil {
+		return err
+	}
+	if err = r.migrateTraceGrouping(); err != nil {
+		return err
+	}
 	return r.migrateTraceRetention()
 }
 
@@ -80,19 +90,30 @@ func (r *SQLiteRepository) GetTraceMetadataDocument(id string) (TraceMetadata, e
 		if err == nil && count == 0 {
 			err = sql.ErrNoRows
 		}
+		if err == nil {
+			m.Origin, err = r.traceOrigin(id)
+		}
 		return m, err
 	}
 	if err == nil {
 		err = json.Unmarshal([]byte(raw), &m)
 	}
+	if err == nil {
+		m.Origin, err = r.traceOrigin(id)
+	}
 	return m, err
 }
 
 func (r *SQLiteRepository) SaveTraceMetadata(m TraceMetadata) (TraceMetadata, error) {
+	// The caller cannot forge, edit or remove a system provenance marker.
+	m.Origin = nil
 	m.Name = strings.TrimSpace(m.Name)
 	m.Labels = normalizeLabels(m.Labels)
 	if len(m.Name) > 512 || len(m.Notes) > 16000 || len(m.Labels) > 20 {
 		return m, fmt.Errorf("%w: trace metadata too large", benchmark.ErrInvalid)
+	}
+	if m.TopAt < 0 {
+		return m, fmt.Errorf("%w: invalid trace top time", benchmark.ErrInvalid)
 	}
 	if m.Status == "" {
 		m.Status = "none"
@@ -118,18 +139,36 @@ func (r *SQLiteRepository) SaveTraceMetadata(m TraceMetadata) (TraceMetadata, er
 		return m, sql.ErrNoRows
 	}
 	var revision int64
-	err = tx.QueryRow("SELECT revision FROM trace_metadata WHERE trace_id=?", m.TraceID).Scan(&revision)
+	var previousDocument string
+	err = tx.QueryRow("SELECT revision,document FROM trace_metadata WHERE trace_id=?", m.TraceID).Scan(&revision, &previousDocument)
 	if err != nil && err != sql.ErrNoRows {
 		return m, err
 	}
 	if revision != m.Revision {
 		return m, ErrCorrelationConflict
 	}
+	var previous TraceMetadata
+	if previousDocument != "" {
+		if err = json.Unmarshal([]byte(previousDocument), &previous); err != nil {
+			return m, err
+		}
+	}
+	if m.Archived {
+		m.TopAt = 0
+	} else if m.TopAt > 0 {
+		m.TopAt = previous.TopAt
+		if m.TopAt == 0 {
+			m.TopAt = time.Now().UnixMilli()
+		}
+	}
 	m.Revision++
 	raw, _ := json.Marshal(m)
 	_, err = tx.Exec("INSERT INTO trace_metadata VALUES(?,?,?) ON CONFLICT(trace_id) DO UPDATE SET document=excluded.document,revision=excluded.revision", m.TraceID, string(raw), m.Revision)
 	if err == nil {
 		err = tx.Commit()
+	}
+	if err == nil {
+		m.Origin, err = r.traceOrigin(m.TraceID)
 	}
 	return m, err
 }
@@ -154,7 +193,7 @@ func (r *SQLiteRepository) ListExperiments(q string, archived bool, offset, limi
 	if err := r.db.QueryRow("SELECT COUNT(*) FROM experiments "+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := r.db.Query("SELECT json_remove(document,'$.task','$.review','$.notes'),(SELECT COUNT(*) FROM experiment_runs WHERE experiment_id=experiments.id),COALESCE((SELECT status FROM review_reports WHERE experiment_id=experiments.id ORDER BY created_at DESC,id DESC LIMIT 1),''),COALESCE(json_extract(document,'$.review.template_name'),''),COALESCE(json_array_length(document,'$.review.selected'),0) FROM experiments "+where+" ORDER BY updated_at DESC,id LIMIT ? OFFSET ?", append(args, limit, max(0, offset))...)
+	rows, err := r.db.Query("SELECT json_remove(document,'$.task','$.review','$.notes'),(SELECT COUNT(*) FROM experiment_runs WHERE experiment_id=experiments.id),COALESCE((SELECT status FROM review_reports WHERE experiment_id=experiments.id ORDER BY created_at DESC,id DESC LIMIT 1),''),COALESCE(json_extract(document,'$.review.template_name'),''),COALESCE(json_array_length(document,'$.review.selected'),0),COALESCE(json_extract(document,'$.review.template_id'),'') FROM experiments "+where+" ORDER BY updated_at DESC,id LIMIT ? OFFSET ?", append(args, limit, max(0, offset))...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -163,10 +202,10 @@ func (r *SQLiteRepository) ListExperiments(q string, archived bool, offset, limi
 	for rows.Next() {
 		var raw string
 		var count int
-		var status, templateName string
+		var status, templateName, templateID string
 		var pointCount int
 		var e benchmark.Experiment
-		if err = rows.Scan(&raw, &count, &status, &templateName, &pointCount); err != nil {
+		if err = rows.Scan(&raw, &count, &status, &templateName, &pointCount, &templateID); err != nil {
 			return nil, 0, err
 		}
 		if err = json.Unmarshal([]byte(raw), &e); err != nil {
@@ -174,7 +213,7 @@ func (r *SQLiteRepository) ListExperiments(q string, archived bool, offset, limi
 		}
 		e.RunCount = count
 		e.Task = benchmark.Task{}
-		e.ReviewSummary = &benchmark.ReviewSummary{Status: status, TemplateName: templateName, PointCount: pointCount}
+		e.ReviewSummary = &benchmark.ReviewSummary{Status: status, TemplateID: templateID, TemplateName: templateName, PointCount: pointCount}
 		e.Review = nil
 		items = append(items, e)
 	}
@@ -374,6 +413,11 @@ func (r *SQLiteRepository) SaveExperimentRun(run benchmark.Run) (benchmark.Run, 
 			return run, err
 		}
 	}
+	for _, table := range []string{"experiment_trace_samples", "experiment_trace_snapshots"} {
+		if _, err = tx.Exec("DELETE FROM "+table+" WHERE run_id=? AND trace_id NOT IN (SELECT trace_id FROM experiment_run_traces WHERE run_id=?)", run.ID, run.ID); err != nil {
+			return run, err
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		return run, err
 	}
@@ -488,8 +532,8 @@ func (r *SQLiteRepository) StopExperimentCapture(id string, revision int64) (ben
 func (r *SQLiteRepository) ExperimentLogs(ctx context.Context, id string, limit int) ([]*RequestLog, error) {
 	rows, err := r.db.QueryContext(ctx, `
 	SELECT id,created_at,method,path,status_code,latency_ms,error,trace_id,COALESCE(websocket_info,''),usage_input_tokens,usage_output_tokens,usage_total_tokens
-	FROM request_logs WHERE ((capture_run_id!='' AND capture_run_id=(SELECT capture_run_id FROM experiment_runs WHERE id=?)) OR trace_id IN (SELECT trace_id FROM experiment_run_traces WHERE run_id=?)) AND COALESCE(tag,'') NOT LIKE 'prismcat-analysis%' ORDER BY created_at_unix_ms,id LIMIT ?
-	`, id, id, limit)
+	FROM request_logs l WHERE ((capture_run_id!='' AND capture_run_id=(SELECT capture_run_id FROM experiment_runs WHERE id=?)) OR trace_id IN (SELECT et.trace_id FROM experiment_run_traces et WHERE run_id=? AND NOT EXISTS(SELECT 1 FROM experiment_trace_snapshots s WHERE s.run_id=et.run_id AND s.trace_id=et.trace_id)) OR EXISTS(SELECT 1 FROM experiment_trace_samples s WHERE s.run_id=? AND s.log_id=l.id)) AND COALESCE(tag,'') NOT LIKE 'prismcat-analysis%' ORDER BY created_at_unix_ms,id LIMIT ?
+	`, id, id, id, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -237,6 +237,8 @@ func taskReferences(ctx context.Context, tx *sql.Tx, kind, id string) ([]TaskRef
 	}
 	query := `SELECT e.id,COALESCE(json_extract(e.document,'$.name'),e.id) FROM experiments e WHERE ` + direct + ` OR EXISTS(SELECT 1 FROM experiment_runs er JOIN request_logs l ON l.capture_run_id=er.capture_run_id AND er.capture_run_id!='' WHERE er.experiment_id=e.id AND ` + predicate + `) OR EXISTS(SELECT 1 FROM review_card_logs cl JOIN request_logs l ON l.id=cl.log_id WHERE cl.experiment_id=e.id AND ` + predicate + `)`
 	args := []any{id, id, id}
+	query += ` OR EXISTS(SELECT 1 FROM experiment_trace_samples s JOIN experiment_runs er ON er.id=s.run_id JOIN request_logs l ON l.id=s.log_id WHERE er.experiment_id=e.id AND ` + predicate + `)`
+	args = append(args, id)
 	if kind == "capture" { // A run may import a trace whose requests belong to this capture.
 		query += ` OR EXISTS(SELECT 1 FROM experiment_run_traces et JOIN experiment_runs er ON er.id=et.run_id JOIN request_logs l ON l.trace_id=et.trace_id WHERE er.experiment_id=e.id AND l.capture_run_id=?)`
 		args = append(args, id)
@@ -328,6 +330,11 @@ func archiveTask(ctx context.Context, tx *sql.Tx, kind, id string, archived bool
 		return err
 	}
 	patch := `UPDATE ` + table + ` SET document=json_set(document,'$.archived',json(?),'$.revision',revision+1),revision=revision+1`
+	if kind == "trace" {
+		// Archived tasks return as ordinary tasks when restored. Favorites are
+		// independent and continue to protect the complete trace.
+		patch = `UPDATE trace_metadata SET document=json_set(document,'$.archived',json(?),'$.top_at',0,'$.revision',revision+1),revision=revision+1`
+	}
 	args := []any{fmt.Sprint(archived)}
 	if kind != "trace" {
 		now := time.Now().UTC()

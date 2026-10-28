@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Code2, FilePlus2, FlaskConical, Pencil, Plus, Shield } from 'lucide-react'
+import { Code2, FilePlus2, Plus, ScanSearch, Shield } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchTemplate, fetchTemplates, presetTemplates, reviewError, saveTemplate, type ReviewConfig, type ReviewTemplate, type TemplateSummary } from '@/lib/review'
 import { cn } from '@/lib/utils'
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { TaskActions, TaskBatchActions, TaskSelectionToggle } from '@/components/TaskManagement'
+import { TaskActionBar, TaskPreviewTrigger } from '@/components/TaskHover'
 import ObservationPicker from './ObservationPicker'
 
 type Props = { onChoose: (template: ReviewTemplate) => void; disabled?: boolean; manage?: boolean }
@@ -50,13 +51,13 @@ export default function ReviewTemplates({ onChoose, disabled, manage = false }: 
     catch (e) { toast.error(reviewError(e, t)) }
     finally { setLoading('') }
   }
-  const icons = [Shield, Code2, FlaskConical, FilePlus2]
+  const icons = [Shield, Code2, ScanSearch, FilePlus2]
   return <div className="space-y-4">
     <p className="text-sm text-muted-foreground">{t('review.template_intro')}</p>
     {!showArchived && <div className="grid gap-3 sm:grid-cols-2">
       {presetTemplates(t).map((template, i) => {
         const Icon = icons[i]
-        return <button key={template.id} disabled={disabled || !!loading} className="space-y-2 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50" onClick={() => onChoose(template)}>
+        return <button key={template.id} disabled={disabled || !!loading} className="space-y-2 rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-border hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50" onClick={() => onChoose(template)}>
           <div className="flex items-center gap-2 font-medium"><Icon className="size-5 text-primary" />{template.name}</div>
           <p className="text-xs leading-relaxed text-muted-foreground">{template.description}</p>
           <p className="text-xs text-primary">{t('review.use_template')}</p>
@@ -67,7 +68,7 @@ export default function ReviewTemplates({ onChoose, disabled, manage = false }: 
       <h3 className="text-sm font-medium">{t('review.my_templates')}</h3>
       {manage && <div className="flex flex-wrap items-center gap-2">
         {(items.length > 0 || selecting) && <TaskSelectionToggle active={selecting} disabled={pending || disabled || !!loading} onToggle={() => selecting ? exitSelection() : setSelection({ key: pageKey, ids: [], active: true })} />}
-        <select aria-label={t('task_management.archive_filter')} className="h-9 rounded-md border border-input bg-background px-2 text-sm" value={String(archived)} onChange={event => { setArchived(event.target.value === 'true'); setOffset(0); exitSelection() }}>
+        <select aria-label={t('task_management.archive_filter')} className="h-8 rounded-md border border-input bg-background px-2 text-sm" value={String(archived)} onChange={event => { setArchived(event.target.value === 'true'); setOffset(0); exitSelection() }}>
         <option value="false">{t('task_management.unarchived')}</option><option value="true">{t('task_management.archived')}</option>
       </select><Button size="sm" variant="outline" disabled={disabled} onClick={() => {
         exitSelection()
@@ -81,17 +82,16 @@ export default function ReviewTemplates({ onChoose, disabled, manage = false }: 
       {selectedItems.length > 0 && <TaskBatchActions kind="template" items={selectedItems} archived={showArchived} disabled={disabled || !!loading} onChanged={changed} />}
     </div>}
     {!items.length && !error && <p className="text-xs text-muted-foreground">{t(pending ? 'common.loading' : showArchived ? 'task_management.empty_archived' : 'review.no_templates')}</p>}
-    <div className="grid gap-3 sm:grid-cols-2">{items.map(item => <div key={item.id} className={cn('rounded-xl border border-border bg-card p-4 transition-colors', selecting && selected.includes(item.id) && 'border-primary/50 bg-primary/5')}>
+    <div className="grid gap-3 sm:grid-cols-2">{items.map(item => <div key={item.id} className={cn('task-item rounded-lg border border-border bg-card p-4 transition-colors', selecting && selected.includes(item.id) && 'border-primary/50 bg-primary/5')}>
       <div className="flex items-start gap-3">
         {selecting && <input className="mt-1" type="checkbox" aria-label={t('task_management.select_item', { name: item.name })} checked={selected.includes(item.id)} onChange={event => toggleSelected(item.id, event.target.checked)} />}
-        {showArchived && !selecting ? <div className="min-w-0 flex-1 space-y-2"><p className="break-words font-medium">{item.name}</p><p className="line-clamp-2 text-xs text-muted-foreground">{item.description || t('review.point_count', { count: item.point_count })}</p><p className="text-xs text-muted-foreground">{t('task_management.archived')}</p></div> : <button type="button" disabled={disabled || !!loading} aria-pressed={selecting ? selected.includes(item.id) : undefined} onClick={() => selecting ? toggleSelected(item.id, !selected.includes(item.id)) : void choose(item.id)} className="block min-w-0 flex-1 space-y-2 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50">
+        {showArchived && !selecting ? <div className="min-w-0 flex-1 space-y-2"><p className="break-words font-medium">{item.name}</p><p className="line-clamp-2 text-xs text-muted-foreground">{item.description || t('review.point_count', { count: item.point_count })}</p><p className="text-xs text-muted-foreground">{t('task_management.archived')}</p></div> : <TaskPreviewTrigger disabled={selecting} name={item.name} summary={item.description} details={t('review.point_count', { count: item.point_count })}><button type="button" disabled={disabled || !!loading} aria-pressed={selecting ? selected.includes(item.id) : undefined} onClick={() => selecting ? toggleSelected(item.id, !selected.includes(item.id)) : void choose(item.id)} className="block min-w-0 flex-1 space-y-2 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50">
           <p className="break-words font-medium">{item.name}</p><p className="line-clamp-2 text-xs text-muted-foreground">{item.description || t('review.point_count', { count: item.point_count })}</p>
           {!selecting && <p className="text-xs text-primary">{loading === item.id ? t('common.loading') : t('review.use_template')}</p>}
-        </button>}
+        </button></TaskPreviewTrigger>}
       </div>
-      {manage && !selecting && <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-        <Button size="xs" variant="ghost" disabled={disabled || !!loading} onClick={() => void choose(item.id, true)}><Pencil className="size-3" />{t('review.edit_template')}</Button>
-        <TaskActions kind="template" items={[{ id: item.id, revision: item.revision }]} name={item.name} archived={showArchived} disabled={disabled || !!loading} onChanged={changed} />
+      {manage && !selecting && <div className="mt-3 flex min-h-8 justify-end">
+        <TaskActionBar><TaskActions kind="template" items={[{ id: item.id, revision: item.revision }]} name={item.name} archived={showArchived} disabled={disabled || !!loading} onChanged={changed} onEdit={() => void choose(item.id, true)} editLabel={t('review.edit_template')} editShortcut /></TaskActionBar>
       </div>}
     </div>)}</div>
     {total > 20 && <div className="flex items-center gap-2 text-xs"><Button size="xs" variant="outline" disabled={pending || !offset} onClick={() => { setOffset(Math.max(0, offset - 20)); exitSelection() }}>{t('correlation.previous')}</Button><span>{offset / 20 + 1} / {Math.ceil(total / 20)}</span><Button size="xs" variant="outline" disabled={pending || offset + 20 >= total} onClick={() => { setOffset(offset + 20); exitSelection() }}>{t('correlation.next')}</Button></div>}

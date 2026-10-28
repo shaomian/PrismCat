@@ -124,6 +124,7 @@ type LogStats struct {
 
 // TraceSummary trace 列表的聚合摘要
 type TraceSummary struct {
+	Origin            *TraceOrigin   `json:"origin,omitempty"`
 	Metadata          *TraceMetadata `json:"metadata,omitempty"`
 	Sources           []string       `json:"sources,omitempty"`
 	TraceID           string         `json:"trace_id"`
@@ -141,6 +142,7 @@ type TraceSummary struct {
 
 // TraceFilter trace 查询过滤器
 type TraceFilter struct {
+	Mergeable bool // Exclude explicit client traces before target-picker pagination.
 	Query     string
 	Archived  *bool
 	Pinned    *bool

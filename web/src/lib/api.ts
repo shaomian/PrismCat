@@ -1,5 +1,5 @@
 import i18n from '../i18n'
-import type { TraceTaskMetadata } from './experiments'
+import type { TraceOrigin, TraceTaskMetadata } from './experiments'
 
 // API 响应类型
 export interface RequestLog {
@@ -211,6 +211,7 @@ export interface LogFilter {
 
 // Trace 类型
 export interface TraceSummary {
+	origin?: TraceOrigin
 	metadata?: TraceTaskMetadata
     sources?: string[]
     trace_id: string
@@ -227,6 +228,7 @@ export interface TraceSummary {
 }
 
 export interface TraceFilter {
+	mergeable?: boolean
 	q?: string
 	archived?: boolean
 	pinned?: boolean

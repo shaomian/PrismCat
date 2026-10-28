@@ -367,6 +367,32 @@ code {
 
 /* Dark variant handled by system-wide dark setting */
 
+/* Keep task layout stable while revealing contextual actions. */
+@media (hover: hover) and (pointer: fine) {
+  .task-actions { opacity: 0; pointer-events: none; transition: opacity 120ms; }
+  .task-item:hover .task-actions,
+  .task-item:has(:focus-visible) .task-actions,
+  .task-actions:has([data-state="open"]),
+  .task-actions:has([aria-busy="true"]) { opacity: 1; pointer-events: auto; }
+  .task-copy-action { opacity: 0; pointer-events: none; transition: opacity 120ms; }
+  .trace-copy-scope:hover .task-copy-action,
+  .trace-copy-scope:has(:focus-visible) .task-copy-action { opacity: 1; pointer-events: auto; }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .task-actions .task-secondary-action { display: none; }
+  .task-actions .task-menu-trigger,
+  .task-actions .task-direct-action,
+  .task-actions .task-primary-action { min-width: 44px; min-height: 44px; }
+  .task-menu-item { min-height: 44px; }
+  .task-copy-action { min-width: 44px; min-height: 44px; }
+  .review-point-label { min-height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-actions, .task-copy-action { transition: none; }
+}
+
 @layer base {
   * {
     @apply border-border;
@@ -374,5 +400,15 @@ code {
 
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Compact desktop controls retain comfortable touch targets on coarse pointers. */
+@media (pointer: coarse) {
+  [data-slot="button"],
+  [data-slot="input"],
+  [data-slot="select-trigger"],
+  [data-slot="tabs-trigger"] {
+    min-height: 40px;
   }
 }
