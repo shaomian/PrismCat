@@ -332,6 +332,7 @@
             "copy_failed": "复制失败",
             "render_failed": "流程图渲染失败，已显示源码",
             "load_failed": "加载流程图失败",
+            "request_range": "当前显示第 {{start}}–{{end}} 个请求，共 {{total}} 个；跨页父请求显示为视图外节点。",
             "truncated_hint": "末尾带省略号（…）的文字已截断，悬停可预览，点击查看全文",
             "full_text": "完整内容",
             "full_text_desc": "流程图中的标签已截断，以下为完整内容（{{count}} 字符）",
@@ -348,6 +349,8 @@
         "parse_error": "无法解析为对话：{{reason}}",
         "empty": "暂无可展示的对话事件",
         "load_failed": "加载对话时间线失败",
+        "show_more_requests": "加载更多请求（剩余 {{count}} 条）",
+        "show_more_events": "显示更多对话事件（剩余 {{count}} 条）",
         "role": {
             "system": "系统",
             "user": "用户",
@@ -1226,5 +1229,28 @@
             "7d": "近 7 天",
             "30d": "近 30 天"
         }
+    },
+    "task_preview": {
+        "load_failed": "无法加载预览",
+        "traces": "包含调用链",
+        "unnamed_trace": "调用链 {{id}}",
+        "more_traces": "另有 {{count}} 条调用链",
+        "errors": "请求异常",
+        "error_count": "{{count}} 条请求错误",
+        "no_errors": "已记录请求中无错误",
+        "latest_error": "最近异常",
+        "no_http_status": "未返回 HTTP 状态",
+        "usage": "用量完整性",
+        "usage_missing": "{{count}} 条请求缺少完整用量，Token 仅计已知部分",
+        "recording_range": "录制区间",
+        "recording_now": "正在录制",
+        "recording_mode": "录制方式",
+        "single_task": "合成单任务",
+        "ordinary_capture": "普通录制",
+        "tasks": "参与任务",
+        "more_tasks": "另有 {{count}} 个任务",
+        "points": "所选观测点",
+        "more_points": "另有 {{count}} 个观测点",
+        "last_report": "最近报告创建于"
     }
 }

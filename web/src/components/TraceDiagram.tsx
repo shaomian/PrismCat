@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import mermaid from 'mermaid'
 import { Copy, Check, Download, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
@@ -21,6 +22,7 @@ const TOOLTIP_CHARS = 300
 // LRU 上限 8 条，超出后淘汰最旧。
 const SVG_CACHE_LIMIT = 8
 const svgCache = new Map<string, string>()
+const pendingRenders = new Map<string, Promise<string>>()
 
 function getCachedSvg(key: string): string | undefined {
   const hit = svgCache.get(key)
@@ -104,6 +106,7 @@ export function TraceDiagram({
   const theme = useSyncExternalStore(subscribeTheme, getTheme)
   const containerRef = useRef<HTMLDivElement>(null)
   const [error, setError] = useState(false)
+  const [rendering, setRendering] = useState(true)
   const [copied, setCopied] = useState(false)
   const [detail, setDetail] = useState<DiagramLabel | null>(null)
   const [detailCopied, setDetailCopied] = useState(false)
@@ -113,6 +116,7 @@ export function TraceDiagram({
     ensureMermaid(theme)
     let cancelled = false
     setError(false)
+    setRendering(true)
 
     const applySvg = (svg: string) => {
       if (cancelled || !containerRef.current) return
@@ -120,6 +124,7 @@ export function TraceDiagram({
       if (labels?.length) {
         bindTruncatedLabels(containerRef.current, labels, setDetail)
       }
+      setRendering(false)
     }
 
     // 命中缓存时同步应用，tab 切换即时出图
@@ -132,15 +137,26 @@ export function TraceDiagram({
       }
     }
 
-    mermaid
-      .render(`trace-diagram-${++renderSeq}`, code)
-      .then(({ svg }) => {
-        if (cancelled) return
+    // 快速切换页签或 StrictMode 重挂载时，复用尚未完成的渲染任务。
+    // 即使原组件离开也保存结果，下次打开无需再次进入 Mermaid 的渲染队列。
+    let pending = pendingRenders.get(cacheKey)
+    if (!pending) {
+      pending = mermaid.render(`trace-diagram-${++renderSeq}`, code).then(({ svg }) => {
         putCachedSvg(cacheKey, svg)
+        return svg
+      }).finally(() => pendingRenders.delete(cacheKey))
+      pendingRenders.set(cacheKey, pending)
+    }
+    pending
+      .then(svg => {
+        if (cancelled) return
         applySvg(svg)
       })
       .catch(() => {
-        if (!cancelled) setError(true)
+        if (!cancelled) {
+          setError(true)
+          setRendering(false)
+        }
       })
     return () => {
       cancelled = true
@@ -189,7 +205,7 @@ export function TraceDiagram({
           {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
           {t('timeline.diagram.copy_source')}
         </Button>
-        <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={downloadSvg} disabled={error}>
+        <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={downloadSvg} disabled={error || rendering}>
           <Download className="h-3 w-3" />
           SVG
         </Button>
@@ -199,19 +215,22 @@ export function TraceDiagram({
           </span>
         )}
       </div>
+      {rendering && <div role="status" className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+        <Spinner />{t('common.loading')}
+      </div>}
       {error ? (
         <div className="rounded-md border border-warning/30 bg-warning/5 p-3">
           <p className="text-xs text-warning mb-2">{t('timeline.diagram.render_failed')}</p>
           <pre className="text-xs font-mono whitespace-pre-wrap text-foreground/70">{code}</pre>
         </div>
-      ) : (
-        <div
-          ref={containerRef}
-          className="overflow-x-auto rounded-md border border-border bg-card p-4 [&_svg]:max-w-none
-            [&_.diagram-label-truncated]:cursor-pointer
-            [&_.diagram-label-truncated:hover]:fill-info"
-        />
-      )}
+      ) : null}
+      <div
+        hidden={error}
+        ref={containerRef}
+        className="overflow-x-auto rounded-md border border-border bg-card p-4 [&_svg]:max-w-none
+          [&_.diagram-label-truncated]:cursor-pointer
+          [&_.diagram-label-truncated:hover]:fill-info"
+      />
 
       <Dialog open={!!detail} onOpenChange={(open) => !open && setDetail(null)}>
         <DialogContent className="sm:max-w-2xl">

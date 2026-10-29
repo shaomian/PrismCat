@@ -20,10 +20,29 @@ func (h *Handler) handleTraceDiagram(w http.ResponseWriter, r *http.Request, tra
 		return
 	}
 
+	offset, limit := 0, 0
+	for name, target := range map[string]*int{"offset": &offset, "limit": &limit} {
+		if value := r.URL.Query().Get(name); value != "" {
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 0 || (name == "limit" && (n == 0 || n > 100)) {
+				h.jsonError(w, "无效的流程图分页参数", http.StatusBadRequest)
+				return
+			}
+			*target = n
+		}
+	}
 	tl := h.buildTraceTimeline(w, r, traceID)
 	if tl == nil {
 		return
 	}
+	total := len(tl.Requests)
+	if limit == 0 {
+		limit = total // 不带分页参数的 API 调用保持返回完整图。
+	}
+	offset = min(offset, total)
+	end := offset + min(limit, total-offset)
+	view := *tl
+	view.Requests = tl.Requests[offset:end]
 
 	opts := timeline.DiagramOptions{}
 	if v := r.URL.Query().Get("label_chars"); v != "" {
@@ -31,11 +50,18 @@ func (h *Handler) handleTraceDiagram(w http.ResponseWriter, r *http.Request, tra
 			opts.LabelChars = n
 		}
 	}
-	src, labels := timeline.Diagram(tl, opts)
+	var src string
+	var labels []timeline.DiagramLabel
 	if r.URL.Query().Get("view") == "dependencies" {
-		src, labels = timeline.Dependencies(tl), nil
+		src = timeline.Dependencies(&view)
+	} else {
+		src, labels = timeline.Diagram(&view, opts)
 	}
-	h.jsonResponse(w, map[string]interface{}{"mermaid": src, "labels": labels})
+	h.jsonResponse(w, map[string]interface{}{
+		"mermaid": src, "labels": labels,
+		"request_offset": offset, "request_total": total,
+		"request_count": end - offset,
+	})
 }
 
 // handleTraceExport 导出调用链 JSONL: GET /api/traces/{id}/export?mode=events|raw
@@ -130,15 +156,42 @@ func (h *Handler) buildTraceTimelineOpts(w http.ResponseWriter, r *http.Request,
 		return deriveTimeline(cached, opts)
 	}
 
+	release, err := h.tlCache.lockBuild(r.Context(), traceID)
+	if err != nil {
+		return nil
+	}
+	defer release()
+	// 等待期间日志可能更新，重新核对指纹与其他请求刚生成的缓存。
+	fp, err = h.repo.GetTraceFingerprint(traceID)
+	if err != nil {
+		h.jsonError(w, err.Error(), http.StatusInternalServerError)
+		return nil
+	}
+	if fp.Count == 0 {
+		h.jsonError(w, "trace 不存在", http.StatusNotFound)
+		return nil
+	}
+	if cached := h.tlCache.get(traceID, fp); cached != nil {
+		return deriveTimeline(cached, opts)
+	}
+
 	requests, err := h.repo.GetTraceRequests(traceID)
 	if err != nil {
 		h.jsonError(w, err.Error(), http.StatusInternalServerError)
 		return nil
 	}
 	// 完整构建一次，截断级别由派生产出
-	full := timeline.Build(traceID, h.traceTimelineInputs(r, requests),
+	inputs := h.traceTimelineInputs(r, requests)
+	if r.Context().Err() != nil {
+		return nil
+	}
+	full := timeline.Build(traceID, inputs,
 		timeline.Options{MaxEventChars: math.MaxInt})
+	// 输入完整时，纯解析阶段即使遇到客户端取消仍可复用构建结果。
 	h.tlCache.put(traceID, fp, full)
+	if r.Context().Err() != nil {
+		return nil
+	}
 	return deriveTimeline(full, opts)
 }
 
@@ -147,6 +200,9 @@ func (h *Handler) traceTimelineInputs(r *http.Request, requests []*storage.Reque
 	logging := h.cfg.LoggingSnapshot()
 	inputs := make([]timeline.Input, 0, len(requests))
 	for _, req := range requests {
+		if r.Context().Err() != nil {
+			return nil
+		}
 		inputs = append(inputs, timeline.Input{
 			TraceAssociation: req.TraceAssociation,
 			LogID:            req.ID,

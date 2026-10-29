@@ -19,6 +19,8 @@ Matching is isolated by upstream entry. Identical prompts, models, IPs, system p
 
 Log details show source, reason, session, and observed parents. Assignment metadata refreshes automatically. Processing is asynchronous and uses request-body snapshots and completed response captures, so grouping can briefly lag forwarding. The diagram tab offers a request relationship graph that draws only recorded parent links, including forks and joins. Automatic timelines fold against a unique parent rather than the preceding sibling. Sequence numbers do not prove causality or completion order.
 
+Views load on demand. Conversations initially show 20 requests and up to 20 events per request, with buttons to reveal more. Diagrams show 25 requests per page, preserve original sequence numbers, and mark parents on other pages as outside the current view. Paging does not change task membership; exports still include the complete trace.
+
 ## Native client metadata and WebSocket
 
 Codex per-call `client_metadata["x-codex-turn-metadata"]` (object or JSON string), the equivalent HTTP header, and flat compatibility `thread_id` / `turn_id` identify a task within one upstream. Native identifiers are digested in correlation features. Retries and context changes with the same native turn can retain membership without inventing parent links. A `thread-id` header alone, OpenCode `x-opencode-session`, and Pi/compatible service `x-session-id` or `x-session-affinity` establish sessions only. Account IDs, generic `metadata.user_id`, cache keys and request IDs are not task identities. Clients without these fields use protocol evidence. Individual versions of Cherry Studio, Claude Code, Codex, OpenCode, Pi, dsh and custom clients still require real-traffic validation.
@@ -34,6 +36,8 @@ Choose **New capture** in Traces, select an upstream with logging enabled, and s
 A regular run works without automatic correlation and includes all logged traffic on its entry, including unassigned auxiliary calls, while retaining internal trace groups. If an entry is dedicated to exactly one task, enable **Group this capture into one trace** under **More options** in the dialog. This requires correlation to be enabled and still preserves explicit trace headers.
 
 The list shows 20 runs per page, with active captures first, and displays request counts, request-span wall time, and known tokens. Details show input/output tokens and missing-usage counts, with 50 requests per page and bodies loaded only when opened. Missing usage is unknown, not zero. Enable existing usage extraction if token totals are needed. Display deduplication never subtracts repeated calls or billed history tokens.
+
+Hover a capture title or focus it with the keyboard to preview included traces, request errors, missing usage, and the recording period and mode. Previews load a short summary after a delay and cancel on leaving; they never read log bodies or call AI. Clicking still opens the existing details panel.
 
 Traces loads lightweight status only; capture aggregates load when their tab opens. Active captures refresh every five seconds. Stopped captures do not poll; refresh manually after in-flight requests finish. Polling pauses while the browser page is hidden.
 

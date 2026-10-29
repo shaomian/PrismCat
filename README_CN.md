@@ -6,6 +6,8 @@
 
 > 基于 [PrismCat](https://github.com/paopaoandlingyia/PrismCat) 独立维护的分支 —— 沿用同一 [MIT License](LICENSE)。
 
+v2.3.0 优化首页与调用链加载，新增长对话分批展示、流程图分页和内容摘要预览，并修复趋势统计边界计数，详见 [更新记录](CHANGELOG.md#v230)。
+
 v2.2.0 新增调用链合并与拆分、任务置顶与标签、复盘报告 Markdown 导出，并优化调用链列表与复盘工作页，详见 [更新记录](CHANGELOG.md#v220)。
 
 v2.1.0 新增自动调用链、录制批次、AI 对比复盘与任务管理，详见 [更新记录](CHANGELOG.md)。

@@ -176,6 +176,11 @@ type TraceFingerprint struct {
 	LastMs   int64 // 最新日志的创建时间（unix 毫秒），无日志时为 0
 }
 
+// TraceMetadataReader 可选的轻量调用链读取接口，避免为列表恢复大正文。
+type TraceMetadataReader interface {
+	GetTraceRequestMetadata(traceID string) ([]*RequestLog, error)
+}
+
 // Repository 存储接口
 type Repository interface {
 	// 日志操作

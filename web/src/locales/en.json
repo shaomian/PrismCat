@@ -332,6 +332,7 @@
             "copy_failed": "Copy failed",
             "render_failed": "Diagram render failed, showing source",
             "load_failed": "Failed to load diagram",
+            "request_range": "Showing requests {{start}}–{{end}} of {{total}}; parents on other pages appear as nodes outside this view.",
             "truncated_hint": "Labels ending with an ellipsis (…) are truncated — hover to preview, click for full text",
             "full_text": "Full Text",
             "full_text_desc": "The label is truncated in the diagram. Full content below ({{count}} chars)",
@@ -348,6 +349,8 @@
         "parse_error": "Cannot parse as conversation: {{reason}}",
         "empty": "No conversation events to display",
         "load_failed": "Failed to load conversation timeline",
+        "show_more_requests": "Load more requests ({{count}} remaining)",
+        "show_more_events": "Show more conversation events ({{count}} remaining)",
         "role": {
             "system": "System",
             "user": "User",
@@ -1244,5 +1247,28 @@
             "7d": "Last 7 days",
             "30d": "Last 30 days"
         }
+    },
+    "task_preview": {
+        "load_failed": "Unable to load preview",
+        "traces": "Included traces",
+        "unnamed_trace": "Trace {{id}}",
+        "more_traces": "{{count}} more traces",
+        "errors": "Request errors",
+        "error_count": "{{count}} failed requests",
+        "no_errors": "No errors in recorded requests",
+        "latest_error": "Latest error",
+        "no_http_status": "No HTTP status returned",
+        "usage": "Usage coverage",
+        "usage_missing": "{{count}} requests lack complete usage; tokens include known usage only",
+        "recording_range": "Recording period",
+        "recording_now": "Recording in progress",
+        "recording_mode": "Recording mode",
+        "single_task": "Combined as one task",
+        "ordinary_capture": "Ordinary capture",
+        "tasks": "Participating tasks",
+        "more_tasks": "{{count}} more tasks",
+        "points": "Selected observations",
+        "more_points": "{{count}} more observations",
+        "last_report": "Latest report created"
     }
 }

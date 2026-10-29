@@ -429,8 +429,8 @@ export async function fetchTraces(filter: TraceFilter = {}, signal?: AbortSignal
     return response.json()
 }
 
-export async function fetchTraceDetail(traceId: string): Promise<TraceDetail> {
-    const response = await apiRequest(`${API_BASE}/traces/${encodeURIComponent(traceId)}`, {}, 'errors.load_trace_detail')
+export async function fetchTraceDetail(traceId: string, signal?: AbortSignal): Promise<TraceDetail> {
+    const response = await apiRequest(`${API_BASE}/traces/${encodeURIComponent(traceId)}`, { signal }, 'errors.load_trace_detail')
     return response.json()
 }
 
@@ -476,8 +476,8 @@ export interface TraceTimeline {
     }
 }
 
-export async function fetchTraceTimeline(traceId: string): Promise<TraceTimeline> {
-    const response = await apiRequest(`${API_BASE}/traces/${encodeURIComponent(traceId)}/timeline`, {}, 'errors.load_timeline')
+export async function fetchTraceTimeline(traceId: string, signal?: AbortSignal): Promise<TraceTimeline> {
+    const response = await apiRequest(`${API_BASE}/traces/${encodeURIComponent(traceId)}/timeline`, { signal }, 'errors.load_timeline')
     return response.json()
 }
 
@@ -501,10 +501,16 @@ export interface DiagramLabel {
 export interface TraceDiagram {
     mermaid: string
     labels: DiagramLabel[] | null
+    request_offset?: number
+    request_total?: number
+    request_count?: number
 }
 
-export async function fetchTraceDiagram(traceId: string, view: 'sequence' | 'dependencies' = 'sequence'): Promise<TraceDiagram> {
-    const response = await apiRequest(`${API_BASE}/traces/${encodeURIComponent(traceId)}/diagram?view=${view}`, {}, 'errors.load_diagram')
+export async function fetchTraceDiagram(traceId: string, view: 'sequence' | 'dependencies' = 'sequence', options: { signal?: AbortSignal; offset?: number; limit?: number } = {}): Promise<TraceDiagram> {
+    const params = new URLSearchParams({ view })
+    if (options.offset !== undefined) params.set('offset', String(options.offset))
+    if (options.limit !== undefined) params.set('limit', String(options.limit))
+    const response = await apiRequest(`${API_BASE}/traces/${encodeURIComponent(traceId)}/diagram?${params}`, { signal: options.signal }, 'errors.load_diagram')
     return response.json()
 }
 

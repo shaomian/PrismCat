@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/shaomian/PrismCat/internal/storage"
@@ -44,6 +47,63 @@ func TestTraceTimelineCacheHitInvalidationAndLRU(t *testing.T) {
 	}
 	if c.get(fmt.Sprintf("t%d", tlCacheLimit+4), fp) == nil {
 		t.Fatal("newest entry should be present")
+	}
+}
+
+func TestTraceTimelineColdBuildsShareCache(t *testing.T) {
+	c := newTraceTimelineCache()
+	fp := storage.TraceFingerprint{Count: 1}
+	var builds atomic.Int32
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() {
+			release, err := c.lockBuild(context.Background(), "one")
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer release()
+			if c.get("one", fp) == nil {
+				builds.Add(1)
+				c.put("one", fp, &timeline.Timeline{TraceID: "one"})
+			}
+		})
+	}
+	wg.Wait()
+	if builds.Load() != 1 {
+		t.Fatalf("cold builds = %d, want one", builds.Load())
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.building) != 0 {
+		t.Fatal("completed build retained a lock")
+	}
+}
+
+func TestTraceTimelineBuildWaitCancellationAndIndependence(t *testing.T) {
+	c := newTraceTimelineCache()
+	release, err := c.lockBuild(context.Background(), "one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	other, err := c.lockBuild(context.Background(), "two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other()
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		unlock, err := c.lockBuild(ctx, "one")
+		if unlock != nil {
+			unlock()
+		}
+		result <- err
+	}()
+	cancel()
+	if err := <-result; err != context.Canceled {
+		t.Fatalf("waiting request returned %v", err)
 	}
 }
 

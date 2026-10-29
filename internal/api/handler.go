@@ -76,6 +76,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/system/cleanup/preview", h.handleCleanupPreview)
 	mux.HandleFunc("/api/system/cleanup", h.handleCleanup)
 	mux.HandleFunc("/api/task-management/", h.handleTaskManagement)
+	mux.HandleFunc("/api/task-previews/", h.handleTaskPreview)
 	mux.HandleFunc("/api/system/update", h.handleSystemUpdate)
 	mux.HandleFunc("/healthz", h.handleHealth)
 	mux.HandleFunc("/api/blobs/", h.handleBlob)
@@ -672,7 +673,13 @@ func (h *Handler) handleTraceDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requests, err := h.repo.GetTraceRequests(traceID)
+	var requests []*storage.RequestLog
+	var err error
+	if reader, ok := h.repo.(storage.TraceMetadataReader); ok {
+		requests, err = reader.GetTraceRequestMetadata(traceID)
+	} else {
+		requests, err = h.repo.GetTraceRequests(traceID)
+	}
 	if err != nil {
 		h.jsonError(w, err.Error(), http.StatusInternalServerError)
 		return

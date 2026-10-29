@@ -2,6 +2,7 @@ package api
 
 import (
 	"container/list"
+	"context"
 	"math"
 	"sync"
 
@@ -27,15 +28,46 @@ type tlCacheEntry struct {
 // 命中后用 timeline.TruncateEvents 派生各种截断级别，
 // blob 恢复与 JSON 解析对每条调用链只发生一次。
 type traceTimelineCache struct {
-	mu      sync.Mutex
-	entries map[string]*tlCacheEntry
-	lru     *list.List // front = 最近使用
+	mu       sync.Mutex
+	entries  map[string]*tlCacheEntry
+	lru      *list.List // front = 最近使用
+	building map[string]chan struct{}
 }
 
 func newTraceTimelineCache() *traceTimelineCache {
 	return &traceTimelineCache{
-		entries: make(map[string]*tlCacheEntry),
-		lru:     list.New(),
+		entries:  make(map[string]*tlCacheEntry),
+		lru:      list.New(),
+		building: make(map[string]chan struct{}),
+	}
+}
+
+// 同一调用链的冷构建串行化，等待者命中刚生成的缓存，不重复恢复与解析正文。
+// 不持有全局锁进行 IO；其他调用链不受影响，等待请求可独立取消。
+func (c *traceTimelineCache) lockBuild(ctx context.Context, traceID string) (func(), error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		c.mu.Lock()
+		if done, ok := c.building[traceID]; ok {
+			c.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-done:
+				continue
+			}
+		}
+		done := make(chan struct{})
+		c.building[traceID] = done
+		c.mu.Unlock()
+		return func() {
+			c.mu.Lock()
+			delete(c.building, traceID)
+			close(done)
+			c.mu.Unlock()
+		}, nil
 	}
 }
 

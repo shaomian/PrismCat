@@ -23,3 +23,14 @@ func TestForkedTimelineUsesParentAndGraphDoesNotInventEdges(t *testing.T) {
 		t.Fatalf("wrong graph: %s", graph)
 	}
 }
+
+func TestDependencyPagePreservesParentsOutsideView(t *testing.T) {
+	tl := &Timeline{Requests: []RequestEntry{{
+		LogID: "child", Seq: 26,
+		TraceAssociation: &trace.Assignment{Parents: []string{"parent", "parent"}},
+	}}}
+	graph := Dependencies(tl)
+	if !strings.Contains(graph, "Request 26") || !strings.Contains(graph, "Parent outside this view") || strings.Count(graph, "e0 -.-> n0") != 1 {
+		t.Fatalf("page lost or duplicated a parent: %s", graph)
+	}
+}

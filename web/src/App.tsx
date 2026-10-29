@@ -2,8 +2,6 @@ import { BrowserRouter, Navigate, Routes, Route, NavLink, useLocation, useNaviga
 import { FlaskConical, LayoutDashboard, LogOut, Network, Settings as SettingsIcon, Zap } from 'lucide-react'
 import { PrismCatLogo } from '@/components/PrismCatLogo'
 import { useTranslation } from 'react-i18next'
-import { Dashboard } from '@/pages/Dashboard'
-import { Traces } from '@/pages/Traces'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ThemeToggle } from '@/components/ThemeToggle'
@@ -15,6 +13,16 @@ import { fetchAuthStatus, fetchConfig, login, logout as logoutRequest, onAuthExp
 import { isSettingsTab, logRequestDiffRoute, settingsTabLabelKeys, settingsTabPath, settingsTabs } from '@/lib/routes'
 import { Login } from '@/pages/Login'
 import { TaskPreviewProvider } from '@/components/TaskHover'
+
+const DashboardPage = lazy(async () => {
+  const module = await import('@/pages/Dashboard')
+  return { default: module.Dashboard }
+})
+
+const TracesPage = lazy(async () => {
+  const module = await import('@/pages/Traces')
+  return { default: module.Traces }
+})
 
 const PlaygroundPage = lazy(async () => {
   const module = await import('@/pages/Playground')
@@ -269,9 +277,9 @@ function AppLayout({ onSignOut }: AppLayoutProps) {
           <div key={location.pathname} className="mx-auto w-full max-w-[1600px] animate-fade-in">
             <Suspense fallback={routeFallback}>
               <Routes>
-                <Route path="/" element={<Dashboard />} />
+                <Route path="/" element={<DashboardPage />} />
                 <Route path={logRequestDiffRoute} element={<LogDiffPage />} />
-                <Route path="/traces" element={<Traces />} />
+                <Route path="/traces" element={<TracesPage />} />
                 <Route path="/traces/:traceId" element={<TraceDetailPage />} />
                 <Route path="/experiments" element={<ExperimentsPage />} />
                 <Route path="/experiments/:experimentId" element={<ExperimentsPage />} />

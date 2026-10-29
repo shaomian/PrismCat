@@ -222,6 +222,13 @@ func (a *AsyncRepository) GetTraceRequests(traceID string) ([]*RequestLog, error
 	return a.inner.GetTraceRequests(traceID)
 }
 
+func (a *AsyncRepository) GetTraceRequestMetadata(traceID string) ([]*RequestLog, error) {
+	if reader, ok := a.inner.(TraceMetadataReader); ok {
+		return reader.GetTraceRequestMetadata(traceID)
+	}
+	return a.inner.GetTraceRequests(traceID)
+}
+
 func (a *AsyncRepository) GetTraceFingerprint(traceID string) (TraceFingerprint, error) {
 	return a.inner.GetTraceFingerprint(traceID)
 }

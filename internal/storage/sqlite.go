@@ -776,12 +776,14 @@ func (r *SQLiteRepository) SaveLogAnnotation(logID string, annotation LogAnnotat
 	return r.GetLogAnnotation(logID)
 }
 
+// statsTrendBuckets 趋势图只需要固定数量的时间桶。
+const statsTrendBuckets = 24
+
 func (r *SQLiteRepository) GetStats(since *time.Time) (*LogStats, error) {
 	stats := &LogStats{
 		ByUpstream:   make(map[string]int64),
 		ByStatusCode: make(map[int]int64),
 	}
-
 	where := ""
 	var args []interface{}
 	if since != nil {
@@ -789,142 +791,74 @@ func (r *SQLiteRepository) GetStats(since *time.Time) (*LogStats, error) {
 		args = append(args, since.UTC().UnixMilli())
 	}
 
-	// SUM 在零行时返回 NULL,直接扫进 int64 会报错 —— 全新安装、还没有任何日志时
-	// 走的正是这条路径,所以每个聚合都要 COALESCE
-	query := fmt.Sprintf(`
-	SELECT
-		COUNT(*) as total,
-		COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 ELSE 0 END), 0) as success,
-		COALESCE(SUM(CASE WHEN (error IS NOT NULL AND error != '') OR status_code >= 400 THEN 1 ELSE 0 END), 0) as errors,
-		COALESCE(SUM(CASE WHEN streaming = 1 THEN 1 ELSE 0 END), 0) as streaming,
-		COALESCE(AVG(latency_ms), 0) as avg_latency
-	FROM request_logs %s
-	`, where)
-
-	if err := r.db.QueryRow(query, args...).Scan(
-		&stats.TotalRequests,
-		&stats.SuccessCount,
-		&stats.ErrorCount,
-		&stats.StreamingCount,
-		&stats.AvgLatency,
-	); err != nil {
+	// 先通过时间索引确定窗口，再一次聚合同时生成摘要、分组和趋势。
+	// 避免为迷你趋势图额外扫描包含大正文的日志表。
+	var minMs, maxMs sql.NullInt64
+	if err := r.db.QueryRow("SELECT MIN(created_at_unix_ms), MAX(created_at_unix_ms) FROM request_logs "+where, args...).Scan(&minMs, &maxMs); err != nil {
 		return nil, err
 	}
+	if !minMs.Valid {
+		return stats, nil
+	}
+	startMs := minMs.Int64
+	if since != nil {
+		startMs = since.UTC().UnixMilli()
+	}
+	endMs := max(time.Now().UTC().UnixMilli(), maxMs.Int64)
+	span := max(endMs-startMs, 1)
+	interval := max(span/statsTrendBuckets, 1)
+	stats.TrendIntervalMs = interval
+	stats.Trend = make([]StatsTrendPoint, statsTrendBuckets)
+	for i := range stats.Trend {
+		stats.Trend[i].StartUnixMs = startMs + int64(i)*interval
+	}
 
-	upstreamQuery := fmt.Sprintf("SELECT upstream, COUNT(*) FROM request_logs %s GROUP BY upstream", where)
-	rows, err := r.db.Query(upstreamQuery, args...)
+	// 先把窗口末尾归入最后一桶再 GROUP BY，避免边界桶覆盖原有计数。
+	query := fmt.Sprintf(`
+		SELECT MIN(?, MAX(0, (created_at_unix_ms - ?) / ?)) AS bucket,
+			upstream, status_code, COUNT(*),
+			SUM(CASE WHEN (error IS NOT NULL AND error != '') OR status_code >= 400 THEN 1 ELSE 0 END),
+			SUM(CASE WHEN streaming = 1 THEN 1 ELSE 0 END),
+			TOTAL(latency_ms), COUNT(latency_ms)
+		FROM request_logs %s
+		GROUP BY bucket, upstream, status_code
+	`, where)
+	queryArgs := append([]interface{}{statsTrendBuckets - 1, startMs, interval}, args...)
+	rows, err := r.db.Query(query, queryArgs...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	var latencyTotal float64
+	var latencyCount int64
 	for rows.Next() {
+		var bucket, code int
 		var upstream string
-		var count int64
-		if err := rows.Scan(&upstream, &count); err != nil {
+		var count, errors, streaming, knownLatencies int64
+		var latency float64
+		if err := rows.Scan(&bucket, &upstream, &code, &count, &errors, &streaming, &latency, &knownLatencies); err != nil {
 			return nil, err
 		}
-		stats.ByUpstream[upstream] = count
+		stats.TotalRequests += count
+		if code >= 200 && code < 400 {
+			stats.SuccessCount += count
+		}
+		stats.ErrorCount += errors
+		stats.StreamingCount += streaming
+		stats.ByUpstream[upstream] += count
+		stats.ByStatusCode[code] += count
+		stats.Trend[bucket].Total += count
+		stats.Trend[bucket].Errors += errors
+		latencyTotal += latency
+		latencyCount += knownLatencies
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-
-	statusQuery := fmt.Sprintf("SELECT status_code, COUNT(*) FROM request_logs %s GROUP BY status_code", where)
-	rows2, err := r.db.Query(statusQuery, args...)
-	if err != nil {
-		return nil, err
+	if latencyCount > 0 {
+		stats.AvgLatency = latencyTotal / float64(latencyCount)
 	}
-	defer rows2.Close()
-	for rows2.Next() {
-		var code int
-		var count int64
-		if err := rows2.Scan(&code, &count); err != nil {
-			return nil, err
-		}
-		stats.ByStatusCode[code] = count
-	}
-	if err := rows2.Err(); err != nil {
-		return nil, err
-	}
-
-	if err := r.fillStatsTrend(stats, since, where, args); err != nil {
-		return nil, err
-	}
-
 	return stats, nil
-}
-
-// statsTrendBuckets 趋势图固定桶数:仪表盘迷你趋势图只需要看出形状,不需要高精度
-const statsTrendBuckets = 24
-
-// fillStatsTrend 把统计窗口切成固定数量的时间桶,空隙补零,前端按序渲染即可。
-// since 为 nil(全部时间)时窗口从最早一条日志开始到当前时间。
-func (r *SQLiteRepository) fillStatsTrend(stats *LogStats, since *time.Time, where string, args []interface{}) error {
-	var minMs, maxMs int64
-	rangeQuery := fmt.Sprintf("SELECT COALESCE(MIN(created_at_unix_ms),0), COALESCE(MAX(created_at_unix_ms),0) FROM request_logs %s", where)
-	if err := r.db.QueryRow(rangeQuery, args...).Scan(&minMs, &maxMs); err != nil {
-		return err
-	}
-	if maxMs == 0 {
-		return nil
-	}
-
-	startMs := minMs
-	if since != nil {
-		startMs = since.UTC().UnixMilli()
-	}
-	endMs := time.Now().UTC().UnixMilli()
-	if endMs < maxMs {
-		endMs = maxMs
-	}
-	span := endMs - startMs
-	if span <= 0 {
-		span = 1
-	}
-	interval := span / statsTrendBuckets
-	if interval <= 0 {
-		interval = 1
-	}
-
-	trend := make([]StatsTrendPoint, statsTrendBuckets)
-	for i := range trend {
-		trend[i] = StatsTrendPoint{StartUnixMs: startMs + int64(i)*interval}
-	}
-
-	bucketQuery := fmt.Sprintf(`
-	SELECT (created_at_unix_ms - ?) / ? as bucket,
-		COUNT(*),
-		COALESCE(SUM(CASE WHEN (error IS NOT NULL AND error != '') OR status_code >= 400 THEN 1 ELSE 0 END), 0)
-	FROM request_logs %s
-	GROUP BY bucket
-	`, where)
-	rows3, err := r.db.Query(bucketQuery, append([]interface{}{startMs, interval}, args...)...)
-	if err != nil {
-		return err
-	}
-	defer rows3.Close()
-	for rows3.Next() {
-		var bucket, total, errors int64
-		if err := rows3.Scan(&bucket, &total, &errors); err != nil {
-			return err
-		}
-		// created_at == endMs 的边界行会落出最后一桶,收回来
-		if bucket >= statsTrendBuckets {
-			bucket = statsTrendBuckets - 1
-		}
-		if bucket < 0 {
-			continue
-		}
-		trend[bucket].Total = total
-		trend[bucket].Errors = errors
-	}
-	if err := rows3.Err(); err != nil {
-		return err
-	}
-
-	stats.TrendIntervalMs = interval
-	stats.Trend = trend
-	return nil
 }
 
 func (r *SQLiteRepository) ListTraces(filter TraceFilter) ([]TraceSummary, int64, error) {
@@ -932,11 +866,24 @@ func (r *SQLiteRepository) ListTraces(filter TraceFilter) ([]TraceSummary, int64
 }
 
 func (r *SQLiteRepository) GetTraceRequests(traceID string) ([]*RequestLog, error) {
+	return r.getTraceRequests(traceID, false)
+}
+
+// GetTraceRequestMetadata 不从 SQLite 解码正文；详情打开单条日志时再读取。
+func (r *SQLiteRepository) GetTraceRequestMetadata(traceID string) ([]*RequestLog, error) {
+	return r.getTraceRequests(traceID, true)
+}
+
+func (r *SQLiteRepository) getTraceRequests(traceID string, metadataOnly bool) ([]*RequestLog, error) {
+	requestBody, originalBody, finalBody, responseBody := "l.request_body", "l.request_body_original", "l.request_body_final", "l.response_body"
+	if metadataOnly {
+		requestBody, originalBody, finalBody, responseBody = "''", "''", "''", "''"
+	}
 	// 注解用 LEFT JOIN 一次取回，避免每行一次 GetLogAnnotation 的 N+1 查询
-	query := `
+	query := fmt.Sprintf(`
 	SELECT l.id, l.created_at, l.upstream, l.upstream_target, l.target_url, l.method, l.path, l.query,
-		l.request_headers, l.request_body, l.request_body_original, l.request_body_final, l.request_body_ref, l.request_body_size,
-		l.status_code, l.response_headers, l.response_body, l.response_body_ref, l.response_body_size,
+		l.request_headers, %s, %s, %s, l.request_body_ref, l.request_body_size,
+		l.status_code, l.response_headers, %s, l.response_body_ref, l.response_body_size,
 		l.streaming, l.latency_ms, l.error, l.truncated, l.tag,
 		l.request_override_applied, l.request_override_rules, l.request_override_error,
 		l.request_header_override_applied, l.request_header_override_changes, l.request_headers_original,
@@ -948,7 +895,7 @@ func (r *SQLiteRepository) GetTraceRequests(traceID string) ([]*RequestLog, erro
 	LEFT JOIN log_annotations a ON a.log_id = l.id
 	WHERE l.trace_id = ?
 	ORDER BY l.trace_seq, l.created_at_unix_ms
-	`
+	`, requestBody, originalBody, finalBody, responseBody)
 	rows, err := r.db.Query(query, traceID)
 	if err != nil {
 		return nil, err

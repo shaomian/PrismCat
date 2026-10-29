@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, startTransition } from 'react'
+import { Suspense, lazy, useState, useEffect, useMemo, useCallback, useRef, startTransition } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -15,11 +15,13 @@ import { TraceGroupingDialog } from '@/components/TraceGroupingDialog'
 import type { GroupingAction } from '@/lib/trace-grouping'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { LogDetail } from '@/components/LogDetail'
 import { TraceTimelineView } from '@/components/TraceTimeline'
-import { TraceDiagram } from '@/components/TraceDiagram'
-import { AnalysisChat } from '@/components/AnalysisChat'
 import { toast } from 'sonner'
+
+const TraceDiagram = lazy(async () => ({ default: (await import('@/components/TraceDiagram')).TraceDiagram }))
+const AnalysisChat = lazy(async () => ({ default: (await import('@/components/AnalysisChat')).AnalysisChat }))
+const LogDetail = lazy(async () => ({ default: (await import('@/components/LogDetail')).LogDetail }))
+const DIAGRAM_PAGE_SIZE = 25
 
 export function TraceDetail() {
   const { t, i18n } = useTranslation()
@@ -32,6 +34,7 @@ export function TraceDetail() {
   const [timeline, setTimeline] = useState<TraceTimeline | null>(null)
   const [diagram, setDiagram] = useState<TraceDiagramData | null>(null)
   const [diagramView, setDiagramView] = useState<'sequence' | 'dependencies'>('sequence')
+  const [diagramOffset, setDiagramOffset] = useState(0)
   const [loading, setLoading] = useState(true)
   const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null)
   const [analysisOpen, setAnalysisOpen] = useState(false)
@@ -43,12 +46,19 @@ export function TraceDetail() {
   const toggleRequest = (id: string) => setSelection({ traceId, active: true, ids: chosen.includes(id) ? chosen.filter(value => value !== id) : [...chosen, id] })
   const [assignmentRevision, setAssignmentRevision] = useState(0)
   const [loadingFullLogIds, setLoadingFullLogIds] = useState<Set<string>>(new Set())
+  const fullEventsInFlight = useRef(new Set<string>())
+  const timelineLoaded = useRef('')
+  const diagramCache = useRef(new Map<string, TraceDiagramData>())
+  const [timelineError, setTimelineError] = useState(false)
+  const [diagramError, setDiagramError] = useState(false)
+  const [viewReload, setViewReload] = useState(0)
 
-  const loadDetail = useCallback(async () => {
+  const loadDetail = useCallback(async (signal?: AbortSignal) => {
     if (!traceId) return
     setLoading(true)
     try {
-      const res = await fetchTraceDetail(traceId)
+      const res = await fetchTraceDetail(traceId, signal)
+      if (signal?.aborted) return
       if (res.trace_id !== traceId) {
         toast.info(i18n.t('trace_grouping.redirected'))
         navigate(`/traces/${encodeURIComponent(res.trace_id)}`, { replace: true })
@@ -56,25 +66,31 @@ export function TraceDetail() {
       }
       setDetail(res)
     } catch {
-      toast.error(i18n.t('traces.load_detail_failed'))
+      if (!signal?.aborted) toast.error(i18n.t('traces.load_detail_failed'))
     } finally {
-      setLoading(false)
+      if (!signal?.aborted) setLoading(false)
     }
   }, [traceId, i18n, navigate])
 
-  const loadTimeline = useCallback(async () => {
+  const loadTimeline = useCallback(async (signal: AbortSignal) => {
     if (!traceId) return
+    const key = `${traceId}:${assignmentRevision}`
+    if (timelineLoaded.current === key) return
+    setTimelineError(false)
     try {
-      const res = await fetchTraceTimeline(traceId)
+      const res = await fetchTraceTimeline(traceId, signal)
+      if (signal.aborted) return
+      timelineLoaded.current = key
       setTimeline(res)
     } catch {
-      toast.error(i18n.t('timeline.load_failed'))
+      if (!signal.aborted) setTimelineError(true)
     }
-  }, [traceId, i18n])
+  }, [traceId, assignmentRevision])
 
   // 按需加载单个请求的完整（未截断）事件，原位替换列表中的对应条目
   const handleLoadFullEvents = useCallback(async (logId: string) => {
-    if (!traceId || loadingFullLogIds.has(logId)) return
+    if (!traceId || fullEventsInFlight.current.has(logId)) return
+    fullEventsInFlight.current.add(logId)
     setLoadingFullLogIds(prev => new Set(prev).add(logId))
     try {
       const entry = await fetchTraceTimelineEntry(traceId, logId)
@@ -85,35 +101,59 @@ export function TraceDetail() {
     } catch {
       toast.error(i18n.t('timeline.full_load_failed'))
     } finally {
+      fullEventsInFlight.current.delete(logId)
       setLoadingFullLogIds(prev => {
         const next = new Set(prev)
         next.delete(logId)
         return next
       })
     }
-  }, [traceId, loadingFullLogIds, i18n])
+  }, [traceId, i18n])
 
   useEffect(() => {
-    loadDetail()
-    loadTimeline()
-  }, [loadDetail, loadTimeline])
+    const controller = new AbortController()
+    void loadDetail(controller.signal)
+    return () => controller.abort()
+  }, [loadDetail])
+
+  // 未打开的视图不触发正文恢复、时间线解析或图形库加载。
+  useEffect(() => {
+    if (tab !== 'conversation') return
+    const controller = new AbortController()
+    void loadTimeline(controller.signal)
+    return () => controller.abort()
+  }, [tab, loadTimeline, viewReload])
 
   useEffect(() => {
-    if (!traceId) return
-    let cancelled = false
-    void fetchTraceDiagram(traceId, diagramView).then(value => {
-      if (!cancelled) setDiagram(value)
+    if (!traceId || tab !== 'diagram') return
+    const key = `${traceId}:${assignmentRevision}:${diagramView}:${diagramOffset}`
+    const cached = diagramCache.current.get(key)
+    if (cached) {
+      setDiagram(cached)
+      setDiagramError(false)
+      return
+    }
+    const controller = new AbortController()
+    setDiagramError(false)
+    void fetchTraceDiagram(traceId, diagramView, { signal: controller.signal, offset: diagramOffset, limit: DIAGRAM_PAGE_SIZE }).then(value => {
+      if (!controller.signal.aborted) {
+        diagramCache.current.set(key, value)
+        const oldest = diagramCache.current.keys().next().value
+        if (diagramCache.current.size > 8 && oldest !== undefined) diagramCache.current.delete(oldest)
+        setDiagram(value)
+      }
     }).catch(() => {
-      if (!cancelled) toast.error(i18n.t('timeline.diagram.load_failed'))
+      if (!controller.signal.aborted) setDiagramError(true)
     })
-    return () => { cancelled = true }
-  }, [traceId, diagramView, assignmentRevision, i18n])
+    return () => controller.abort()
+  }, [traceId, tab, diagramView, diagramOffset, assignmentRevision, viewReload])
 
   const requests = useMemo(() => detail?.requests ?? [], [detail?.requests])
   const requestOffset = Math.min(requestPage.traceId === traceId ? requestPage.offset : 0, Math.max(0, Math.ceil(requests.length / 50) - 1) * 50)
   const visibleRequests = requests.slice(requestOffset, requestOffset + 50)
   const pageIds = visibleRequests.map(request => request.id)
   const summary = detail?.summary
+  const diagramTotal = diagram?.request_total ?? requests.length
 
   const maxLatency = useMemo(
     () => requests.reduce((max, r) => Math.max(max, r.latency_ms), 1),
@@ -185,9 +225,12 @@ export function TraceDetail() {
       return
     }
     setDiagram(null)
+    setDiagramOffset(0)
+    setTimeline(null)
+    timelineLoaded.current = ''
+    diagramCache.current.clear()
     setAssignmentRevision(previous => previous + 1)
     void loadDetail()
-    void loadTimeline()
   }
 
   if (loading) {
@@ -299,7 +342,9 @@ export function TraceDetail() {
         </TabsList>
 
         <TabsContent value="conversation" className="pt-4">
-          {!timeline ? (
+          {timelineError ? (
+            <ViewLoadError message={t('timeline.load_failed')} onRetry={() => setViewReload(value => value + 1)} />
+          ) : !timeline ? (
             <div className="flex min-h-[20vh] items-center justify-center">
               <Spinner />
             </div>
@@ -322,12 +367,24 @@ export function TraceDetail() {
             ))}
           </div>
           {diagramView === 'dependencies' && <p className="mb-3 text-xs text-muted-foreground">{t('correlation.diagram_hint')}</p>}
-          {!diagram ? (
+          {diagramTotal > DIAGRAM_PAGE_SIZE && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>{t('timeline.diagram.request_range', { start: diagramOffset + 1, end: Math.min(diagramOffset + DIAGRAM_PAGE_SIZE, diagramTotal), total: diagramTotal })}</span>
+            <div className="flex items-center gap-2">
+              <Button size="icon-sm" variant="ghost" aria-label={t('correlation.previous')} disabled={diagramOffset === 0} onClick={() => { setDiagram(null); setDiagramOffset(offset => Math.max(0, offset - DIAGRAM_PAGE_SIZE)) }}><ChevronLeft className="size-4" /></Button>
+              <span>{Math.floor(diagramOffset / DIAGRAM_PAGE_SIZE) + 1} / {Math.ceil(diagramTotal / DIAGRAM_PAGE_SIZE)}</span>
+              <Button size="icon-sm" variant="ghost" aria-label={t('correlation.next')} disabled={diagramOffset + DIAGRAM_PAGE_SIZE >= diagramTotal} onClick={() => { setDiagram(null); setDiagramOffset(offset => offset + DIAGRAM_PAGE_SIZE) }}><ChevronRight className="size-4" /></Button>
+            </div>
+          </div>}
+          {diagramError ? (
+            <ViewLoadError message={t('timeline.diagram.load_failed')} onRetry={() => setViewReload(value => value + 1)} />
+          ) : !diagram ? (
             <div className="flex min-h-[20vh] items-center justify-center">
               <Spinner />
             </div>
           ) : (
-            <TraceDiagram code={diagram.mermaid} labels={diagram.labels} onOpenLog={handleOpenLog} />
+            <Suspense fallback={<PageLoading className="min-h-[20vh]" />}>
+              <TraceDiagram code={diagram.mermaid} labels={diagram.labels} onOpenLog={handleOpenLog} />
+            </Suspense>
           )}
         </TabsContent>
 
@@ -475,7 +532,7 @@ export function TraceDetail() {
         if (all) { handleCloseLog(); navigate(`/traces/${encodeURIComponent(result.target_trace_id)}`) }
         else handleAssignmentChanged({ trace_id: traceId })
       }} />}
-      <LogDetail
+      {selectedLog && <Suspense fallback={<PageLoading className="min-h-[20vh]" />}><LogDetail
         log={selectedLog}
         loading={selectedLogLoading}
         onClose={handleCloseLog}
@@ -496,7 +553,7 @@ export function TraceDetail() {
             }
           })
         }}
-      />
+      /></Suspense>}
 
       {/* AI 分析面板：流式状态在模块级 store 中，关闭面板不中断输出 */}
       <Sheet open={analysisOpen} onOpenChange={setAnalysisOpen}>
@@ -509,12 +566,22 @@ export function TraceDetail() {
             <SheetDescription className="text-xs truncate font-mono">{traceId}</SheetDescription>
           </SheetHeader>
           <div className="flex-1 min-h-0">
-            <AnalysisChat traceId={traceId ?? ''} open={analysisOpen} />
+            <Suspense fallback={<PageLoading className="min-h-[20vh]" />}>
+              <AnalysisChat traceId={traceId ?? ''} open={analysisOpen} />
+            </Suspense>
           </div>
         </SheetContent>
       </Sheet>
     </div>
   )
+}
+
+function ViewLoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { t } = useTranslation()
+  return <div role="alert" className="flex min-h-[20vh] flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+    <p>{message}</p>
+    <Button variant="outline" size="sm" onClick={onRetry}>{t('common.refresh')}</Button>
+  </div>
 }
 
 function SummaryCard({

@@ -176,7 +176,7 @@ export function Dashboard() {
             </section>
 
             {/* 日志详情侧边栏 */}
-            <Suspense fallback={logDetailFallback}>
+            {selectedLog && <Suspense fallback={logDetailFallback}>
                 <LogDetailPanel
                     log={selectedLog}
                     loading={selectedLogLoading}
@@ -186,7 +186,7 @@ export function Dashboard() {
                     canNavigatePreviousLog={selectedLogIndex > 0}
                     canNavigateNextLog={selectedLogIndex >= 0 && selectedLogIndex < logs.length - 1}
                 />
-            </Suspense>
+            </Suspense>}
         </div>
     )
 }

@@ -15,6 +15,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { CopyTraceIdButton } from '@/components/CopyTraceIdButton'
 import { TaskActions, TaskBatchActions, TaskSelectionToggle } from '@/components/TaskManagement'
 import { TaskActionBar, TaskPreviewTrigger } from '@/components/TaskHover'
+import { capturePreviewContent, fetchTaskPreview, type CapturePreview } from '@/lib/task-preview'
 
 const LogDetail = lazy(async () => { const module = await import('@/components/LogDetail'); return { default: module.LogDetail } })
 
@@ -159,9 +160,20 @@ export function TraceCapturePanel({ revision, recording, onChanged }: { revision
       {runs.map(run => <div key={run.id} className={cn('task-item flex flex-col gap-3 py-4 transition-colors sm:flex-row sm:items-center sm:justify-between', selecting && selectedIds.includes(run.id) && 'bg-primary/5')}>
         <div className="flex min-w-0 flex-1 items-start gap-3">
         {selecting && <input type="checkbox" className="mt-1 shrink-0" aria-label={t('task_management.select_item', { name: run.name })} disabled={!run.stopped_at} checked={selectedIds.includes(run.id)} onChange={event => toggleSelected(run.id, event.target.checked)} />}
-        <TaskPreviewTrigger disabled={selecting} name={run.name} summary={`${run.upstream} · ${t(run.stopped_at ? 'correlation.stopped' : 'correlation.recording')}`} details={`${t('correlation.requests_count', { count: run.request_count })} · ${formatLatency(run.wall_time_ms)} · ${captureTokens(run)?.toLocaleString(i18n.language) ?? '—'} Token`}><button type="button" className="group min-w-0 flex-1 space-y-2 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60" aria-pressed={selecting ? selectedIds.includes(run.id) : undefined} disabled={selecting && !run.stopped_at} onClick={() => selecting ? toggleSelected(run.id, !selectedIds.includes(run.id)) : setSelected(run)}>
+        <TaskPreviewTrigger disabled={selecting} titleOnly name={run.name}
+          previewKey={JSON.stringify(['capture', run.id, run.name, run.revision, run.started_at, run.stopped_at, run.single_task, run.request_count, run.wall_time_ms, run.usage_missing_count, i18n.language])}
+          cacheTtlMs={run.stopped_at ? 30000 : 5000}
+          loadPreview={async signal => {
+            try {
+              const preview = await fetchTaskPreview<CapturePreview>('capture', run.id, signal)
+              return capturePreviewContent(run, preview, t, i18n.language)
+            } catch (error) {
+              if (signal.aborted) throw error
+              return capturePreviewContent(run, null, t, i18n.language)
+            }
+          }}><button type="button" className="group min-w-0 flex-1 space-y-2 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60" aria-pressed={selecting ? selectedIds.includes(run.id) : undefined} disabled={selecting && !run.stopped_at} onClick={() => selecting ? toggleSelected(run.id, !selectedIds.includes(run.id)) : setSelected(run)}>
           <div className="flex min-w-0 items-center gap-2.5">
-            <span className="truncate text-sm font-medium transition-colors group-hover:text-primary group-focus-visible:text-primary">{run.name}</span>
+            <span data-task-preview-title className="truncate text-sm font-medium transition-colors group-hover:text-primary group-focus-visible:text-primary">{run.name}</span>
             <span className={cn('inline-flex shrink-0 items-center gap-1.5 text-xs', run.stopped_at ? 'text-muted-foreground' : 'text-danger')}>
               {!run.stopped_at && <span className="size-1.5 rounded-full bg-danger" />}{t(run.stopped_at ? 'correlation.stopped' : 'correlation.recording')}
             </span>

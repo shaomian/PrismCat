@@ -33,7 +33,7 @@ func Dependencies(tl *Timeline) string {
 				if !ok {
 					n = len(external)
 					external[parent] = n
-					fmt.Fprintf(&b, "    e%d[\"Parent outside this trace\"]\n", n)
+					fmt.Fprintf(&b, "    e%d[\"Parent outside this view\"]\n", n)
 				}
 				fmt.Fprintf(&b, "    e%d -.-> n%d\n", n, i)
 			}

@@ -1,5 +1,30 @@
 # Release notes / 更新记录
 
+## v2.3.0
+
+### 新增与改进
+
+- **调用链加载优化**：对话、流程图及日志详情按需加载；同一调用链的并发时间线构建复用缓存，减少重复正文读取与解析。
+- **长任务分批展示**：对话按请求和事件分批展开，流程图每页展示 25 个请求，保留原始序号与跨页父请求提示；完整导出保持可用。
+- **内容摘要预览**：录制批次展示调用链、异常、用量缺失及录制范围；复盘展示参与任务、Agent／模型、所选观测点和背景摘要。支持延迟加载、取消、缓存和键盘操作，不自动调用 AI。
+- **统计与存储性能**：合并统计查询；调用链详情直接读取元数据，打开单条日志时再读取正文。修复趋势图窗口末尾请求少算。
+- **交互可靠性**：补充视图加载失败重试、流程图渲染任务复用，以及空预览隐藏和键盘切换处理。
+
+### 升级说明
+
+- 兼容已有配置与 SQLite 数据，无需手动迁移。
+- 流程图界面按页显示；不带分页参数的图形 API 和完整日志导出保留原有行为。
+- 更新后需重新构建并重启程序。详情见 [性能检查记录](PERFORMANCE_REVIEW_CN.md)。
+
+### English
+
+- Load trace views, diagrams and log details on demand; share concurrent timeline builds and avoid reading bodies for metadata-only detail lists.
+- Render long conversations in batches and diagrams in pages of 25 requests, preserving sequence numbers, external-parent references and complete exports.
+- Add useful capture/review previews with delayed loading, cancellation, caching and keyboard support, without automatic AI calls.
+- Consolidate statistics queries and fix lost counts at the final trend bucket; improve loading retries and diagram rendering reuse.
+
+Existing configuration and SQLite data remain compatible. Rebuild and restart to apply the update.
+
 ## v2.2.0
 
 ### 新增与改进

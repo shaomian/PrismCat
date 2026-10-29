@@ -14,7 +14,7 @@ import (
 
 // Version 本地构建显示的版本号；CI 发布构建由 ldflags 注入实际 tag 版本。
 // v2.0.0 起为本仓库独立版本线（v1.x 为上游历史）。
-var Version = "2.2.0"
+var Version = "2.3.0"
 
 const (
 	DefaultUpstreamTimeoutSeconds      = 300

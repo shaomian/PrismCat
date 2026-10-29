@@ -24,6 +24,7 @@ import { TaskActions, TaskBatchActions, TaskSelectionToggle } from '@/components
 import { TaskActionBar, TaskIconButton, TaskPreviewTrigger } from '@/components/TaskHover'
 import { getReviewSession, subscribeReview } from '@/lib/review-stream'
 import type { ReviewTemplate } from '@/lib/review'
+import { experimentPreviewContent, fetchTaskPreview, type ExperimentPreview } from '@/lib/task-preview'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 const ReviewPanel = lazy(() => import('@/components/review/ReviewPanel'))
 const ReviewTemplates = lazy(() => import('@/components/review/ReviewTemplates'))
@@ -147,7 +148,7 @@ function ExperimentList() {
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{items.map(item => {
         const Icon = item.review_summary?.template_id === 'builtin:pentest' ? Shield : item.review_summary?.template_id === 'builtin:coding' ? Code2 : item.review_summary?.template_id === 'builtin:reverse' ? ScanSearch : FileText
         const content = <>
-          <h3 className="break-words font-medium transition-colors group-hover/review:text-foreground group-focus-visible/review:text-primary">{item.name}</h3>
+          <h3 data-task-preview-title className="break-words font-medium transition-colors group-hover/review:text-foreground group-focus-visible/review:text-primary">{item.name}</h3>
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Icon className="size-3.5 shrink-0" />{item.review_summary?.template_name || t('review.basic_card')}</p>
           <div className="flex flex-wrap gap-3 text-xs text-muted-foreground"><span>{t('review.task_count', { count: item.run_count })}</span>{!!item.review_summary?.point_count && <span>{t('review.point_count', { count: item.review_summary.point_count })}</span>}{item.review_summary?.status && <span>{t(`review.status.${item.review_summary.status}`)}</span>}</div>
         </>
@@ -155,7 +156,10 @@ function ExperimentList() {
         return <article className={cn('task-item flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-4 transition-colors hover:border-border', selecting && selected.includes(item.id) && 'border-primary/50 bg-primary/5')} key={item.id}>
           <div className="flex min-w-0 items-start gap-3">
             {selecting && <input className="mt-1" type="checkbox" aria-label={t('task_management.select_item', { name: item.name })} checked={selected.includes(item.id)} onChange={event => toggleSelected(item.id, event.target.checked)} />}
-            {selecting ? <button type="button" className={contentClass} aria-pressed={selected.includes(item.id)} onClick={() => toggleSelected(item.id, !selected.includes(item.id))}>{content}</button> : <TaskPreviewTrigger name={item.name} summary={item.review_summary?.template_name || t('review.basic_card')} details={[t('review.task_count', { count: item.run_count }), item.review_summary?.point_count ? t('review.point_count', { count: item.review_summary.point_count }) : '', item.review_summary?.status ? t(`review.status.${item.review_summary.status}`) : ''].filter(Boolean).join(' · ')}><Link className={contentClass} to={`/experiments/${item.id}`}>{content}</Link></TaskPreviewTrigger>}
+            {selecting ? <button type="button" className={contentClass} aria-pressed={selected.includes(item.id)} onClick={() => toggleSelected(item.id, !selected.includes(item.id))}>{content}</button> : <TaskPreviewTrigger name={item.name} titleOnly
+              previewKey={JSON.stringify(['experiment', item.id, item.revision, item.updated_at, item.run_count, item.review_summary?.status, item.review_summary?.point_count, i18n.language])}
+              loadPreview={async signal => experimentPreviewContent(item.name, await fetchTaskPreview<ExperimentPreview>('experiment', item.id, signal), t, i18n.language)}
+            ><Link className={contentClass} to={`/experiments/${item.id}`}>{content}</Link></TaskPreviewTrigger>}
           </div>
           <div className="mt-auto flex min-h-8 flex-wrap items-center justify-between gap-x-2 gap-y-1">
             <time className="text-xs text-muted-foreground" dateTime={item.updated_at}>{new Date(item.updated_at).toLocaleString()}</time>

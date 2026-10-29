@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   User, Bot, Wrench, Terminal, Brain, Image as ImageIcon, Shield,
@@ -6,8 +6,11 @@ import {
 } from 'lucide-react'
 import type { TimelineEvent, TimelineRequest } from '@/lib/api'
 import { cn, formatLatency, getStatusColor } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 
 const PREVIEW_CHARS = 600
+const REQUEST_PAGE_SIZE = 20
+const EVENT_PAGE_SIZE = 20
 
 const ROLE_STYLE: Record<string, { icon: typeof User; badge: string; accent: string }> = {
   system: { icon: Shield, badge: 'bg-system/10 text-system', accent: 'border-l-system/50' },
@@ -100,20 +103,23 @@ function EventCard({
   )
 }
 
-function RequestGroup({
+const RequestGroup = memo(function RequestGroup({
   request,
   onOpenLog,
   onLoadFull,
-  loadingFullLogIds,
+  loadingFull,
 }: {
   request: TimelineRequest
   onOpenLog?: (logId: string) => void
   onLoadFull?: (logId: string) => void
-  loadingFullLogIds?: Set<string>
+  loadingFull?: boolean
 }) {
   const { t } = useTranslation()
+  const [eventLimit, setEventLimit] = useState(EVENT_PAGE_SIZE)
   const newEvents = request.new_events ?? []
   const responseEvents = request.response_events ?? []
+  const visibleResponses = responseEvents.slice(0, Math.max(0, eventLimit - newEvents.length))
+  const remaining = newEvents.length + responseEvents.length - eventLimit
 
   return (
     <div className="space-y-2">
@@ -155,31 +161,34 @@ function RequestGroup({
       )}
 
       {/* 新增消息 */}
-      {newEvents.map((ev, i) => (
+      {newEvents.slice(0, eventLimit).map((ev, i) => (
         <EventCard
           key={`n-${i}`}
           event={ev}
           onNeedFull={onLoadFull ? () => onLoadFull(request.log_id) : undefined}
-          loadingFull={loadingFullLogIds?.has(request.log_id)}
+          loadingFull={loadingFull}
         />
       ))}
 
       {/* 响应事件 */}
-      {responseEvents.length > 0 && (
+      {visibleResponses.length > 0 && (
         <div className="ml-4 space-y-2 pt-1">
-          {responseEvents.map((ev, i) => (
+          {visibleResponses.map((ev, i) => (
             <EventCard
               key={`r-${i}`}
               event={ev}
               onNeedFull={onLoadFull ? () => onLoadFull(request.log_id) : undefined}
-              loadingFull={loadingFullLogIds?.has(request.log_id)}
+              loadingFull={loadingFull}
             />
           ))}
         </div>
       )}
+      {remaining > 0 && <Button variant="outline" size="sm" onClick={() => setEventLimit(limit => limit + EVENT_PAGE_SIZE)}>
+        {t('timeline.show_more_events', { count: remaining })}
+      </Button>}
     </div>
   )
-}
+})
 
 export function TraceTimelineView({
   requests,
@@ -193,21 +202,25 @@ export function TraceTimelineView({
   loadingFullLogIds?: Set<string>
 }) {
   const { t } = useTranslation()
+  const [requestLimit, setRequestLimit] = useState(REQUEST_PAGE_SIZE)
   if (requests.length === 0) {
     return <div className="py-12 text-center text-sm text-muted-foreground">{t('timeline.empty')}</div>
   }
   return (
     <div className="space-y-6">
-      {requests.map(req => (
+      {requests.slice(0, requestLimit).map(req => (
         <div key={req.log_id} className="relative">
           <RequestGroup
             request={req}
             onOpenLog={onOpenLog}
             onLoadFull={onLoadFull}
-            loadingFullLogIds={loadingFullLogIds}
+            loadingFull={loadingFullLogIds?.has(req.log_id)}
           />
         </div>
       ))}
+      {requests.length > requestLimit && <Button variant="outline" size="sm" onClick={() => setRequestLimit(limit => limit + REQUEST_PAGE_SIZE)}>
+        {t('timeline.show_more_requests', { count: requests.length - requestLimit })}
+      </Button>}
     </div>
   )
 }
