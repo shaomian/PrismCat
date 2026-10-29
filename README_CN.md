@@ -6,6 +6,8 @@
 
 > 基于 [PrismCat](https://github.com/paopaoandlingyia/PrismCat) 独立维护的分支 —— 沿用同一 [MIT License](LICENSE)。
 
+v2.2.0 新增调用链合并与拆分、任务置顶与标签、复盘报告 Markdown 导出，并优化调用链列表与复盘工作页，详见 [更新记录](CHANGELOG.md#v220)。
+
 v2.1.0 新增自动调用链、录制批次、AI 对比复盘与任务管理，详见 [更新记录](CHANGELOG.md)。
 
 > **你永远不知道 SDK 在你的 Prompt 里偷偷塞了多少东西 —— 直到你用了 PrismCat。**
@@ -458,3 +460,9 @@ PrismCat 使用异步日志写入，代理本身的延迟通常在 1ms 以内。
 ## 致谢
 
 感谢 [原项目 PrismCat](https://github.com/paopaoandlingyia/PrismCat) 的开源贡献。
+
+---
+
+## License
+
+[MIT License](LICENSE)

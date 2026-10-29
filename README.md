@@ -6,6 +6,8 @@
 
 > Independently maintained fork of [PrismCat](https://github.com/paopaoandlingyia/PrismCat) — released under the same [MIT License](LICENSE).
 
+v2.2.0 adds trace merging and splitting, task pinning and labels, and Markdown report export, with improved trace lists and review pages. See the [release notes](CHANGELOG.md#v220).
+
 v2.1.0 adds automatic task traces, capture runs, AI comparison reviews and task management. See the [release notes](CHANGELOG.md).
 
 > **You never know how much junk your SDK silently injects into your prompts — until you use PrismCat.**
@@ -458,3 +460,9 @@ PrismCat uses asynchronous log writing. The proxy overhead is typically under 1m
 ## Acknowledgments
 
 Thanks to the [original PrismCat project](https://github.com/paopaoandlingyia/PrismCat) for its open-source contribution.
+
+---
+
+## License
+
+[MIT License](LICENSE)
