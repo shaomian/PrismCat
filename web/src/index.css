@@ -4,13 +4,14 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* 颜色 token 只在本块声明一次,不要拆出第二个 @theme 重复定义 */
 @theme {
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
-  --color-popover: hsl(var(--card));
-  --color-popover-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
   --color-primary: hsl(var(--primary));
   --color-primary-foreground: hsl(var(--primary-foreground));
   --color-secondary: hsl(var(--secondary));
@@ -24,6 +25,11 @@
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
   --radius-radius: var(--radius);
 
   /* 最小字号 12px -> 13px。两个原因:
@@ -36,9 +42,15 @@
   /* 语义色 - 状态表达统一走这四个,不要再直接用 green-500/amber-600 之类的调色板类 */
   --color-success: hsl(var(--success));
   --color-warning: hsl(var(--warning));
-  --color-danger: hsl(var(--destructive));
+  --color-danger: hsl(var(--destructive)); /* danger 是 destructive 的语义别名 */
   --color-info: hsl(var(--info));
   --color-system: hsl(var(--system));
+
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
 
   /* 平铺元素一律不用阴影,层级由 1px 边框表达;阴影只留给真浮层(弹窗/抽屉) */
   --shadow-card: none;
@@ -94,6 +106,10 @@
   --chart-3: 185 70% 45%;
   --chart-4: 45 95% 55%;
   --chart-5: 0 85% 55%;
+
+  /* 搜索高亮(当前激活匹配项)用 token,亮暗各自取值,不散落魔法色 */
+  --search-highlight: rgb(253 186 116);
+  --search-highlight-ring: rgb(251 146 60);
 }
 
 .dark {
@@ -122,26 +138,11 @@
   --border: 0 0% 20%;
   --input: 0 0% 20%;
   --ring: 263 75% 70%;
+
+  --search-highlight: rgb(234 88 12 / 0.45);
+  --search-highlight-ring: rgb(251 146 60 / 0.6);
 }
 
-
-@layer base {
-  body {
-    /* Inter 负责拉丁,Noto Sans SC 负责中文。两者 x-height 接近,
-       混排时不会出现中文比英文粗一档、大一号的割裂感。
-       Noto Sans SC 只打包了 UI 文案用到的字形,见 scripts/build-font.mjs */
-    font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-    min-height: 100vh;
-  }
-
-  button {
-    cursor: pointer;
-  }
-
-  [role="button"] {
-    cursor: pointer;
-  }
-}
 
 /* 滚动条样式 */
 ::-webkit-scrollbar {
@@ -176,15 +177,10 @@ input[type="number"] {
 
 /* 搜索高亮 - 当前激活的匹配项 */
 [data-search-match-active] {
-  background-color: rgb(253 186 116) !important;
-  outline: 2px solid rgb(251 146 60);
+  background-color: var(--search-highlight) !important;
+  outline: 2px solid var(--search-highlight-ring);
   outline-offset: -1px;
   border-radius: 2px;
-}
-
-.dark [data-search-match-active] {
-  background-color: rgba(234, 88, 12, 0.45) !important;
-  outline-color: rgba(251, 146, 60, 0.6);
 }
 
 /* 代码块样式 */
@@ -193,27 +189,22 @@ code {
   font-family: 'Fira Code', 'JetBrains Mono', Consolas, Monaco, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', monospace;
 }
 
-/* 动画 */
-@keyframes slideInRight {
+/* 动画 - fadeIn 之前引用但未定义,animate-fade-in 曾静默失效;
+   animate-pulse / animate-slide-in-right 与 Tailwind 内置重复或未使用,已移除 */
+@keyframes fadeIn {
   from {
-    transform: translateX(100%);
+    opacity: 0;
+    transform: translateY(2px);
   }
 
   to {
-    transform: translateX(0);
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.3s ease-out forwards;
-}
-
-.animate-slide-in-right {
-  animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.animate-pulse {
-  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  animation: fadeIn 0.2s ease-out;
 }
 
 /* 棱镜渐变 */
@@ -324,49 +315,6 @@ code {
   display: none !important;
 }
 
-@theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
-  --radius-3xl: calc(var(--radius) + 12px);
-  --radius-4xl: calc(var(--radius) + 16px);
-  --color-background: hsl(var(--background));
-  --color-foreground: hsl(var(--foreground));
-  --color-card: hsl(var(--card));
-  --color-card-foreground: hsl(var(--card-foreground));
-  --color-popover: hsl(var(--popover));
-  --color-popover-foreground: hsl(var(--popover-foreground));
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
-  --color-secondary: hsl(var(--secondary));
-  --color-secondary-foreground: hsl(var(--secondary-foreground));
-  --color-muted: hsl(var(--muted));
-  --color-muted-foreground: hsl(var(--muted-foreground));
-  --color-accent: hsl(var(--accent));
-  --color-accent-foreground: hsl(var(--accent-foreground));
-  --color-destructive: hsl(var(--destructive));
-  --color-border: hsl(var(--border));
-  --color-input: hsl(var(--input));
-  --color-ring: hsl(var(--ring));
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-}
-
-/* Dark variant handled by system-wide dark setting */
-
 /* Keep task layout stable while revealing contextual actions. */
 @media (hover: hover) and (pointer: fine) {
   .task-actions { opacity: 0; pointer-events: none; transition: opacity 120ms; }
@@ -400,6 +348,19 @@ code {
 
   body {
     @apply bg-background text-foreground;
+    /* Inter 负责拉丁,Noto Sans SC 负责中文。两者 x-height 接近,
+       混排时不会出现中文比英文粗一档、大一号的割裂感。
+       Noto Sans SC 只打包了 UI 文案用到的字形,见 scripts/build-font.mjs */
+    font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    min-height: 100vh;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  [role="button"] {
+    cursor: pointer;
   }
 }
 

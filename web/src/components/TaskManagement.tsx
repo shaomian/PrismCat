@@ -49,7 +49,7 @@ export function TaskActions({ name, onEdit, editLabel, editShortcut = false, inl
   return <span className="relative inline-flex shrink-0 items-center gap-0.5" aria-busy={busy} onClick={event => event.stopPropagation()}>
     {onEdit && (inline || editShortcut) && <TaskIconButton label={editLabel || t('common.edit')} className={inline ? 'task-direct-action' : 'task-secondary-action'} disabled={disabled} onClick={onEdit}><Pencil className="size-3.5" /></TaskIconButton>}
     {inline && props.kind !== 'run' && <TaskIconButton label={t(props.archived ? 'task_management.restore' : 'task_management.archive')} className="task-direct-action" disabled={disabled} onClick={() => void change(props.archived ? 'restore' : 'archive')}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : props.archived ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}</TaskIconButton>}
-    {inline ? <TaskIconButton label={t(`task_management.delete_label.${props.kind}`)} className="task-direct-action hover:bg-destructive/10 hover:text-destructive" disabled={disabled || deleteDisabled} onClick={() => setDeleting(true)}><Trash2 className="size-3.5" /></TaskIconButton> : <DropdownMenu.Root>
+    {inline ? <TaskIconButton label={t(`task_management.delete_label.${props.kind}`)} className="task-direct-action hover:bg-danger/10 hover:text-danger" disabled={disabled || deleteDisabled} onClick={() => setDeleting(true)}><Trash2 className="size-3.5" /></TaskIconButton> : <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild><TaskIconButton label={t('task_management.more_for', { name })} className="task-menu-trigger data-[state=open]:bg-accent data-[state=open]:text-accent-foreground" disabled={disabled}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Ellipsis className="size-4" />}</TaskIconButton></DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={5} className="z-50 min-w-40 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md">
@@ -60,7 +60,7 @@ export function TaskActions({ name, onEdit, editLabel, editShortcut = false, inl
             {props.archived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />}{t(props.archived ? 'task_management.restore' : 'task_management.archive')}
           </TaskMenuItem>}
           {props.kind !== 'run' && <DropdownMenu.Separator className="my-1 h-px bg-border" />}
-          <TaskMenuItem disabled={deleteDisabled} className="text-destructive data-[highlighted]:text-destructive" onSelect={() => setDeleting(true)}><Trash2 className="size-4" />{t(`task_management.delete_label.${props.kind}`)}</TaskMenuItem>
+          <TaskMenuItem disabled={deleteDisabled} className="text-danger data-[highlighted]:text-danger" onSelect={() => setDeleting(true)}><Trash2 className="size-4" />{t(`task_management.delete_label.${props.kind}`)}</TaskMenuItem>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>}
@@ -86,7 +86,7 @@ export function TaskBatchActions(props: ManagementProps) {
   return <div className="flex flex-wrap items-center gap-2 text-xs" onClick={event => event.stopPropagation()}>
     <span className="text-muted-foreground">{t('task_management.selected_count', { count: props.items.length })}</span>
     {props.kind !== 'run' && <Button type="button" size="sm" variant="outline" disabled={props.disabled || busy} onClick={() => void change()}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : props.archived ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}{t(props.archived ? 'task_management.restore' : 'task_management.archive')}</Button>}
-    <Button type="button" size="sm" variant="ghost" className="text-destructive" disabled={props.disabled || busy} onClick={() => setDeleting(true)}><Trash2 className="size-3.5" />{t('task_management.delete_selected')}</Button>
+    <Button type="button" size="sm" variant="ghost" className="text-danger" disabled={props.disabled || busy} onClick={() => setDeleting(true)}><Trash2 className="size-3.5" />{t('task_management.delete_selected')}</Button>
     {deleting && <TaskDeleteDialog {...props} onClose={() => setDeleting(false)} />}
   </div>
 }
@@ -143,12 +143,12 @@ function TaskDeleteDialog({ name, kind, items, experimentId, onClose, onChanged 
         {preview.items.some(item => item.blocked_reason) && <div className="space-y-3 rounded-md border border-border p-3">
           {preview.items.filter(item => item.blocked_reason).map(item => <div key={item.id} className="space-y-1 text-xs">
             <p className="break-words font-medium">{item.name || item.id}</p>
-            <p className="text-destructive">{t(`task_management.reasons.${item.blocked_reason}`)}</p>
+            <p className="text-danger">{t(`task_management.reasons.${item.blocked_reason}`)}</p>
             {!!item.referenced_by?.length && <div className="flex flex-wrap gap-x-3 gap-y-1">{item.referenced_by.slice(0, 5).map(reference => <Link key={reference.id} className="break-words text-primary hover:underline" to={`/experiments/${encodeURIComponent(reference.id)}`} onClick={onClose}>{reference.name || reference.id}</Link>)}</div>}
           </div>)}
         </div>}
       </div>}
-      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-danger">{error}</p>}
       <DialogFooter>
         <Button type="button" variant="outline" disabled={busy} onClick={onClose}>{t('common.cancel')}</Button>
         {!preview && error && <Button type="button" variant="outline" disabled={busy} onClick={() => { setError(''); void load() }}>{t('common.refresh')}</Button>}

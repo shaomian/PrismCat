@@ -18,6 +18,12 @@ const badgeVariants = cva(
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         link: "text-primary underline-offset-4 [a&]:hover:underline",
+        // 软色语义徽章:状态表达统一用这组,别再手动拼 bg-x/10 text-x
+        soft: "bg-primary/10 text-primary",
+        success: "bg-success/10 text-success",
+        warning: "bg-warning/10 text-warning",
+        info: "bg-info/10 text-info",
+        danger: "bg-danger/10 text-danger",
       },
     },
     defaultVariants: {

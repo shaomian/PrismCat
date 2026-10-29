@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { FlaskConical, Globe, LayoutDashboard, LogOut, Network, Settings as SettingsIcon, Zap } from 'lucide-react'
+import { FlaskConical, LayoutDashboard, LogOut, Network, Settings as SettingsIcon, Zap } from 'lucide-react'
 import { PrismCatLogo } from '@/components/PrismCatLogo'
 import { useTranslation } from 'react-i18next'
 import { Dashboard } from '@/pages/Dashboard'
@@ -7,6 +7,8 @@ import { Traces } from '@/pages/Traces'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { LanguageToggle } from '@/components/LanguageToggle'
+import { PageLoading } from '@/components/PageLoading'
 import { Toaster } from '@/components/ui/sonner'
 import { Suspense, lazy, useState, useEffect } from 'react'
 import { fetchAuthStatus, fetchConfig, login, logout as logoutRequest, onAuthExpired, setupPassword } from '@/lib/api'
@@ -43,7 +45,7 @@ interface AppLayoutProps {
 }
 
 function AppLayout({ onSignOut }: AppLayoutProps) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const location = useLocation()
   const [version, setVersion] = useState<string>('') // 接口返回前显示空占位，避免版本号过期误导
 
@@ -108,12 +110,7 @@ function AppLayout({ onSignOut }: AppLayoutProps) {
     ? settingsTabLabelKeys[settingsTab]
     : navItems.find(item => isNavActive(item.to))?.labelKey ?? 'app.title'
 
-  const routeFallback = (
-    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      <div className="text-sm text-muted-foreground">{t('common.loading')}</div>
-    </div>
-  )
+  const routeFallback = <PageLoading />
 
   return (
     <div className="min-h-screen bg-background">
@@ -180,14 +177,7 @@ function AppLayout({ onSignOut }: AppLayoutProps) {
         <div className="shrink-0 border-t border-border p-2">
           <div className="flex items-center gap-1">
             <ThemeToggle />
-            <button
-              onClick={() => i18n.changeLanguage(i18n.language === 'zh' ? 'en' : 'zh')}
-              className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              aria-label={t('auth.switch_language')}
-            >
-              <Globe className="h-3.5 w-3.5" />
-              <span>{i18n.language === 'zh' ? 'EN' : '中'}</span>
-            </button>
+            <LanguageToggle className="flex-1 px-0" />
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -217,14 +207,7 @@ function AppLayout({ onSignOut }: AppLayoutProps) {
             </div>
             <div className="flex shrink-0 items-center gap-1">
               <ThemeToggle />
-              <button
-                onClick={() => i18n.changeLanguage(i18n.language === 'zh' ? 'en' : 'zh')}
-                className="flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                aria-label={t('auth.switch_language')}
-              >
-                <Globe className="h-3.5 w-3.5" />
-                <span>{i18n.language === 'zh' ? 'EN' : '中'}</span>
-              </button>
+              <LanguageToggle />
               {/* 移动端顶栏不挂 Tooltip:触屏不触发悬停,aria-label 已覆盖读屏器 */}
               <button
                 onClick={onSignOut}
@@ -282,7 +265,8 @@ function AppLayout({ onSignOut }: AppLayoutProps) {
 
         {/* 主内容 */}
         <main className="w-full flex-1 px-4 py-4 sm:px-5">
-          <div className="mx-auto w-full max-w-[1600px]">
+          {/* key 按 pathname 重放淡入,查询串变化(翻页/筛选)不重复动画 */}
+          <div key={location.pathname} className="mx-auto w-full max-w-[1600px] animate-fade-in">
             <Suspense fallback={routeFallback}>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
@@ -370,12 +354,7 @@ function AppContent() {
   }
 
   if (isCheckingAuth) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        <div className="text-sm text-muted-foreground">{t('common.loading')}</div>
-      </div>
-    )
+    return <PageLoading className="min-h-screen" />
   }
 
   if (!isAuthenticated) {

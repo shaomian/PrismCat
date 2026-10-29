@@ -64,6 +64,18 @@ export const FOCUS_RING = 'outline-none focus-visible:border-ring focus-visible:
 /** 校验失败时的焦点环,配合 border-danger 使用 */
 export const FOCUS_RING_DANGER = 'outline-none focus-visible:border-danger focus-visible:ring-danger/50 focus-visible:ring-[3px]'
 
+/**
+ * 页面级面板容器统一造型:圆角 + 1px 边框 + 卡片底色(平面化设计不用阴影)。
+ * 需要裁切子元素时 cn(PANEL_CLASS, 'overflow-hidden')。
+ */
+export const PANEL_CLASS = 'rounded-lg border border-border bg-card'
+
+/**
+ * 表格/列表选中行:除淡色底还要左侧 2px 竖条 —— 详情抽屉盖住右侧时,
+ * 只剩左半边可见,没有竖条选中态几乎分辨不出。
+ */
+export const SELECTED_ROW_CLASS = 'bg-primary/[0.07] hover:bg-primary/[0.09] dark:bg-primary/[0.14] dark:hover:bg-primary/[0.16] [&>td:first-child]:shadow-[inset_2px_0_0_0_hsl(var(--primary))]'
+
 // JSON 语法高亮
 export function syntaxHighlightJson(json: string): string {
   if (!json) return ''

@@ -164,7 +164,7 @@ function LargeTextPreview({ text, searchTerm, maxMatches }: { text: string; sear
     return (
         <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground/60">
-                <span>{t('json_viewer.large_text', 'Large Text')}</span>
+                <span>{t('json_viewer.large_text')}</span>
                 <span>{formatSize(text.length)}</span>
                 <button
                     type="button"

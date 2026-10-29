@@ -105,7 +105,7 @@ export function StorageCleanup({ onCompleted }: { onCompleted?: () => void }) {
     </div>
     {job.state === 'running' && <p role="status" className="text-xs text-muted-foreground">{t('task_cleanup.running_hint')}</p>}
     {job.state === 'completed' && <p role="status" className="text-xs text-muted-foreground">{t('task_cleanup.completed', { count: job.deleted_logs })} {t('task_cleanup.space_hint')}</p>}
-    {job.state === 'failed' && <p role="alert" className="text-xs text-destructive">{t(job.deleted_logs > 0 ? 'task_cleanup.partial_failed' : 'task_cleanup.failed', { count: job.deleted_logs })}</p>}
+    {job.state === 'failed' && <p role="alert" className="text-xs text-danger">{t(job.deleted_logs > 0 ? 'task_cleanup.partial_failed' : 'task_cleanup.failed', { count: job.deleted_logs })}</p>}
     <Dialog open={open} onOpenChange={value => { if (!value) closePreview() }}>
       <DialogContent className="sm:max-w-[460px]">
         <DialogHeader className="text-left">
@@ -127,7 +127,7 @@ export function StorageCleanup({ onCompleted }: { onCompleted?: () => void }) {
           <p className="text-xs leading-relaxed text-muted-foreground">{t('task_cleanup.protection_hint')}</p>
           {!preview.counts.eligible_logs && <p className="text-sm">{t('task_cleanup.nothing_to_clean')}</p>}
         </div>}
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         <DialogFooter>
           <Button variant="outline" disabled={starting} onClick={closePreview}>{t('common.cancel')}</Button>
           {error && <Button variant="outline" disabled={busy} onClick={() => void showPreview()}>{t('common.refresh')}</Button>}

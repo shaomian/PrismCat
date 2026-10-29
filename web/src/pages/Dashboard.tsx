@@ -5,6 +5,8 @@ import type { RequestLog, LogStats, Upstream, LogFilter, LogListResponse } from 
 import { StatsCards } from '@/components/StatsCards'
 import { LogTable } from '@/components/LogTable'
 import { LogFilters } from '@/components/LogFilters'
+import { Spinner } from '@/components/ui/spinner'
+import { PANEL_CLASS, cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -134,7 +136,7 @@ export function Dashboard() {
     const logDetailFallback = selectedLog ? (
         <div className="fixed inset-y-0 right-0 z-50 w-full border-l border-border bg-background sm:max-w-2xl">
             <div className="flex h-full flex-col items-center justify-center gap-4">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                <Spinner className="h-6 w-6" />
                 <div className="text-sm font-medium text-muted-foreground">
                     {t('common.loading')}
                 </div>
@@ -150,7 +152,7 @@ export function Dashboard() {
             </section>
 
             {/* 日志模块 - 筛选栏(头部) + 表格(主体) 合为一张卡片 */}
-            <section className="rounded-lg overflow-hidden border border-border bg-card">
+            <section className={cn(PANEL_CLASS, 'overflow-hidden')}>
                 {/* 筛选 + 分页 头部 */}
                 <div className="border-b border-border px-2 sm:px-0">
                     <LogFilters

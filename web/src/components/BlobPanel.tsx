@@ -43,7 +43,7 @@ export function BlobPanel({
                     <Cloud className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 )}
                 <span className="font-medium text-foreground">
-                    {binary ? t('log_detail.binary_response', 'Binary response') : isLoaded ? t('log_detail.blob_loaded') : t('log_detail.blob_detached')}
+                    {binary ? t('log_detail.binary_response') : isLoaded ? t('log_detail.blob_loaded') : t('log_detail.blob_detached')}
                 </span>
                 {mediaType && (
                     <span className="rounded-md bg-background px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
@@ -109,7 +109,7 @@ export function BlobPanel({
                         className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                     >
                         <Download className="h-3 w-3" />
-                        {t('log_detail.download', 'Download')}
+                        {t('log_detail.download')}
                     </a>
                 </div>
             </div>
@@ -117,7 +117,7 @@ export function BlobPanel({
                 <div className="mt-3 overflow-hidden rounded-md border border-border bg-background">
                     <img
                         src={blobUrl}
-                        alt={t('log_detail.binary_image_preview', 'Binary image preview')}
+                        alt={t('log_detail.binary_image_preview')}
                         className="max-h-[420px] w-full object-contain"
                         loading="lazy"
                     />

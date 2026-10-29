@@ -847,7 +847,84 @@ func (r *SQLiteRepository) GetStats(since *time.Time) (*LogStats, error) {
 		return nil, err
 	}
 
+	if err := r.fillStatsTrend(stats, since, where, args); err != nil {
+		return nil, err
+	}
+
 	return stats, nil
+}
+
+// statsTrendBuckets 趋势图固定桶数:仪表盘迷你趋势图只需要看出形状,不需要高精度
+const statsTrendBuckets = 24
+
+// fillStatsTrend 把统计窗口切成固定数量的时间桶,空隙补零,前端按序渲染即可。
+// since 为 nil(全部时间)时窗口从最早一条日志开始到当前时间。
+func (r *SQLiteRepository) fillStatsTrend(stats *LogStats, since *time.Time, where string, args []interface{}) error {
+	var minMs, maxMs int64
+	rangeQuery := fmt.Sprintf("SELECT COALESCE(MIN(created_at_unix_ms),0), COALESCE(MAX(created_at_unix_ms),0) FROM request_logs %s", where)
+	if err := r.db.QueryRow(rangeQuery, args...).Scan(&minMs, &maxMs); err != nil {
+		return err
+	}
+	if maxMs == 0 {
+		return nil
+	}
+
+	startMs := minMs
+	if since != nil {
+		startMs = since.UTC().UnixMilli()
+	}
+	endMs := time.Now().UTC().UnixMilli()
+	if endMs < maxMs {
+		endMs = maxMs
+	}
+	span := endMs - startMs
+	if span <= 0 {
+		span = 1
+	}
+	interval := span / statsTrendBuckets
+	if interval <= 0 {
+		interval = 1
+	}
+
+	trend := make([]StatsTrendPoint, statsTrendBuckets)
+	for i := range trend {
+		trend[i] = StatsTrendPoint{StartUnixMs: startMs + int64(i)*interval}
+	}
+
+	bucketQuery := fmt.Sprintf(`
+	SELECT (created_at_unix_ms - ?) / ? as bucket,
+		COUNT(*),
+		COALESCE(SUM(CASE WHEN (error IS NOT NULL AND error != '') OR status_code >= 400 THEN 1 ELSE 0 END), 0)
+	FROM request_logs %s
+	GROUP BY bucket
+	`, where)
+	rows3, err := r.db.Query(bucketQuery, append([]interface{}{startMs, interval}, args...)...)
+	if err != nil {
+		return err
+	}
+	defer rows3.Close()
+	for rows3.Next() {
+		var bucket, total, errors int64
+		if err := rows3.Scan(&bucket, &total, &errors); err != nil {
+			return err
+		}
+		// created_at == endMs 的边界行会落出最后一桶,收回来
+		if bucket >= statsTrendBuckets {
+			bucket = statsTrendBuckets - 1
+		}
+		if bucket < 0 {
+			continue
+		}
+		trend[bucket].Total = total
+		trend[bucket].Errors = errors
+	}
+	if err := rows3.Err(); err != nil {
+		return err
+	}
+
+	stats.TrendIntervalMs = interval
+	stats.Trend = trend
+	return nil
 }
 
 func (r *SQLiteRepository) ListTraces(filter TraceFilter) ([]TraceSummary, int64, error) {

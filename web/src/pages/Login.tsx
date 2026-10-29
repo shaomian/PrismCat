@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { ArrowRight, Eye, EyeOff, Globe, LockKeyhole, Server, ShieldCheck } from 'lucide-react'
+import { ArrowRight, Eye, EyeOff, LockKeyhole, Server, ShieldCheck } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { PrismCatLogo } from '@/components/PrismCatLogo'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { LanguageToggle } from '@/components/LanguageToggle'
+import { PANEL_CLASS, cn } from '@/lib/utils'
 
 interface LoginProps {
   setupRequired: boolean
@@ -14,7 +16,7 @@ interface LoginProps {
 }
 
 export function Login({ setupRequired, onSignedIn }: LoginProps) {
-  const { t, i18n } = useTranslation()
+    const { t } = useTranslation()
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -55,20 +57,16 @@ export function Login({ setupRequired, onSignedIn }: LoginProps) {
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <button
-            onClick={() => i18n.changeLanguage(i18n.language === 'zh' ? 'en' : 'zh')}
-            className="flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-accent/50 px-3 text-xs font-semibold text-muted-foreground transition-all hover:border-border hover:bg-accent hover:text-foreground active:scale-95 sm:min-w-[110px] sm:px-4"
-            aria-label={t('auth.switch_language')}
-          >
-            <Globe className="h-3.5 w-3.5" />
-            <span>{i18n.language === 'zh' ? 'English' : '中文'}</span>
-          </button>
+          <LanguageToggle variant="outline" />
         </div>
       </header>
 
       <main className="grid min-h-[calc(100vh-76px)] place-items-center px-4 py-8 sm:px-6">
-        <div className="grid w-full max-w-5xl overflow-hidden rounded-lg border border-border bg-card md:grid-cols-[1fr_420px]">
+        <div className={cn(PANEL_CLASS, 'grid w-full max-w-5xl overflow-hidden md:grid-cols-[1fr_420px]')}>
           <section className="relative hidden min-h-[560px] overflow-hidden border-r border-border bg-muted/40 md:block">
+            {/* 棱镜光晕:唯一的品牌色点缀,压在很低的存在感,不抢表单焦点 */}
+            <div aria-hidden="true" className="prism-gradient pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full opacity-[0.06] blur-3xl dark:opacity-[0.12]" />
+            <div aria-hidden="true" className="prism-gradient pointer-events-none absolute -bottom-40 -right-24 h-80 w-80 rounded-full opacity-[0.05] blur-3xl dark:opacity-[0.10]" />
             <div className="relative flex h-full flex-col justify-between p-10">
               <div>
                 <div className="mb-8 inline-flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-card">
@@ -122,16 +120,16 @@ export function Login({ setupRequired, onSignedIn }: LoginProps) {
                 <div className="space-y-2">
                   <Label htmlFor="password">{t('auth.password')}</Label>
                   <div className="relative">
-                    <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       id="password"
+                      startIcon={<LockKeyhole />}
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(event) => {
                         setPassword(event.target.value)
                         if (error) setError('')
                       }}
-                      className="h-11 pl-9 pr-11"
+                      className="h-11 pr-11"
                       placeholder={setupRequired ? t('auth.new_password_placeholder') : t('auth.password_placeholder')}
                       aria-invalid={error ? 'true' : 'false'}
                       autoComplete={setupRequired ? 'new-password' : 'current-password'}
@@ -151,29 +149,27 @@ export function Login({ setupRequired, onSignedIn }: LoginProps) {
                 {setupRequired ? (
                   <div className="space-y-2">
                     <Label htmlFor="confirm-password">{t('auth.confirm_password')}</Label>
-                    <div className="relative">
-                      <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        id="confirm-password"
-                        type={showPassword ? 'text' : 'password'}
-                        value={confirmPassword}
-                        onChange={(event) => {
-                          setConfirmPassword(event.target.value)
-                          if (error) setError('')
-                        }}
-                        className="h-11 pl-9"
-                        placeholder={t('auth.confirm_password_placeholder')}
-                        aria-invalid={error ? 'true' : 'false'}
-                        autoComplete="new-password"
-                        disabled={isSubmitting}
-                      />
-                    </div>
+                    <Input
+                      id="confirm-password"
+                      startIcon={<LockKeyhole />}
+                      type={showPassword ? 'text' : 'password'}
+                      value={confirmPassword}
+                      onChange={(event) => {
+                        setConfirmPassword(event.target.value)
+                        if (error) setError('')
+                      }}
+                      className="h-11"
+                      placeholder={t('auth.confirm_password_placeholder')}
+                      aria-invalid={error ? 'true' : 'false'}
+                      autoComplete="new-password"
+                      disabled={isSubmitting}
+                    />
                   </div>
                 ) : null}
 
                 <div>
                   {error ? (
-                    <p className="text-sm font-medium text-destructive">{error}</p>
+                    <p className="text-sm font-medium text-danger">{error}</p>
                   ) : null}
                 </div>
 

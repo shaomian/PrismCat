@@ -1,817 +1,51 @@
-import { TraceCorrelationSetting } from '@/components/TraceCorrelationSetting'
-import { StorageCleanup } from '@/components/StorageCleanup'
-import {
+﻿import {
     useEffect,
     useState,
     useCallback,
     useMemo,
-    useId,
     useRef,
     type FormEvent,
-    type ReactNode,
 } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { isSettingsTab, type SettingsTab } from '@/lib/routes'
-import {
-    Plus,
-    Trash2,
-    Save,
-    Upload,
-    Copy,
-    CircleHelp,
-    AlertTriangle,
-    Pencil,
-    ExternalLink,
-    RefreshCw,
-    Download,
-    Database,
-    Archive,
-    FileCode,
-    ChevronDown,
-    Route,
-    Eye,
-    EyeOff,
-} from 'lucide-react'
+import { Save } from 'lucide-react'
 
-import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { UpstreamLoggingPathFilter } from '@/components/UpstreamLoggingPathFilter'
-import { LoggingRules, type LoggingRulesTab } from '@/pages/LoggingRules'
-import { Switch } from '@/components/ui/switch'
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog'
-import {
-    Tooltip,
-    TooltipContent,
-    TooltipTrigger,
-} from '@/components/ui/tooltip'
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from '@/components/ui/table'
+import { PageLoading } from '@/components/PageLoading'
 import { DEFAULT_SSE_KEEPALIVE_INTERVAL_SECONDS, DEFAULT_UPSTREAM_TIMEOUT_SECONDS, fetchUpstreams, addUpstream, removeUpstream, activateUpstreamTarget, fetchConfig, updateConfig, fetchSystemMetrics, fetchUpdateInfo, fetchStorageUsage, fetchModelPathTemplates } from '@/lib/api'
 import type { Upstream, UpstreamTarget, AppConfig, SystemMetrics, UpdateInfo, StorageUsage, LoggingPathFilter, ModelPathTemplate, SSEKeepaliveMode } from '@/lib/api'
+import type { LoggingRulesTab } from '@/pages/LoggingRules'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
-
-type FieldBlockProps = {
-    label: string
-    hint?: string
-    htmlFor?: string
-    unit?: string
-    children: ReactNode
-}
-
-type ToggleSettingProps = {
-    label: string
-    description: string
-    checked: boolean
-    onCheckedChange: (checked: boolean) => void
-}
-
-const requestOverrideExample = JSON.stringify([
-    {
-        name: 'Example: default max_tokens',
-        enabled: false,
-        match: {
-            methods: ['POST'],
-        },
-        patch: [
-            { op: 'default', path: 'max_tokens', value: 4096 },
-        ],
-    },
-], null, 2)
-
-const usageExtractionExample = JSON.stringify([
-    {
-        name: 'OpenAI compatible',
-        enabled: true,
-        match: {
-            content_types: ['application/json', 'text/event-stream'],
-        },
-        paths: {
-            input_tokens: ['/usage/prompt_tokens', '/usage/input_tokens'],
-            output_tokens: ['/usage/completion_tokens', '/usage/output_tokens'],
-            total_tokens: ['/usage/total_tokens'],
-            raw_usage: ['/usage'],
-        },
-    },
-    {
-        name: 'OpenAI Responses',
-        enabled: true,
-        match: {
-            content_types: ['application/json', 'text/event-stream'],
-        },
-        paths: {
-            input_tokens: ['/usage/input_tokens', '/response/usage/input_tokens'],
-            output_tokens: ['/usage/output_tokens', '/response/usage/output_tokens'],
-            total_tokens: ['/usage/total_tokens', '/response/usage/total_tokens'],
-            raw_usage: ['/usage', '/response/usage'],
-        },
-    },
-    {
-        name: 'Anthropic',
-        enabled: true,
-        match: {
-            content_types: ['application/json', 'text/event-stream'],
-        },
-        paths: {
-            input_tokens: ['/usage/input_tokens', '/message/usage/input_tokens'],
-            output_tokens: ['/usage/output_tokens', '/message/usage/output_tokens'],
-            raw_usage: ['/usage', '/message/usage'],
-        },
-    },
-    {
-        name: 'Gemini',
-        enabled: true,
-        match: {
-            content_types: ['application/json', 'text/event-stream'],
-        },
-        paths: {
-            input_tokens: ['/usageMetadata/promptTokenCount'],
-            output_tokens: ['/usageMetadata/candidatesTokenCount'],
-            total_tokens: ['/usageMetadata/totalTokenCount'],
-            raw_usage: ['/usageMetadata'],
-        },
-    },
-], null, 2)
-
-function getErrorMessage(error: unknown, fallback: string) {
-    return error instanceof Error ? error.message : fallback
-}
-
-type OverrideBinding = {
-    enabled: boolean
-    rule_names: string[]
-}
-
-type EditingUpstream = {
-    name: string
-    target: string
-    timeout: number
-    responseHeaderTimeout: number
-    responseBodyFirstByteTimeout: number
-    responseBodyIdleTimeout: number
-    sseKeepaliveMode: SSEKeepaliveMode
-    sseKeepaliveInterval: number
-    order: number
-    outboundProxy: string
-    loggingEnabled: boolean
-    loggingPathFilter: LoggingPathFilter
-    overrideEnabled: boolean
-    ruleNames: string[]
-    usageEnabled: boolean
-    usageRuleNames: string[]
-    usesTargetPresets: boolean
-    activeTarget: string
-    selectedTarget: string
-    targets: Record<string, UpstreamTarget>
-}
-
-type OutboundProxyMode = 'env' | 'direct' | 'custom'
-type RuleTab = 'request_overrides' | 'usage_extraction'
-type OverrideRuleObject = Record<string, unknown>
-type HeaderOp = { op: string; name: string; value?: string }
-
-const customProxyPlaceholder = 'http://127.0.0.1:7890'
-
-function editingBufferAsTarget(upstream: EditingUpstream): UpstreamTarget {
-    return {
-        url: upstream.target,
-        timeout: upstream.timeout,
-        response_header_timeout: upstream.responseHeaderTimeout,
-        response_body_first_byte_timeout: upstream.responseBodyFirstByteTimeout,
-        response_body_idle_timeout: upstream.responseBodyIdleTimeout,
-        sse_keepalive: {
-            mode: upstream.sseKeepaliveMode,
-            interval: upstream.sseKeepaliveInterval,
-        },
-        outbound_proxy: upstream.outboundProxy,
-        request_overrides: {
-            enabled: upstream.overrideEnabled,
-            rule_names: upstream.ruleNames,
-        },
-        usage_extraction: {
-            enabled: upstream.usageEnabled,
-            rule_names: upstream.usageRuleNames,
-        },
-    }
-}
-
-function commitSelectedTarget(upstream: EditingUpstream): EditingUpstream {
-    if (!upstream.usesTargetPresets || !upstream.selectedTarget) return upstream
-    return {
-        ...upstream,
-        targets: {
-            ...upstream.targets,
-            [upstream.selectedTarget]: editingBufferAsTarget(upstream),
-        },
-    }
-}
-
-function loadTargetBuffer(upstream: EditingUpstream, targetName: string): EditingUpstream {
-    const target = upstream.targets[targetName]
-    if (!target) return upstream
-    return {
-        ...upstream,
-        selectedTarget: targetName,
-        target: target.url || '',
-        timeout: target.timeout || DEFAULT_UPSTREAM_TIMEOUT_SECONDS,
-        responseHeaderTimeout: target.response_header_timeout || 0,
-        responseBodyFirstByteTimeout: target.response_body_first_byte_timeout || 0,
-        responseBodyIdleTimeout: target.response_body_idle_timeout || 0,
-        sseKeepaliveMode: target.sse_keepalive?.mode || 'off',
-        sseKeepaliveInterval: target.sse_keepalive?.interval || DEFAULT_SSE_KEEPALIVE_INTERVAL_SECONDS,
-        outboundProxy: target.outbound_proxy || 'env',
-        overrideEnabled: target.request_overrides?.enabled ?? false,
-        ruleNames: target.request_overrides?.rule_names || [],
-        usageEnabled: target.usage_extraction?.enabled ?? false,
-        usageRuleNames: target.usage_extraction?.rule_names || [],
-    }
-}
-
-function activeTargetConfig(upstream: Upstream): UpstreamTarget | undefined {
-    if (!upstream.active_target) return undefined
-    return upstream.targets?.[upstream.active_target]
-}
-
-function getOverrideRuleName(rule: unknown, fallback: string) {
-    if (!rule || typeof rule !== 'object') return fallback
-    const name = (rule as { name?: unknown }).name
-    return typeof name === 'string' && name.trim() ? name.trim() : fallback
-}
-
-// canonicalJson 生成与键序无关的规范化 JSON，用于「编辑器内容是否
-// 与规则对象语义一致」的判断（见选中规则同步 effect）。
-function canonicalJson(value: unknown): string {
-    if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
-    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
-    const entries = Object.entries(value as Record<string, unknown>)
-        .filter(([, v]) => v !== undefined)
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`
-}
-
-function getOverrideRuleEnabled(rule: unknown) {
-    if (!rule || typeof rule !== 'object') return false
-    const enabled = (rule as { enabled?: unknown }).enabled
-    return enabled !== false
-}
-
-function getBindingRuleNames(binding?: OverrideBinding) {
-    return Array.isArray(binding?.rule_names) ? binding.rule_names : []
-}
-
-// 高级设置面板「有改动才默认展开」的判据。记录日志不在其中 —— 它是上游级的,
-// 已经移到面板外面了。
-function hasAdvancedValues(source?: {
-    response_header_timeout?: number
-    response_body_first_byte_timeout?: number
-    response_body_idle_timeout?: number
-    sse_keepalive?: { mode?: SSEKeepaliveMode }
-    request_overrides?: OverrideBinding
-    usage_extraction?: OverrideBinding
-}) {
-    if (!source) return false
-    return (source.response_header_timeout || 0) > 0
-        || (source.response_body_first_byte_timeout || 0) > 0
-        || (source.response_body_idle_timeout || 0) > 0
-        || (source.sse_keepalive?.mode || 'off') !== 'off'
-        || (source.request_overrides?.enabled ?? false)
-        || (source.usage_extraction?.enabled ?? false)
-        || getBindingRuleNames(source.request_overrides).length > 0
-        || getBindingRuleNames(source.usage_extraction).length > 0
-}
-
-type RuleRuntimeStatus =
-    | { kind: 'active'; enabledUpstreams: string[]; disabledUpstreams: string[]; inactiveTargets: string[] }
-    | { kind: 'blocked'; reason: 'global' | 'rule' | 'bindings'; enabledUpstreams: string[]; disabledUpstreams: string[]; inactiveTargets: string[] }
-    | { kind: 'inactive'; inactiveTargets: string[] }
-    | { kind: 'unbound' }
-
-type BindingKind = 'request_overrides' | 'usage_extraction'
-
-function collectRuleBindingLocations(
-    upstreams: Upstream[],
-    legacyBindings: Record<string, OverrideBinding>,
-    kind: BindingKind,
-): { active: string[]; disabled: string[]; inactive: string[] } {
-    const active: string[] = []
-    const disabled: string[] = []
-    const inactive: string[] = []
-    for (const upstream of upstreams) {
-        const targets = upstream.targets || {}
-        if (Object.keys(targets).length === 0) {
-            const binding = legacyBindings[upstream.name]
-            if (!binding) continue
-            const label = upstream.name
-            if (binding.enabled) active.push(label)
-            else disabled.push(label)
-            continue
-        }
-
-        for (const [targetName, target] of Object.entries(targets)) {
-            const binding = target[kind]
-            if (!binding) continue
-            const label = `${upstream.name}/${targetName}`
-            if (targetName === upstream.active_target) {
-                if (binding.enabled) active.push(label)
-                else disabled.push(label)
-            } else {
-                inactive.push(label)
-            }
-        }
-    }
-    return { active, disabled, inactive }
-}
-
-function getRuleRuntimeStatus(
-    rule: OverrideRuleObject,
-    upstreams: Upstream[],
-    bindings: Record<string, OverrideBinding>,
-    globalEnabled: boolean,
-): RuleRuntimeStatus {
-    const ruleName = getOverrideRuleName(rule, '')
-    if (!ruleName) return { kind: 'unbound' }
-
-    const locations = collectRuleBindingLocations(upstreams, bindings, 'request_overrides')
-    const enabledUpstreams = locations.active.filter(name => {
-        const [upstreamName, targetName] = name.split('/')
-        const binding = targetName
-            ? upstreams.find(upstream => upstream.name === upstreamName)?.targets?.[targetName]?.request_overrides
-            : bindings[upstreamName]
-        return Boolean(binding && getBindingRuleNames(binding).includes(ruleName))
-    })
-    const disabledUpstreams = locations.disabled.filter(name => {
-        const [upstreamName, targetName] = name.split('/')
-        const binding = targetName
-            ? upstreams.find(upstream => upstream.name === upstreamName)?.targets?.[targetName]?.request_overrides
-            : bindings[upstreamName]
-        return Boolean(binding && getBindingRuleNames(binding).includes(ruleName))
-    })
-    const inactiveTargets = locations.inactive.filter(name => {
-        const [upstreamName, targetName] = name.split('/')
-        const binding = upstreams.find(upstream => upstream.name === upstreamName)?.targets?.[targetName]?.request_overrides
-        return Boolean(binding && getBindingRuleNames(binding).includes(ruleName))
-    })
-
-    if (enabledUpstreams.length + disabledUpstreams.length + inactiveTargets.length === 0) {
-        return { kind: 'unbound' }
-    }
-    if (enabledUpstreams.length + disabledUpstreams.length === 0) {
-        return { kind: 'inactive', inactiveTargets }
-    }
-    if (!globalEnabled) {
-        return { kind: 'blocked', reason: 'global', enabledUpstreams, disabledUpstreams, inactiveTargets }
-    }
-    if (!getOverrideRuleEnabled(rule)) {
-        return { kind: 'blocked', reason: 'rule', enabledUpstreams, disabledUpstreams, inactiveTargets }
-    }
-    if (enabledUpstreams.length === 0) {
-        return { kind: 'blocked', reason: 'bindings', enabledUpstreams, disabledUpstreams, inactiveTargets }
-    }
-    return { kind: 'active', enabledUpstreams, disabledUpstreams, inactiveTargets }
-}
-
-function formatUpstreamList(
-    enabled: string[],
-    disabled: string[],
-    t: (key: string, options?: Record<string, unknown>) => string,
-): string {
-    const summarize = (names: string[]) => {
-        if (names.length <= 2) return names.join(', ')
-        return `${names.slice(0, 2).join(', ')} +${names.length - 2}`
-    }
-    const parts: string[] = []
-    if (enabled.length > 0) parts.push(`→ ${summarize(enabled)}`)
-    if (disabled.length > 0) parts.push(t('settings.rule_status_disabled_upstreams', { list: summarize(disabled) }))
-    return parts.join('  ·  ')
-}
-
-function formatInactiveTargets(
-    targets: string[],
-    t: (key: string, options?: Record<string, unknown>) => string,
-): string {
-    if (targets.length === 0) return ''
-    const summarize = targets.length <= 2 ? targets.join(', ') : `${targets.slice(0, 2).join(', ')} +${targets.length - 2}`
-    return t('settings.rule_status_inactive_targets', { list: summarize })
-}
-
-function outboundProxyMode(value?: string): OutboundProxyMode {
-    const normalized = (value || '').trim().toLowerCase()
-    if (!normalized || normalized === 'env') return 'env'
-    if (normalized === 'direct') return 'direct'
-    return 'custom'
-}
-
-function normalizedOutboundProxy(value: string): string {
-    return value.trim() || 'env'
-}
-
-function formatBytes(value?: number | null): string {
-    if (value === undefined || value === null) return '-'
-    if (value < 1024) return `${value} B`
-    const units = ['KB', 'MB', 'GB', 'TB']
-    let size = value / 1024
-    let unitIndex = 0
-    while (size >= 1024 && unitIndex < units.length - 1) {
-        size /= 1024
-        unitIndex += 1
-    }
-    return `${size >= 100 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`
-}
-
-function formatPercent(value?: number | null): string {
-    if (value === undefined || value === null) return '-'
-    if (value < 0.1) return '0%'
-    return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)}%`
-}
-
-function formatDuration(seconds?: number | null): string {
-    if (seconds === undefined || seconds === null) return '-'
-    const total = Math.max(0, Math.floor(seconds))
-    const days = Math.floor(total / 86400)
-    const hours = Math.floor((total % 86400) / 3600)
-    const minutes = Math.floor((total % 3600) / 60)
-    if (days > 0) return `${days}d ${hours}h`
-    if (hours > 0) return `${hours}h ${minutes}m`
-    return `${minutes}m ${total % 60}s`
-}
-
-function OutboundProxyControl({
-    value,
-    onChange,
-    t,
-    className,
-}: {
-    value: string
-    onChange: (value: string) => void
-    t: (key: string) => string
-    className?: string
-}) {
-    const mode = outboundProxyMode(value)
-    const [customValue, setCustomValue] = useState(
-        mode === 'custom' ? value : customProxyPlaceholder,
-    )
-
-    return (
-        <div
-            className={cn(
-                "relative flex h-9 overflow-hidden rounded-md border border-input bg-background transition-shadow focus-within:ring-2 focus-within:ring-ring/50",
-                className,
-            )}
-        >
-            {mode === 'custom' && (
-                <Input
-                    value={value}
-                    onChange={e => {
-                        setCustomValue(e.target.value)
-                        onChange(e.target.value)
-                    }}
-                    placeholder={customProxyPlaceholder}
-                    aria-label={t('upstream_manager.outbound_proxy_custom_address')}
-                    className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent px-3 pr-11 font-mono text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
-                />
-            )}
-            <Select
-                value={mode}
-                onValueChange={(nextMode: OutboundProxyMode) => {
-                    if (nextMode === 'custom') {
-                        onChange(mode === 'custom' ? value : customValue)
-                        return
-                    }
-                    onChange(nextMode)
-                }}
-            >
-                <SelectTrigger
-                    className={cn(
-                        "h-full rounded-none border-0 bg-transparent text-sm shadow-none",
-                        mode === 'custom'
-                            ? "absolute inset-y-0 right-0 z-10 w-10 justify-center px-0 hover:bg-muted/40"
-                            : "w-full",
-                    )}
-                >
-                    {mode === 'custom' ? (
-                        <span className="sr-only">
-                            <SelectValue />
-                        </span>
-                    ) : (
-                        <SelectValue />
-                    )}
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="env">{t('upstream_manager.outbound_proxy_env')}</SelectItem>
-                    <SelectItem value="direct">{t('upstream_manager.outbound_proxy_direct')}</SelectItem>
-                    <SelectItem value="custom">{t('upstream_manager.outbound_proxy_custom')}</SelectItem>
-                </SelectContent>
-            </Select>
-        </div>
-    )
-}
-
-
-function InfoTooltip({ content }: { content: string }) {
-    return (
-        <Tooltip>
-            <TooltipTrigger asChild>
-                <button
-                    type="button"
-                    onClick={event => event.stopPropagation()}
-                    className="inline-flex h-4 w-4 items-center justify-center rounded-md text-muted-foreground/85 transition-colors hover:text-foreground"
-                    aria-label="More info"
-                >
-                    <CircleHelp className="h-3.5 w-3.5" />
-                </button>
-            </TooltipTrigger>
-            <TooltipContent sideOffset={6} className="max-w-xs px-3 py-2 text-xs leading-6">
-                {content}
-            </TooltipContent>
-        </Tooltip>
-    )
-}
-
-function FieldBlock({ label, hint, htmlFor, unit, children }: FieldBlockProps) {
-    return (
-        <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2.5">
-                <Label
-                    htmlFor={htmlFor}
-                    className="cursor-pointer select-none text-sm font-medium text-foreground hover:text-foreground/90 transition-colors"
-                >
-                    {label}
-                </Label>
-                {hint && <InfoTooltip content={hint} />}
-                {unit && (
-                    <span className="rounded-md bg-muted/60 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                        {unit}
-                    </span>
-                )}
-            </div>
-            {children}
-        </div>
-    )
-}
-
-function AdvancedSettings({
-    children,
-    open: controlledOpen,
-    onOpenChange,
-    defaultOpen = false,
-}: {
-    children: ReactNode
-    open?: boolean
-    onOpenChange?: (open: boolean) => void
-    defaultOpen?: boolean
-}) {
-    const { t } = useTranslation()
-    const [internalOpen, setInternalOpen] = useState(defaultOpen)
-    const open = controlledOpen ?? internalOpen
-    const setOpen = (nextOpen: boolean) => {
-        if (controlledOpen === undefined) setInternalOpen(nextOpen)
-        onOpenChange?.(nextOpen)
-    }
-    return (
-        <section className="rounded-md border border-input bg-muted/20">
-            <button
-                type="button"
-                aria-expanded={open}
-                onClick={() => setOpen(!open)}
-                className="flex w-full cursor-pointer items-center justify-between gap-4 px-4 py-3 text-left"
-            >
-                <div className="flex min-w-0 items-center gap-2">
-                    <div className="text-sm font-medium text-foreground">
-                        {t('upstream_manager.advanced_settings')}
-                    </div>
-                    <InfoTooltip content={t('upstream_manager.advanced_settings_hint')} />
-                </div>
-                <ChevronDown className={cn(
-                    "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                    open && "rotate-180",
-                )} />
-            </button>
-            {open && (
-                <div className="space-y-6 border-t border-input px-4 py-5">
-                    {children}
-                </div>
-            )}
-        </section>
-    )
-}
-
-function uniqueRuleName(baseName: string, rules: OverrideRuleObject[]) {
-    const names = new Set(rules.map(rule => getOverrideRuleName(rule, '')))
-    if (!names.has(baseName)) return baseName
-    let suffix = 2
-    while (names.has(`${baseName} ${suffix}`)) suffix += 1
-    return `${baseName} ${suffix}`
-}
-
-function isSensitiveHeaderName(name: string, configuredHeaders: string) {
-    const normalized = name.trim().toLowerCase()
-    if (!normalized) return false
-    const defaults = ['authorization', 'proxy-authorization', 'x-api-key', 'api-key']
-    const configured = configuredHeaders
-        .split('\n')
-        .map(value => value.trim().toLowerCase())
-        .filter(Boolean)
-    return defaults.includes(normalized) || configured.includes(normalized)
-}
-
-function redactSensitiveRuleHeaders(rule: OverrideRuleObject, configuredHeaders: string) {
-    const headers = Array.isArray(rule.headers) ? rule.headers : []
-    return {
-        ...rule,
-        ...(headers.length > 0
-            ? {
-                headers: headers.map(header => {
-                    if (!header || typeof header !== 'object' || Array.isArray(header)) return header
-                    const item = header as Record<string, unknown>
-                    const name = typeof item.name === 'string' ? item.name : ''
-                    if (!isSensitiveHeaderName(name, configuredHeaders) || typeof item.value !== 'string') return item
-                    return { ...item, value: '••••••••' }
-                }),
-            }
-            : {}),
-    }
-}
-
-function AdvancedSettingsGroup({
-    title,
-    description,
-    children,
-    card = false,
-    divider = false,
-}: {
-    title: string
-    description?: string
-    children: ReactNode
-    /** 独立成卡片。嵌在别的面板里时别用 —— 会叠出第三层边框 */
-    card?: boolean
-    /** 用一条分隔线起新段,替代再套一层边框 */
-    divider?: boolean
-}) {
-    return (
-        <div className={cn(
-            "space-y-4",
-            card && "rounded-md border border-input bg-background p-4",
-            divider && "border-t border-input pt-6",
-        )}>
-            <div>
-                <div className="text-xs font-semibold text-foreground/65">{title}</div>
-                {description && <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{description}</p>}
-            </div>
-            {children}
-        </div>
-    )
-}
-
-function ToggleSetting({
-    label,
-    description,
-    checked,
-    onCheckedChange,
-}: ToggleSettingProps) {
-    const id = useId()
-    return (
-        <div className="flex items-center gap-3">
-            <Switch
-                id={id}
-                checked={checked}
-                onCheckedChange={onCheckedChange}
-                className="shrink-0 data-[state=unchecked]:bg-border/60"
-            />
-            <div className="flex items-center gap-1.5">
-                <Label
-                    htmlFor={id}
-                    className="cursor-pointer select-none text-sm font-medium text-foreground hover:text-foreground transition-colors"
-                >
-                    {label}
-                </Label>
-                <InfoTooltip content={description} />
-            </div>
-        </div>
-    )
-}
-
-function HeaderValueInput({
-    value,
-    onChange,
-    placeholder,
-    disabled,
-    sensitive,
-    showLabel,
-    hideLabel,
-}: {
-    value: string
-    onChange: (value: string) => void
-    placeholder: string
-    disabled: boolean
-    sensitive: boolean
-    showLabel: string
-    hideLabel: string
-}) {
-    const [revealed, setRevealed] = useState(false)
-    const masked = sensitive && !revealed
-
-    return (
-        <div className="relative min-w-0 flex-[2]">
-            <Input
-                type={masked ? 'password' : 'text'}
-                value={value}
-                onChange={event => onChange(event.target.value)}
-                placeholder={placeholder}
-                disabled={disabled}
-                autoComplete="off"
-                className={cn(
-                    "h-9 w-full rounded-lg border-input bg-background text-xs disabled:opacity-40",
-                    sensitive && !disabled && "pr-9",
-                )}
-            />
-            {sensitive && !disabled && (
-                <button
-                    type="button"
-                    onClick={() => setRevealed(current => !current)}
-                    className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
-                    aria-label={revealed ? hideLabel : showLabel}
-                >
-                    {revealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                </button>
-            )}
-        </div>
-    )
-}
-
-function MetricCard({
-    label,
-    value,
-    detail,
-}: {
-    label: string
-    value: string
-    detail?: string
-}) {
-    return (
-        <div className="rounded-lg border border-border bg-card px-4 py-3">
-            <div className="text-xs text-muted-foreground">{label}</div>
-            <div className="mt-1 text-xl tabular-nums text-foreground">{value}</div>
-            {detail && (
-                <div className="mt-2 text-xs leading-5 text-muted-foreground">
-                    {detail}
-                </div>
-            )}
-        </div>
-    )
-}
-
-function SettingSection({
-    title,
-    description,
-    action,
-    children,
-}: {
-    title: string
-    description?: string
-    action?: ReactNode
-    children: ReactNode
-}) {
-    return (
-        <section className="overflow-hidden rounded-lg border border-input bg-card">
-            <div className="flex items-start justify-between gap-4 border-b border-input px-6 py-4">
-                <div className="min-w-0">
-                    <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-                    {description && (
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
-                    )}
-                </div>
-                {action && <div className="shrink-0">{action}</div>}
-            </div>
-            <div className="px-6 py-6">{children}</div>
-        </section>
-    )
-}
-
+import {
+    canonicalJson,
+    commitSelectedTarget,
+    customProxyPlaceholder,
+    editingBufferAsTarget,
+    getBindingRuleNames,
+    getErrorMessage,
+    getOverrideRuleName,
+    hasAdvancedValues,
+    loadTargetBuffer,
+    normalizedOutboundProxy,
+    outboundProxyMode,
+    redactSensitiveRuleHeaders,
+    requestOverrideExample,
+    uniqueRuleName,
+    usageExtractionExample,
+    type BindingKind,
+    type EditingUpstream,
+    type HeaderOp,
+    type OverrideBinding,
+    type OverrideRuleObject,
+    type RuleTab,
+} from './settings/helpers'
+import { UpstreamEditDialog } from './settings/UpstreamEditDialog'
+import { RoutingTab } from './settings/RoutingTab'
+import { LoggingTab } from './settings/LoggingTab'
+import { SystemTab } from './settings/SystemTab'
+import { OverridesTab } from './settings/OverridesTab'
 
 export function Settings() {
     const { t, i18n } = useTranslation()
@@ -821,8 +55,8 @@ export function Settings() {
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [showAddForm, setShowAddForm] = useState(false)
-    // 分区由 URL 决定,导航入口只有侧边栏一处。/settings 不带分区时落到 routing,
-    // 不做重定向,免得在保存栏有未提交改动时因为地址跳转丢状态。
+    // 鍒嗗尯鐢?URL 鍐冲畾,瀵艰埅鍏ュ彛鍙湁渚ц竟鏍忎竴澶勩€?settings 涓嶅甫鍒嗗尯鏃惰惤鍒?routing,
+    // 涓嶅仛閲嶅畾鍚?鍏嶅緱鍦ㄤ繚瀛樻爮鏈夋湭鎻愪氦鏀瑰姩鏃跺洜涓哄湴鍧€璺宠浆涓㈢姸鎬併€?
     const { tab: tabParam, subtab: subtabParam } = useParams()
     const [searchParams] = useSearchParams()
     const deepLinkHandled = useRef(false)
@@ -1018,8 +252,8 @@ export function Settings() {
         return { proto, hostname, portSuffix }
     }, [])
 
-    // 列表里只显示 host,不显示 scheme:入口地址的协议恒等于面板自身的 origin,
-    // 是常量,占宽度却不携带信息。复制出去的仍然是 getProxyUrl 的完整 URL。
+    // 鍒楄〃閲屽彧鏄剧ず host,涓嶆樉绀?scheme:鍏ュ彛鍦板潃鐨勫崗璁亽绛変簬闈㈡澘鑷韩鐨?origin,
+    // 鏄父閲?鍗犲搴﹀嵈涓嶆惡甯︿俊鎭€傚鍒跺嚭鍘荤殑浠嶇劧鏄?getProxyUrl 鐨勫畬鏁?URL銆?
     const getProxyHost = useCallback((name: string) => {
         return `${name}.${domainSuffix}${proxyBase.portSuffix}`
     }, [proxyBase, domainSuffix])
@@ -1065,10 +299,10 @@ export function Settings() {
         const nextRule = overrideRuleObjects[nextIndex]
         setSelectedOverrideRuleName(getOverrideRuleName(nextRule, `rule-${nextIndex + 1}`))
 
-        // 用户编辑合法 JSON 时会立即回写 overrideRuleObjects（新的对象标识
-        // 会触发本 effect）。若此时把 pretty-print 结果覆盖回编辑器，
-        // 每次合法按键都会重排整个 textarea 并把光标甩到末尾——
-        // 因此编辑器内容与选中规则语义一致时跳过同步。
+        // 鐢ㄦ埛缂栬緫鍚堟硶 JSON 鏃朵細绔嬪嵆鍥炲啓 overrideRuleObjects锛堟柊鐨勫璞℃爣璇?
+        // 浼氳Е鍙戞湰 effect锛夈€傝嫢姝ゆ椂鎶?pretty-print 缁撴灉瑕嗙洊鍥炵紪杈戝櫒锛?
+        // 姣忔鍚堟硶鎸夐敭閮戒細閲嶆帓鏁翠釜 textarea 骞舵妸鍏夋爣鐢╁埌鏈熬鈥斺€?
+        // 鍥犳缂栬緫鍣ㄥ唴瀹逛笌閫変腑瑙勫垯璇箟涓€鑷存椂璺宠繃鍚屾銆?
         const editorMatchesRule = (() => {
             const raw = selectedOverrideRuleText.trim()
             if (!raw) return false
@@ -1134,9 +368,9 @@ export function Settings() {
             setUsageExtractionEnabled(configData.usage_extraction?.enabled ?? false)
             setUsageBindings(configData.usage_extraction?.upstreams ?? {})
             const usageRules = configData.usage_extraction?.rules ?? []
-            // 空规则时保持空文本（示例仅作为 textarea 占位符展示）。
-            // 此前会把内置示例当作真实规则回填，用户只想保存无关配置时
-            // 示例规则会被一并持久化，且删不干净（重新加载又会复活）。
+            // 绌鸿鍒欐椂淇濇寔绌烘枃鏈紙绀轰緥浠呬綔涓?textarea 鍗犱綅绗﹀睍绀猴級銆?
+            // 姝ゅ墠浼氭妸鍐呯疆绀轰緥褰撲綔鐪熷疄瑙勫垯鍥炲～锛岀敤鎴峰彧鎯充繚瀛樻棤鍏抽厤缃椂
+            // 绀轰緥瑙勫垯浼氳涓€骞舵寔涔呭寲锛屼笖鍒犱笉骞插噣锛堥噸鏂板姞杞藉張浼氬娲伙級銆?
             setUsageRulesText(usageRules.length ? JSON.stringify(usageRules, null, 2) : '')
         } catch (err) {
             console.error('Failed to load settings:', err)
@@ -1651,8 +885,8 @@ export function Settings() {
         const selectedTarget = usesTargetPresets
             ? (upstream.active_target && targets[upstream.active_target] ? upstream.active_target : Object.keys(targets)[0])
             : ''
-        // 必须从实际存值的地方读:启用了目标预设的上游,这些字段在 targets[名字] 里,
-        // 上游级一律是 0,绑定还会被 delete 掉 —— 原来的判断对它们永远为假
+        // 蹇呴』浠庡疄闄呭瓨鍊肩殑鍦版柟璇?鍚敤浜嗙洰鏍囬璁剧殑涓婃父,杩欎簺瀛楁鍦?targets[鍚嶅瓧] 閲?
+        // 涓婃父绾т竴寰嬫槸 0,缁戝畾杩樹細琚?delete 鎺?鈥斺€?鍘熸潵鐨勫垽鏂瀹冧滑姘歌繙涓哄亣
         setUpstreamAdvancedOpen(hasAdvancedValues(
             usesTargetPresets
                 ? targets[selectedTarget]
@@ -1716,9 +950,9 @@ export function Settings() {
     }
 
     const handleSelectTargetPreset = (targetName: string) => {
-        // 切到一个有高级设置的预设时把面板展开,否则那些非默认值是看不见的。
-        // 只展开不收起 —— 自动关掉用户手动打开的面板更烦人。
-        // commitSelectedTarget 只回写当前选中的那个,所以这里读切换前的状态等价
+        // 鍒囧埌涓€涓湁楂樼骇璁剧疆鐨勯璁炬椂鎶婇潰鏉垮睍寮€,鍚﹀垯閭ｄ簺闈為粯璁ゅ€兼槸鐪嬩笉瑙佺殑銆?
+        // 鍙睍寮€涓嶆敹璧?鈥斺€?鑷姩鍏虫帀鐢ㄦ埛鎵嬪姩鎵撳紑鐨勯潰鏉挎洿鐑︿汉銆?
+        // commitSelectedTarget 鍙洖鍐欏綋鍓嶉€変腑鐨勯偅涓?鎵€浠ヨ繖閲岃鍒囨崲鍓嶇殑鐘舵€佺瓑浠?
         if (hasAdvancedValues(editingUpstream?.targets[targetName])) {
             setUpstreamAdvancedOpen(true)
         }
@@ -1907,2039 +1141,224 @@ export function Settings() {
     }
 
     if (loading) {
-        return (
-            <div className="flex h-96 flex-col items-center justify-center gap-4">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                <div className="text-sm font-medium text-muted-foreground">
-                    {t('common.loading')}
-                </div>
-            </div>
-        )
+        return <PageLoading className="h-96 min-h-0" />
     }
 
     return (
         <div className="w-full">
-            <Dialog open={!!editingUpstream} onOpenChange={(open) => !open && setEditingUpstream(null)}>
-                <DialogContent className={cn(
-                    "max-h-[calc(100vh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg border border-input bg-card p-0 transition-[max-width] duration-200",
-                    upstreamAdvancedOpen ? "max-w-2xl lg:max-w-5xl" : "max-w-2xl",
-                )}>
-                    <DialogHeader className="border-b border-input px-6 py-5">
-                        <DialogTitle className="text-base font-semibold">
-                            {editingUpstream ? t('upstream_manager.edit_title', { name: editingUpstream.name }) : t('common.edit')}
-                        </DialogTitle>
-                        <DialogDescription className="sr-only">
-                            {t('upstream_manager.edit_description')}
-                        </DialogDescription>
-                    </DialogHeader>
-                    {editingUpstream && (
-                        <>
-                            <div className="min-h-0 space-y-6 overflow-y-auto px-6 py-5">
-                                {/* 上游级字段:这三个不属于任何预设,所以留在预设面板外面。
-                                    记录日志原来混在右栏的预设级分组里,看着像能按预设分别关,
-                                    实际 loggingEnabled 不在 editingBufferAsTarget 里 */}
-                                <section className="space-y-4">
-                                    <div className="text-sm font-semibold text-foreground">
-                                        {t('upstream_manager.scope_upstream')}
-                                    </div>
-                                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-[minmax(0,1fr)_120px]">
-                                        <FieldBlock label={t('upstream_manager.name')}>
-                                            <Input
-                                                value={editingUpstream.name}
-                                                readOnly
-                                                className="h-9 rounded-md border-input bg-muted/50 font-mono text-sm"
-                                            />
-                                        </FieldBlock>
-                                        <FieldBlock label={t('upstream_manager.order')}>
-                                            <Input
-                                                type="number"
-                                                min={0}
-                                                value={editingUpstream.order}
-                                                onChange={e => setEditingUpstream(current => current ? { ...current, order: Number(e.target.value) } : current)}
-                                                className="h-9 rounded-md border-input bg-background text-sm"
-                                            />
-                                        </FieldBlock>
-                                    </div>
-                                    <ToggleSetting
-                                        label={t('upstream_manager.logging_enabled')}
-                                        description={t('upstream_manager.logging_enabled_hint')}
-                                        checked={editingUpstream.loggingEnabled}
-                                        onCheckedChange={(checked) => setEditingUpstream(current => current ? { ...current, loggingEnabled: checked } : current)}
-                                    />
-                                    <div className="space-y-2 border-l-2 border-border pl-4">
-                                        <div>
-                                            <div className="text-sm font-medium text-foreground">
-                                                {t('upstream_manager.logging_path_mode')}
-                                            </div>
-                                            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                                                {t('upstream_manager.logging_path_mode_hint')}
-                                            </p>
-                                        </div>
-                                        <UpstreamLoggingPathFilter
-                                            value={editingUpstream.loggingPathFilter}
-                                            onChange={loggingPathFilter => setEditingUpstream(current => current ? { ...current, loggingPathFilter } : current)}
-                                            templates={modelPathTemplates}
-                                            disabled={!editingUpstream.loggingEnabled}
-                                        />
-                                    </div>
-                                </section>
+            <UpstreamEditDialog
+                editingUpstream={editingUpstream}
+                setEditingUpstream={setEditingUpstream}
+                upstreamAdvancedOpen={upstreamAdvancedOpen}
+                setUpstreamAdvancedOpen={setUpstreamAdvancedOpen}
+                newTargetPresetName={newTargetPresetName}
+                setNewTargetPresetName={setNewTargetPresetName}
+                saving={saving}
+                parsedOverrideRules={parsedOverrideRules}
+                overrideRuleObjects={overrideRuleObjects}
+                parsedUsageRules={parsedUsageRules}
+                usageRuleObjects={usageRuleObjects}
+                modelPathTemplates={modelPathTemplates}
+                handleSelectTargetPreset={handleSelectTargetPreset}
+                handleAddTargetPreset={handleAddTargetPreset}
+                handleEnableTargetPresets={handleEnableTargetPresets}
+                handleRemoveTargetPreset={handleRemoveTargetPreset}
+                handleSaveUpstreamEdit={handleSaveUpstreamEdit}
+                toggleEditingRule={toggleEditingRule}
+                toggleEditingUsageRule={toggleEditingUsageRule}
+                t={t}
+            />
 
-                                {/* 预设级字段:切换器在面板上沿,面板边框包住的正是它支配的范围。
-                                    原来边框只圈住选择器本身,被支配的八组字段全在框外面 */}
-                                <section>
-                                    <div className="mb-3 flex flex-wrap items-center gap-3">
-                                        <div className="flex items-center gap-2.5">
-                                            <span className="text-sm font-semibold text-foreground">
-                                                {editingUpstream.usesTargetPresets
-                                                    ? t('upstream_manager.target_presets')
-                                                    : t('upstream_manager.scope_target')}
-                                            </span>
-                                            <InfoTooltip content={t('upstream_manager.target_presets_hint')} />
-                                        </div>
-                                        {editingUpstream.usesTargetPresets ? (
-                                            <>
-                                                {/* 用 aria-pressed 的按钮组而不是伪造 tab 语义:
-                                                    不必自己实现方向键导航,可达性也不打折 */}
-                                                <div
-                                                    role="group"
-                                                    aria-label={t('upstream_manager.target_presets')}
-                                                    className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-[3px]"
-                                                >
-                                                    {Object.keys(editingUpstream.targets).map(name => (
-                                                        <button
-                                                            key={name}
-                                                            type="button"
-                                                            aria-pressed={name === editingUpstream.selectedTarget}
-                                                            onClick={() => handleSelectTargetPreset(name)}
-                                                            className={cn(
-                                                                'rounded-md px-2.5 py-1 text-xs transition-colors',
-                                                                name === editingUpstream.selectedTarget
-                                                                    ? 'bg-background text-foreground shadow-sm'
-                                                                    : 'text-muted-foreground hover:text-foreground',
-                                                            )}
-                                                        >
-                                                            {name}
-                                                            {name === editingUpstream.activeTarget && (
-                                                                <span className="ml-1.5 text-muted-foreground">
-                                                                    ·{t('upstream_manager.active_target')}
-                                                                </span>
-                                                            )}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                                {/* 不用 ml-auto:宽屏时它会把这组控件顶到最右边,
-                                                    和左边的切换器之间留出一大片空,窄屏时又变成
-                                                    单独一行右对齐的孤儿。紧跟着切换器排就行 */}
-                                                <div className="flex items-center gap-1.5">
-                                                    <Input
-                                                        value={newTargetPresetName}
-                                                        onChange={event => setNewTargetPresetName(event.target.value)}
-                                                        onKeyDown={event => {
-                                                            if (event.key === 'Enter') {
-                                                                event.preventDefault()
-                                                                handleAddTargetPreset()
-                                                            }
-                                                        }}
-                                                        placeholder={t('upstream_manager.new_target_name')}
-                                                        className="h-8 w-[200px] rounded-md border-input bg-background text-xs"
-                                                    />
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        size="sm"
-                                                        className="h-8"
-                                                        onClick={handleAddTargetPreset}
-                                                        disabled={!newTargetPresetName.trim()}
-                                                    >
-                                                        <Plus className="mr-1 h-3.5 w-3.5" />
-                                                        {t('common.add')}
-                                                    </Button>
-                                                </div>
-                                            </>
-                                        ) : (
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="sm"
-                                                className="ml-auto h-8"
-                                                onClick={handleEnableTargetPresets}
-                                            >
-                                                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                                                {t('upstream_manager.enable_target_presets')}
-                                            </Button>
-                                        )}
-                                    </div>
+            <div className="relative z-10 w-full space-y-6 pb-16 animate-fade-in">
 
-                                    <div className={cn(
-                                        'space-y-5',
-                                        editingUpstream.usesTargetPresets && 'rounded-md border border-input bg-muted/15 p-4',
-                                    )}>
-                                        {/* 基础字段整宽排、高级设置整宽排在下面。原来是左右两栏,
-                                            左栏只有三个字段、右栏是一大块面板,右边一展开左下就空一片 */}
-                                        <div className="space-y-5">
-                                            <div className="space-y-5">
-                                                <FieldBlock label={t('upstream_manager.target')}>
-                                                    <Input
-                                                        value={editingUpstream.target}
-                                                        onChange={e => setEditingUpstream(current => current ? { ...current, target: e.target.value } : current)}
-                                                        className="h-9 max-w-2xl rounded-md border-input bg-background font-mono text-sm"
-                                                    />
-                                                </FieldBlock>
-                                                <div className="grid grid-cols-1 gap-5 sm:grid-cols-[140px_minmax(0,1fr)] sm:max-w-2xl">
-                                                    <FieldBlock label={t('upstream_manager.timeout')}>
-                                                        <Input
-                                                            type="number"
-                                                            min="1"
-                                                            value={editingUpstream.timeout}
-                                                            onChange={e => setEditingUpstream(current => current ? { ...current, timeout: Number(e.target.value) } : current)}
-                                                            className="h-9 rounded-md border-input bg-background text-sm"
-                                                        />
-                                                    </FieldBlock>
-                                                    <FieldBlock
-                                                        label={t('upstream_manager.outbound_proxy')}
-                                                        hint={t('upstream_manager.outbound_proxy_hint')}
-                                                    >
-                                                        <OutboundProxyControl
-                                                            value={editingUpstream.outboundProxy}
-                                                            onChange={value => setEditingUpstream(current => current ? { ...current, outboundProxy: value } : current)}
-                                                            t={t}
-                                                        />
-                                                    </FieldBlock>
-                                                </div>
-                                            </div>
-
-                                            <AdvancedSettings
-                                                open={upstreamAdvancedOpen}
-                                                onOpenChange={setUpstreamAdvancedOpen}
-                                            >
-                                                <AdvancedSettingsGroup
-                                                    title={t('upstream_manager.timeout_strategy')}
-                                                    description={t('upstream_manager.timeout_strategy_hint')}
-                                                >
-                                                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                                                        <FieldBlock
-                                                            label={t('upstream_manager.response_header_timeout')}
-                                                            hint={t('upstream_manager.response_header_timeout_hint')}
-                                                        >
-                                                            <Input
-                                                                type="number"
-                                                                min="0"
-                                                                value={editingUpstream.responseHeaderTimeout}
-                                                                onChange={e => setEditingUpstream(current => current ? { ...current, responseHeaderTimeout: Number(e.target.value) } : current)}
-                                                                className="h-9 rounded-md border-input bg-background text-sm"
-                                                            />
-                                                        </FieldBlock>
-                                                        <FieldBlock
-                                                            label={t('upstream_manager.response_body_first_byte_timeout')}
-                                                            hint={t('upstream_manager.response_body_first_byte_timeout_hint')}
-                                                        >
-                                                            <Input
-                                                                type="number"
-                                                                min="0"
-                                                                value={editingUpstream.responseBodyFirstByteTimeout}
-                                                                onChange={e => setEditingUpstream(current => current ? { ...current, responseBodyFirstByteTimeout: Number(e.target.value) } : current)}
-                                                                className="h-9 rounded-md border-input bg-background text-sm"
-                                                            />
-                                                        </FieldBlock>
-                                                        <FieldBlock
-                                                            label={t('upstream_manager.response_body_idle_timeout')}
-                                                            hint={t('upstream_manager.response_body_idle_timeout_hint')}
-                                                        >
-                                                            <Input
-                                                                type="number"
-                                                                min="0"
-                                                                value={editingUpstream.responseBodyIdleTimeout}
-                                                                onChange={e => setEditingUpstream(current => current ? { ...current, responseBodyIdleTimeout: Number(e.target.value) } : current)}
-                                                                className="h-9 rounded-md border-input bg-background text-sm"
-                                                            />
-                                                        </FieldBlock>
-                                                    </div>
-                                                </AdvancedSettingsGroup>
-
-                                                <AdvancedSettingsGroup
-                                                    title={t('upstream_manager.sse_keepalive')}
-                                                    description={t('upstream_manager.sse_keepalive_hint')}
-                                                    divider
-                                                >
-                                                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                                                        <FieldBlock label={t('upstream_manager.sse_keepalive_mode')}>
-                                                            <Select
-                                                                value={editingUpstream.sseKeepaliveMode}
-                                                                onValueChange={value => setEditingUpstream(current => current ? { ...current, sseKeepaliveMode: value as SSEKeepaliveMode } : current)}
-                                                            >
-                                                                <SelectTrigger className="h-9 rounded-md border-input bg-background text-sm">
-                                                                    <SelectValue />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="off">{t('upstream_manager.sse_keepalive_mode_off')}</SelectItem>
-                                                                    <SelectItem value="after_headers">{t('upstream_manager.sse_keepalive_mode_after_headers')}</SelectItem>
-                                                                    <SelectItem value="full">{t('upstream_manager.sse_keepalive_mode_full')}</SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </FieldBlock>
-                                                        {editingUpstream.sseKeepaliveMode !== 'off' && (
-                                                            <FieldBlock
-                                                                label={t('upstream_manager.sse_keepalive_interval')}
-                                                                hint={t('upstream_manager.sse_keepalive_interval_hint')}
-                                                            >
-                                                                <Input
-                                                                    type="number"
-                                                                    min="1"
-                                                                    value={editingUpstream.sseKeepaliveInterval}
-                                                                    onChange={e => setEditingUpstream(current => current ? { ...current, sseKeepaliveInterval: Number(e.target.value) } : current)}
-                                                                    className="h-9 rounded-md border-input bg-background text-sm"
-                                                                />
-                                                            </FieldBlock>
-                                                        )}
-                                                    </div>
-                                                    {editingUpstream.sseKeepaliveMode === 'full' && (
-                                                        <div className="mt-4 flex gap-2 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-                                                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-                                                            <span>{t('upstream_manager.sse_keepalive_full_warning')}</span>
-                                                        </div>
-                                                    )}
-                                                </AdvancedSettingsGroup>
-
-                                                <AdvancedSettingsGroup title={t('upstream_manager.request_overrides')} divider>
-                                                        <ToggleSetting
-                                                            label={t('upstream_manager.override_enabled')}
-                                                            description={t('upstream_manager.override_enabled_hint')}
-                                                            checked={editingUpstream.overrideEnabled}
-                                                            onCheckedChange={(checked) => setEditingUpstream(current => current ? { ...current, overrideEnabled: checked } : current)}
-                                                        />
-                                                        {editingUpstream.overrideEnabled && (
-                                                            <div className="space-y-2">
-                                                                <div className="text-xs font-semibold text-muted-foreground">
-                                                                    {t('upstream_manager.bound_rules')}
-                                                                </div>
-                                                                {parsedOverrideRules.length === 0 ? (
-                                                                    <div className="rounded-lg border border-dashed border-input bg-background px-3 py-4 text-xs text-muted-foreground">
-                                                                        {t('upstream_manager.no_rules')}
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                                                                        {parsedOverrideRules.map((ruleName, ruleIndex) => {
-                                                                            const rule = overrideRuleObjects[ruleIndex]
-                                                                            const ruleEnabled = getOverrideRuleEnabled(rule)
-                                                                            const checked = editingUpstream.ruleNames.includes(ruleName)
-                                                                            return (
-                                                                                <label
-                                                                                    key={`${ruleName}-${ruleIndex}`}
-                                                                                    className={cn(
-                                                                                        "flex items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 text-sm",
-                                                                                        !ruleEnabled && "opacity-70"
-                                                                                    )}
-                                                                                >
-                                                                                    <input
-                                                                                        type="checkbox"
-                                                                                        checked={checked}
-                                                                                        disabled={!ruleEnabled && !checked}
-                                                                                        onChange={e => toggleEditingRule(ruleName, e.target.checked)}
-                                                                                    />
-                                                                                    <span className="min-w-0 truncate font-mono text-xs">{ruleName}</span>
-                                                                                    {!ruleEnabled && (
-                                                                                        <Badge variant="outline" className="ml-auto h-5 shrink-0 rounded-md border-input bg-muted/50 px-1.5 text-xs text-muted-foreground">
-                                                                                            {t('settings.rule_disabled')}
-                                                                                        </Badge>
-                                                                                    )}
-                                                                                </label>
-                                                                            )
-                                                                        })}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                </AdvancedSettingsGroup>
-
-                                                <AdvancedSettingsGroup title={t('upstream_manager.usage_stats')} divider>
-                                                        <ToggleSetting
-                                                            label={t('upstream_manager.usage_enabled')}
-                                                            description={t('upstream_manager.usage_enabled_hint')}
-                                                            checked={editingUpstream.usageEnabled}
-                                                            onCheckedChange={(checked) => setEditingUpstream(current => current ? { ...current, usageEnabled: checked } : current)}
-                                                        />
-                                                        {editingUpstream.usageEnabled && (
-                                                            <div className="space-y-2">
-                                                                <div className="text-xs font-semibold text-muted-foreground">
-                                                                    {t('upstream_manager.bound_usage_rules')}
-                                                                </div>
-                                                                {parsedUsageRules.length === 0 ? (
-                                                                    <div className="rounded-lg border border-dashed border-input bg-background px-3 py-4 text-xs text-muted-foreground">
-                                                                        {t('upstream_manager.no_usage_rules')}
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                                                                        {parsedUsageRules.map((ruleName, ruleIndex) => {
-                                                                            const rule = usageRuleObjects[ruleIndex]
-                                                                            const ruleEnabled = getOverrideRuleEnabled(rule)
-                                                                            const checked = editingUpstream.usageRuleNames.includes(ruleName)
-                                                                            return (
-                                                                                <label
-                                                                                    key={`${ruleName}-${ruleIndex}`}
-                                                                                    className={cn(
-                                                                                        "flex items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 text-sm",
-                                                                                        !ruleEnabled && "opacity-70"
-                                                                                    )}
-                                                                                >
-                                                                                    <input
-                                                                                        type="checkbox"
-                                                                                        checked={checked}
-                                                                                        disabled={!ruleEnabled && !checked}
-                                                                                        onChange={e => toggleEditingUsageRule(ruleName, e.target.checked)}
-                                                                                    />
-                                                                                    <span className="min-w-0 truncate font-mono text-xs">{ruleName}</span>
-                                                                                    {!ruleEnabled && (
-                                                                                        <Badge variant="outline" className="ml-auto h-5 shrink-0 rounded-md border-input bg-muted/50 px-1.5 text-xs text-muted-foreground">
-                                                                                            {t('settings.rule_disabled')}
-                                                                                        </Badge>
-                                                                                    )}
-                                                                                </label>
-                                                                            )
-                                                                        })}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                </AdvancedSettingsGroup>
-                                            </AdvancedSettings>
-                                        </div>
-
-                                        {/* 不满足条件就不渲染:原来这两个按钮在只有一个预设时恒为
-                                            disabled,是两个永远点不动的控件 */}
-                                        {editingUpstream.usesTargetPresets && (
-                                            editingUpstream.selectedTarget !== editingUpstream.activeTarget
-                                            || Object.keys(editingUpstream.targets).length > 1
-                                        ) && (
-                                            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-input pt-4">
-                                                {editingUpstream.selectedTarget !== editingUpstream.activeTarget && (
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        size="sm"
-                                                        className="h-8"
-                                                        onClick={() => setEditingUpstream(current => current ? { ...commitSelectedTarget(current), activeTarget: current.selectedTarget } : current)}
-                                                    >
-                                                        {t('upstream_manager.set_active_target')}
-                                                    </Button>
-                                                )}
-                                                {Object.keys(editingUpstream.targets).length > 1 && (
-                                                    <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="h-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                                                        onClick={handleRemoveTargetPreset}
-                                                    >
-                                                        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                                                        {t('upstream_manager.remove_target')}
-                                                    </Button>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                </section>
-                            </div>
-
-                            <div className="flex justify-end gap-2 border-t border-input bg-card px-6 py-4">
-                                <Button type="button" variant="ghost" onClick={() => setEditingUpstream(null)}>
-                                    {t('common.cancel')}
-                                </Button>
-                                <Button type="button" onClick={handleSaveUpstreamEdit} disabled={saving}>
-                                    <Save className="mr-2 h-4 w-4" />
-                                    {t('common.save')}
-                                </Button>
-                            </div>
-                        </>
+                {/* Content Area */}
+                <div>
+                    {activeTab === 'routing' && (
+                        <RoutingTab
+                            t={t}
+                            previewUpstreamName={previewUpstreamName}
+                            domainSuffix={domainSuffix}
+                            pathRoutingPrefix={pathRoutingPrefix}
+                            setPathRoutingPrefix={setPathRoutingPrefix}
+                            enablePathRouting={enablePathRouting}
+                            setEnablePathRouting={setEnablePathRouting}
+                            showAddForm={showAddForm}
+                            setShowAddForm={setShowAddForm}
+                            handleAddUpstream={handleAddUpstream}
+                            newName={newName}
+                            setNewName={setNewName}
+                            newTarget={newTarget}
+                            setNewTarget={setNewTarget}
+                            newTimeout={newTimeout}
+                            setNewTimeout={setNewTimeout}
+                            newOrder={newOrder}
+                            setNewOrder={setNewOrder}
+                            newOutboundProxy={newOutboundProxy}
+                            setNewOutboundProxy={setNewOutboundProxy}
+                            newResponseHeaderTimeout={newResponseHeaderTimeout}
+                            setNewResponseHeaderTimeout={setNewResponseHeaderTimeout}
+                            newResponseBodyFirstByteTimeout={newResponseBodyFirstByteTimeout}
+                            setNewResponseBodyFirstByteTimeout={setNewResponseBodyFirstByteTimeout}
+                            newResponseBodyIdleTimeout={newResponseBodyIdleTimeout}
+                            setNewResponseBodyIdleTimeout={setNewResponseBodyIdleTimeout}
+                            newSSEKeepaliveMode={newSSEKeepaliveMode}
+                            setNewSSEKeepaliveMode={setNewSSEKeepaliveMode}
+                            newSSEKeepaliveInterval={newSSEKeepaliveInterval}
+                            setNewSSEKeepaliveInterval={setNewSSEKeepaliveInterval}
+                            newLoggingEnabled={newLoggingEnabled}
+                            setNewLoggingEnabled={setNewLoggingEnabled}
+                            newLoggingPathFilter={newLoggingPathFilter}
+                            setNewLoggingPathFilter={setNewLoggingPathFilter}
+                            modelPathTemplates={modelPathTemplates}
+                            upstreams={upstreams}
+                            sortedUpstreams={sortedUpstreams}
+                            overrideBindings={overrideBindings}
+                            switchingTarget={switchingTarget}
+                            handleCopy={handleCopy}
+                            getProxyUrl={getProxyUrl}
+                            getProxyHost={getProxyHost}
+                            getPathProxyUrl={getPathProxyUrl}
+                            handleActivateTarget={handleActivateTarget}
+                            handleEditUpstream={handleEditUpstream}
+                            handleRemoveUpstream={handleRemoveUpstream}
+                            formatOutboundProxy={formatOutboundProxy}
+                        />
                     )}
-                </DialogContent>
-            </Dialog>
 
-                <div className="relative z-10 w-full space-y-6 pb-16 animate-fade-in">
+                    {activeTab === 'logging' && (
+                        <LoggingTab
+                            t={t}
+                            loggingSection={loggingSection}
+                            navigate={navigate}
+                            maxRequestBody={maxRequestBody}
+                            setMaxRequestBody={setMaxRequestBody}
+                            maxResponseBody={maxResponseBody}
+                            setMaxResponseBody={setMaxResponseBody}
+                            detachBodyOver={detachBodyOver}
+                            setDetachBodyOver={setDetachBodyOver}
+                            bodyPreview={bodyPreview}
+                            setBodyPreview={setBodyPreview}
+                            retentionDays={retentionDays}
+                            setRetentionDays={setRetentionDays}
+                            maxStorageGB={maxStorageGB}
+                            setMaxStorageGB={setMaxStorageGB}
+                            earlyRequestBodySnapshot={earlyRequestBodySnapshot}
+                            setEarlyRequestBodySnapshot={setEarlyRequestBodySnapshot}
+                            storeBase64={storeBase64}
+                            setStoreBase64={setStoreBase64}
+                            sensitiveHeaders={sensitiveHeaders}
+                            setSensitiveHeaders={setSensitiveHeaders}
+                        />
+                    )}
 
-                    {/* Content Area */}
-                    <div>
-                        {activeTab === 'routing' && (
-                            <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 motion-reduce:animate-none motion-reduce:duration-0">
-                                {/* 这个 tab 的主体是一张八列数据表,不是表单,所以吃满外壳的 1600
-                                    而不是收到 max-w-7xl —— 宽度跟着内容类型走 */}
-                                <div className="w-full space-y-6">
-                                    <SettingSection
-                                        title={t('settings.access_title')}
-                                        description={t('settings.access_description')}
-                                    >
-                                        <div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
-                                            <FieldBlock
-                                                label={t('settings.proxy_domain_suffix')}
-                                                hint={t('settings.proxy_domain_suffix_hint', {
-                                                    name: previewUpstreamName,
-                                                    suffix: domainSuffix,
-                                                })}
-                                            >
-                                                {/* 容器放宽后给输入框封顶:装 ".localhost" 的框子没必要跟着拉到 500px */}
-                                                <Input
-                                                    value={`.${domainSuffix}`}
-                                                    readOnly
-                                                    className="h-9 w-full max-w-md rounded-md border-input bg-background text-sm font-medium transition-colors cursor-default"
-                                                />
-                                            </FieldBlock>
-                                            <FieldBlock
-                                                label={t('settings.path_routing_prefix')}
-                                                htmlFor="path-routing-prefix"
-                                                hint={t('settings.path_routing_prefix_hint')}
-                                            >
-                                                <Input
-                                                    id="path-routing-prefix"
-                                                    value={pathRoutingPrefix}
-                                                    onChange={e => setPathRoutingPrefix(e.target.value)}
-                                                    placeholder="/_proxy"
-                                                    className="h-9 w-full max-w-md rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                />
-                                            </FieldBlock>
-                                            <div className="flex items-center lg:pt-6">
-                                                <ToggleSetting
-                                                    label={t('settings.enable_path_routing')}
-                                                    description={t('settings.enable_path_routing_hint')}
-                                                    checked={enablePathRouting}
-                                                    onCheckedChange={setEnablePathRouting}
-                                                />
-                                            </div>
-                                        </div>
-                                    </SettingSection>
+                    {activeTab === 'system' && (
+                        <SystemTab
+                            t={t}
+                            metrics={metrics}
+                            metricsLoading={metricsLoading}
+                            metricsError={metricsError}
+                            memoryUsedPercent={memoryUsedPercent}
+                            metricsUpdatedAt={metricsUpdatedAt}
+                            storageUsage={storageUsage}
+                            storageLoading={storageLoading}
+                            storageError={storageError}
+                            storageCalculatedAt={storageCalculatedAt}
+                            updateInfo={updateInfo}
+                            updateLoading={updateLoading}
+                            updateError={updateError}
+                            config={config}
+                            loadMetrics={loadMetrics}
+                            handleCalculateStorage={handleCalculateStorage}
+                            handleCheckUpdate={handleCheckUpdate}
+                        />
+                    )}
 
-                                    <SettingSection
-                                        title={t('settings.tabs.upstreams')}
-                                        description={t('settings.upstreams_description')}
-                                        // 一屏只留一个实心强调色按钮,这里让位给底部的保存
-                                        action={
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                onClick={() => setShowAddForm(prev => !prev)}
-                                                size="sm"
-                                                className="h-8 whitespace-nowrap border border-input bg-background font-medium text-foreground hover:bg-accent"
-                                            >
-                                                {!showAddForm && <Plus className="mr-1.5 h-4 w-4 shrink-0" />}
-                                                {showAddForm ? t('common.cancel') : t('upstream_manager.add_new')}
-                                            </Button>
-                                        }
-                                    >
-                                    <div className="w-full">
-                                        {showAddForm && (
-                                            <div className="mb-8 w-full rounded-lg bg-background p-6 border border-border">
-                                                <form onSubmit={handleAddUpstream} className="grid grid-cols-1 gap-6 md:grid-cols-12 md:items-end">
-                                                    <div className="md:col-span-3">
-                                                        <FieldBlock label={t('upstream_manager.name')} htmlFor="name">
-                                                            <div className="relative">
-                                                                <Input
-                                                                    id="name"
-                                                                    value={newName}
-                                                                    onChange={e => setNewName(e.target.value)}
-                                                                    placeholder="openai"
-                                                                    className="h-9 rounded-md border-input bg-background pr-20 text-sm transition-colors focus-visible:bg-background"
-                                                                    required
-                                                                />
-                                                                <div className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-xs text-muted-foreground">
-                                                                    .{domainSuffix}
-                                                                </div>
-                                                            </div>
-                                                        </FieldBlock>
-                                                    </div>
-
-                                                    <div className="md:col-span-5">
-                                                        <FieldBlock label={t('upstream_manager.target')} htmlFor="target">
-                                                            <Input
-                                                                id="target"
-                                                                value={newTarget}
-                                                                onChange={e => setNewTarget(e.target.value)}
-                                                                placeholder="https://api.openai.com"
-                                                                className="h-9 rounded-md border-input bg-background font-mono text-sm transition-colors focus-visible:bg-background"
-                                                                required
-                                                            />
-                                                        </FieldBlock>
-                                                    </div>
-
-                                                    <div className="md:col-span-2">
-                                                        <FieldBlock label={t('upstream_manager.timeout')} htmlFor="timeout">
-                                                            <Input
-                                                                id="timeout"
-                                                                type="number"
-                                                                min="1"
-                                                                value={newTimeout}
-                                                                onChange={e => setNewTimeout(Number(e.target.value))}
-                                                                className="h-9 rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                            />
-                                                        </FieldBlock>
-                                                    </div>
-
-                                                    <div className="md:col-span-2">
-                                                        <FieldBlock label={t('upstream_manager.order')} htmlFor="order">
-                                                            <Input
-                                                                id="order"
-                                                                type="number"
-                                                                min={0}
-                                                                value={newOrder}
-                                                                onChange={e => setNewOrder(Number(e.target.value))}
-                                                                className="h-9 rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                            />
-                                                        </FieldBlock>
-                                                    </div>
-
-                                                    <div className="md:col-span-4">
-                                                        <FieldBlock
-                                                            label={t('upstream_manager.outbound_proxy')}
-                                                            hint={t('upstream_manager.outbound_proxy_hint')}
-                                                        >
-                                                            <OutboundProxyControl
-                                                                value={newOutboundProxy}
-                                                                onChange={setNewOutboundProxy}
-                                                                t={t}
-                                                                className="h-9 bg-background"
-                                                            />
-                                                        </FieldBlock>
-                                                    </div>
-
-                                                    <div className="md:col-span-12">
-                                                        <AdvancedSettings>
-                                                            <AdvancedSettingsGroup
-                                                                title={t('upstream_manager.timeout_strategy')}
-                                                                description={t('upstream_manager.timeout_strategy_hint')}
-                                                            >
-                                                                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                                                                    <FieldBlock
-                                                                        label={t('upstream_manager.response_header_timeout')}
-                                                                        htmlFor="response-header-timeout"
-                                                                        hint={t('upstream_manager.response_header_timeout_hint')}
-                                                                    >
-                                                                        <Input
-                                                                            id="response-header-timeout"
-                                                                            type="number"
-                                                                            min="0"
-                                                                            value={newResponseHeaderTimeout}
-                                                                            onChange={e => setNewResponseHeaderTimeout(Number(e.target.value))}
-                                                                            className="h-9 rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                                        />
-                                                                    </FieldBlock>
-
-                                                                    <FieldBlock
-                                                                        label={t('upstream_manager.response_body_first_byte_timeout')}
-                                                                        htmlFor="response-body-first-byte-timeout"
-                                                                        hint={t('upstream_manager.response_body_first_byte_timeout_hint')}
-                                                                    >
-                                                                        <Input
-                                                                            id="response-body-first-byte-timeout"
-                                                                            type="number"
-                                                                            min="0"
-                                                                            value={newResponseBodyFirstByteTimeout}
-                                                                            onChange={e => setNewResponseBodyFirstByteTimeout(Number(e.target.value))}
-                                                                            className="h-9 rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                                        />
-                                                                    </FieldBlock>
-
-                                                                    <FieldBlock
-                                                                        label={t('upstream_manager.response_body_idle_timeout')}
-                                                                        htmlFor="response-body-idle-timeout"
-                                                                        hint={t('upstream_manager.response_body_idle_timeout_hint')}
-                                                                    >
-                                                                        <Input
-                                                                            id="response-body-idle-timeout"
-                                                                            type="number"
-                                                                            min="0"
-                                                                            value={newResponseBodyIdleTimeout}
-                                                                            onChange={e => setNewResponseBodyIdleTimeout(Number(e.target.value))}
-                                                                            className="h-9 rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                                        />
-                                                                    </FieldBlock>
-                                                                </div>
-                                                            </AdvancedSettingsGroup>
-
-                                                            <AdvancedSettingsGroup
-                                                                title={t('upstream_manager.sse_keepalive')}
-                                                                description={t('upstream_manager.sse_keepalive_hint')}
-                                                                divider
-                                                            >
-                                                                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                                                                    <FieldBlock label={t('upstream_manager.sse_keepalive_mode')}>
-                                                                        <Select value={newSSEKeepaliveMode} onValueChange={value => setNewSSEKeepaliveMode(value as SSEKeepaliveMode)}>
-                                                                            <SelectTrigger className="h-9 rounded-md border-input bg-background text-sm">
-                                                                                <SelectValue />
-                                                                            </SelectTrigger>
-                                                                            <SelectContent>
-                                                                                <SelectItem value="off">{t('upstream_manager.sse_keepalive_mode_off')}</SelectItem>
-                                                                                <SelectItem value="after_headers">{t('upstream_manager.sse_keepalive_mode_after_headers')}</SelectItem>
-                                                                                <SelectItem value="full">{t('upstream_manager.sse_keepalive_mode_full')}</SelectItem>
-                                                                            </SelectContent>
-                                                                        </Select>
-                                                                    </FieldBlock>
-                                                                    {newSSEKeepaliveMode !== 'off' && (
-                                                                        <FieldBlock
-                                                                            label={t('upstream_manager.sse_keepalive_interval')}
-                                                                            hint={t('upstream_manager.sse_keepalive_interval_hint')}
-                                                                        >
-                                                                            <Input
-                                                                                type="number"
-                                                                                min="1"
-                                                                                value={newSSEKeepaliveInterval}
-                                                                                onChange={e => setNewSSEKeepaliveInterval(Number(e.target.value))}
-                                                                                className="h-9 rounded-md border-input bg-background text-sm"
-                                                                            />
-                                                                        </FieldBlock>
-                                                                    )}
-                                                                </div>
-                                                                {newSSEKeepaliveMode === 'full' && (
-                                                                    <div className="mt-4 flex gap-2 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-                                                                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-                                                                        <span>{t('upstream_manager.sse_keepalive_full_warning')}</span>
-                                                                    </div>
-                                                                )}
-                                                            </AdvancedSettingsGroup>
-
-                                                            <AdvancedSettingsGroup title={t('upstream_manager.request_logging')} divider>
-                                                                <ToggleSetting
-                                                                    label={t('upstream_manager.logging_enabled')}
-                                                                    description={t('upstream_manager.logging_enabled_hint')}
-                                                                    checked={newLoggingEnabled}
-                                                                    onCheckedChange={setNewLoggingEnabled}
-                                                                />
-                                                                <div className="space-y-2 border-l-2 border-border pl-4">
-                                                                    <div>
-                                                                        <div className="text-sm font-medium text-foreground">
-                                                                            {t('upstream_manager.logging_path_mode')}
-                                                                        </div>
-                                                                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                                                                            {t('upstream_manager.logging_path_mode_hint')}
-                                                                        </p>
-                                                                    </div>
-                                                                    <UpstreamLoggingPathFilter
-                                                                        value={newLoggingPathFilter}
-                                                                        onChange={setNewLoggingPathFilter}
-                                                                        templates={modelPathTemplates}
-                                                                        disabled={!newLoggingEnabled}
-                                                                    />
-                                                                </div>
-                                                            </AdvancedSettingsGroup>
-                                                        </AdvancedSettings>
-                                                    </div>
-
-                                                    <div className="flex justify-end md:col-span-12">
-                                                        <Button type="submit" variant="default" size="lg" className="h-9 rounded-md min-w-[120px] font-medium whitespace-nowrap shrink-0">
-                                                            <Save className="mr-1.5 h-4 w-4 shrink-0" />
-                                                            {t('common.save')}
-                                                        </Button>
-                                                    </div>
-                                                </form>
-                                            </div>
-                                        )}
-
-                                        {upstreams.length === 0 ? (
-                                            <div className="rounded-lg border border-dashed border-input bg-muted/10 px-6 py-20 text-center">
-                                                <Upload className="mx-auto mb-4 h-9 w-10 text-muted-foreground/30" />
-                                                <p className="text-sm text-foreground/75">
-                                                    {t('upstream_manager.no_upstreams')}
-                                                </p>
-                                            </div>
-                                        ) : (
-                                            <Table className="table-fixed">
-                                                <TableHeader className="bg-muted">
-                                                    <TableRow>
-                                                        {/* 列宽按最长的真实值定,留给英文界面余量:英文标签普遍比中文长
-                                                            一倍,标记列 250px 才装得下 "Request Override ×1 · Pass-through" */}
-                                                        <TableHead className="w-[120px]">{t('upstream_manager.name')}</TableHead>
-                                                        <TableHead className="w-[280px]">{t('upstream_manager.list_entry')}</TableHead>
-                                                        <TableHead className="w-[130px]">{t('upstream_manager.target_presets')}</TableHead>
-                                                        <TableHead>{t('upstream_manager.target')}</TableHead>
-                                                        <TableHead className="w-[200px]">{t('upstream_manager.outbound_proxy')}</TableHead>
-                                                        <TableHead className="w-[80px]">{t('upstream_manager.list_timeout')}</TableHead>
-                                                        <TableHead className="w-[250px]">{t('upstream_manager.list_flags')}</TableHead>
-                                                        <TableHead className="w-[76px]">{t('upstream_manager.actions')}</TableHead>
-                                                    </TableRow>
-                                                </TableHeader>
-                                                <TableBody>
-                                                    {sortedUpstreams.map(upstream => {
-                                                        // 有目标预设的上游以激活目标的配置为准（显式 false 不再回退到
-                                                        // 旧版绑定，否则已禁用的目标会因残留绑定而显示错误的徽标）
-                                                        const targetConfig = activeTargetConfig(upstream)
-                                                        const overrideConfig = targetConfig?.request_overrides || (!targetConfig ? overrideBindings[upstream.name] : undefined)
-                                                        const overrideEnabled = targetConfig
-                                                            ? targetConfig.request_overrides?.enabled ?? false
-                                                            : overrideBindings[upstream.name]?.enabled ?? false
-                                                        const overrideRuleCount = getBindingRuleNames(overrideConfig).length
-                                                        const targetNames = upstream.targets ? Object.keys(upstream.targets) : []
-                                                        const activeTarget = upstream.active_target || targetNames[0]
-                                                        const proxyIsCustom = outboundProxyMode(upstream.outbound_proxy) === 'custom'
-                                                        const flagLabels: string[] = []
-                                                        if (overrideEnabled) {
-                                                            flagLabels.push(t('log_detail.request_override') + (overrideRuleCount ? ' ×' + overrideRuleCount : ''))
-                                                        }
-                                                        if (upstream.sse_keepalive?.mode && upstream.sse_keepalive.mode !== 'off') {
-                                                            flagLabels.push(t('upstream_manager.sse_keepalive_badge', { mode: t(`upstream_manager.sse_keepalive_mode_${upstream.sse_keepalive.mode}`) }))
-                                                        }
-                                                        if (upstream.logging_enabled === false) {
-                                                            flagLabels.push(t('upstream_manager.logging_disabled_badge'))
-                                                        } else if (upstream.logging_path_filter && upstream.logging_path_filter.mode !== 'all') {
-                                                            flagLabels.push(t(`upstream_manager.logging_mode_${upstream.logging_path_filter.mode}`) + ` ×${upstream.logging_path_filter.rules?.length || 0}`)
-                                                        }
-
-                                                        return (
-                                                            <TableRow key={upstream.name}>
-                                                                <TableCell className="font-medium text-foreground">
-                                                                    <div className="truncate" title={upstream.name}>{upstream.name}</div>
-                                                                </TableCell>
-
-                                                                {/* 路径路由前缀是全局设置,每行都是同一个值;右对齐让它自成一列结构,
-                                                                    而不是跟着入口地址的长度左右漂 */}
-                                                                <TableCell>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleCopy(getProxyUrl(upstream.name))}
-                                                                            className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
-                                                                            title={getProxyUrl(upstream.name)}
-                                                                        >
-                                                                            <Copy className="h-3.5 w-3.5 shrink-0 opacity-40" />
-                                                                            {/* 只显示 host:协议恒等于面板自身的 origin,是常量;复制出去仍是完整 URL */}
-                                                                            <span className="min-w-0 truncate font-mono">{getProxyHost(upstream.name)}</span>
-                                                                        </button>
-                                                                        {enablePathRouting && (
-                                                                            <Tooltip>
-                                                                                <TooltipTrigger asChild>
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={() => handleCopy(getPathProxyUrl(upstream.name))}
-                                                                                        className="shrink-0 rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-                                                                                        aria-label={t('settings.copy_path_proxy_url')}
-                                                                                    >
-                                                                                        <Route className="h-3.5 w-3.5" />
-                                                                                    </button>
-                                                                                </TooltipTrigger>
-                                                                                {/* tooltip 同时说明了「这是什么」和「点了会怎样」:
-                                                                                    图标只对动作成立,状态标签必须留文字 */}
-                                                                                <TooltipContent>{t('settings.copy_path_proxy_url')}</TooltipContent>
-                                                                            </Tooltip>
-                                                                        )}
-                                                                    </div>
-                                                                </TableCell>
-
-                                                                {/* 静止时是一段标签,hover 才浮出边框告诉你可以点 ——
-                                                                    表格主体全是只读文本,一个实心表单控件会独自抢走视线 */}
-                                                                <TableCell>
-                                                                    {targetNames.length > 1 && activeTarget ? (
-                                                                        <Select
-                                                                            value={activeTarget}
-                                                                            onValueChange={value => handleActivateTarget(upstream.name, value)}
-                                                                            disabled={switchingTarget === upstream.name}
-                                                                        >
-                                                                            <SelectTrigger className="h-6 w-full gap-1 border-transparent bg-transparent px-1.5 text-xs text-muted-foreground shadow-none hover:border-input hover:bg-background hover:text-foreground data-[state=open]:border-input data-[state=open]:bg-background dark:bg-transparent dark:hover:bg-background">
-                                                                                <SelectValue />
-                                                                            </SelectTrigger>
-                                                                            <SelectContent>
-                                                                                {targetNames.map(name => (
-                                                                                    <SelectItem key={name} value={name}>{name}</SelectItem>
-                                                                                ))}
-                                                                            </SelectContent>
-                                                                        </Select>
-                                                                    ) : (
-                                                                        <div className="truncate px-1.5 text-xs text-muted-foreground">
-                                                                            {activeTarget || <span className="opacity-50">—</span>}
-                                                                        </div>
-                                                                    )}
-                                                                </TableCell>
-
-                                                                <TableCell>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleCopy(upstream.target)}
-                                                                        className="flex w-full min-w-0 items-center gap-1.5 text-left text-xs text-foreground transition-colors hover:text-primary"
-                                                                        title={upstream.target}
-                                                                    >
-                                                                        <Copy className="h-3.5 w-3.5 shrink-0 opacity-40" />
-                                                                        {/* 目标地址保留 scheme:那是填进去的、会变的(有的上游是 http) */}
-                                                                        <span className="min-w-0 truncate font-mono">{upstream.target}</span>
-                                                                    </button>
-                                                                </TableCell>
-
-                                                                <TableCell className="text-xs text-muted-foreground">
-                                                                    <div
-                                                                        className={cn('truncate', proxyIsCustom && 'font-mono')}
-                                                                        title={proxyIsCustom ? upstream.outbound_proxy : undefined}
-                                                                    >
-                                                                        {formatOutboundProxy(upstream.outbound_proxy)}
-                                                                    </div>
-                                                                </TableCell>
-
-                                                                <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
-                                                                    {upstream.timeout}s
-                                                                </TableCell>
-
-                                                                {/* badge 数量是会变的,给它专属一列 —— 挂在名称后面会把后面每一列
-                                                                    的起点推到每行不同的位置,那正是原来看着乱的原因。
-                                                                    不用药丸:列边界已经把它框住了,再加边框和底色是重复的 */}
-                                                                <TableCell className="text-xs text-muted-foreground">
-                                                                    <div className="truncate" title={flagLabels.join(' · ') || undefined}>
-                                                                        {flagLabels.length ? flagLabels.join(' · ') : <span className="opacity-50">—</span>}
-                                                                    </div>
-                                                                </TableCell>
-
-                                                                {/* 常驻而不是 hover 才出现:右边缘每行都有内容,这一列才立得住 */}
-                                                                <TableCell>
-                                                                    <div className="flex items-center gap-0.5">
-                                                                        <Tooltip>
-                                                                            <TooltipTrigger asChild>
-                                                                                <Button
-                                                                                    type="button"
-                                                                                    variant="ghost"
-                                                                                    size="icon"
-                                                                                    onClick={() => handleEditUpstream(upstream)}
-                                                                                    className="h-7 w-7 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
-                                                                                    aria-label={t('common.edit')}
-                                                                                >
-                                                                                    <Pencil className="h-3.5 w-3.5" />
-                                                                                </Button>
-                                                                            </TooltipTrigger>
-                                                                            <TooltipContent>{t('common.edit')}</TooltipContent>
-                                                                        </Tooltip>
-                                                                        <Tooltip>
-                                                                            <TooltipTrigger asChild>
-                                                                                <Button
-                                                                                    type="button"
-                                                                                    variant="ghost"
-                                                                                    size="icon"
-                                                                                    onClick={() => handleRemoveUpstream(upstream.name)}
-                                                                                    className="h-7 w-7 text-muted-foreground/70 hover:bg-destructive/10 hover:text-destructive"
-                                                                                    aria-label={t('common.delete')}
-                                                                                >
-                                                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                                                </Button>
-                                                                            </TooltipTrigger>
-                                                                            <TooltipContent>{t('common.delete')}</TooltipContent>
-                                                                        </Tooltip>
-                                                                    </div>
-                                                                </TableCell>
-                                                            </TableRow>
-                                                        )
-                                                    })}
-                                                </TableBody>
-                                            </Table>
-                                        )}
-                                    </div>
-                                    </SettingSection>
-                                </div>
-                            </div>
-                        )}
-
-                        {activeTab === 'logging' && (
-                            <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 motion-reduce:animate-none motion-reduce:duration-0">
-                                <div className="mx-auto max-w-7xl space-y-6">
-                                    <Tabs
-                                        value={loggingSection}
-                                        onValueChange={value => navigate(`/settings/logging/${value}`)}
-                                    >
-                                        <TabsList>
-                                            <TabsTrigger value="general">{t('logging_rules.tabs.general')}</TabsTrigger>
-                                            <TabsTrigger value="models">{t('logging_rules.tabs.models')}</TabsTrigger>
-                                            <TabsTrigger value="ignored">{t('logging_rules.tabs.ignored')}</TabsTrigger>
-                                        </TabsList>
-                                    </Tabs>
-
-                                    {loggingSection === 'general' ? (
-                                    <>
-                                    <TraceCorrelationSetting />
-                                    <SettingSection
-                                        title={t('settings.section_content_size')}
-                                        description={t('settings.section_content_size_desc')}
-                                    >
-                                        <div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
-                                            <FieldBlock
-                                                label={t('settings.max_request_body')}
-                                                hint={t('settings.max_request_body_hint')}
-                                                htmlFor="max-req"
-                                                unit="KB"
-                                            >
-                                                <Input
-                                                    id="max-req"
-                                                    type="number"
-                                                    min="1"
-                                                    value={maxRequestBody}
-                                                    onChange={e => setMaxRequestBody(Number(e.target.value))}
-                                                    className="h-9 w-full rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                />
-                                            </FieldBlock>
-                                            <FieldBlock
-                                                label={t('settings.max_response_body')}
-                                                hint={t('settings.max_response_body_hint')}
-                                                htmlFor="max-res"
-                                                unit="KB"
-                                            >
-                                                <Input
-                                                    id="max-res"
-                                                    type="number"
-                                                    min="1"
-                                                    value={maxResponseBody}
-                                                    onChange={e => setMaxResponseBody(Number(e.target.value))}
-                                                    className="h-9 w-full rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                />
-                                            </FieldBlock>
-                                            <FieldBlock
-                                                label={t('settings.detach_body_over_bytes')}
-                                                hint={t('settings.detach_body_over_bytes_hint')}
-                                                htmlFor="detach-over"
-                                                unit="KB"
-                                            >
-                                                <Input
-                                                    id="detach-over"
-                                                    type="number"
-                                                    min="0"
-                                                    value={detachBodyOver}
-                                                    onChange={e => setDetachBodyOver(Number(e.target.value))}
-                                                    className="h-9 w-full rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                />
-                                            </FieldBlock>
-                                            <FieldBlock
-                                                label={t('settings.body_preview_bytes')}
-                                                hint={t('settings.body_preview_bytes_hint')}
-                                                htmlFor="body-preview"
-                                                unit="KB"
-                                            >
-                                                <Input
-                                                    id="body-preview"
-                                                    type="number"
-                                                    min="0"
-                                                    value={bodyPreview}
-                                                    onChange={e => setBodyPreview(Number(e.target.value))}
-                                                    className="h-9 w-full rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                />
-                                            </FieldBlock>
-                                        </div>
-                                    </SettingSection>
-
-                                    <SettingSection
-                                        title={t('settings.section_retention')}
-                                        description={t('settings.section_retention_desc')}
-                                    >
-                                        <div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
-                                            <FieldBlock
-                                                label={t('settings.retention_days')}
-                                                hint={t('settings.retention_days_hint')}
-                                                htmlFor="retention-days"
-                                                unit={t('settings.days')}
-                                            >
-                                                <Input
-                                                    id="retention-days"
-                                                    type="number"
-                                                    min="0"
-                                                    value={retentionDays}
-                                                    onChange={e => setRetentionDays(Number(e.target.value))}
-                                                    className="h-9 w-full rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                />
-                                            </FieldBlock>
-                                            <FieldBlock
-                                                label={t('settings.max_storage_bytes')}
-                                                hint={t('settings.max_storage_bytes_hint')}
-                                                htmlFor="max-storage"
-                                                unit="GB"
-                                            >
-                                                <Input
-                                                    id="max-storage"
-                                                    type="number"
-                                                    min="0"
-                                                    step="0.1"
-                                                    value={maxStorageGB}
-                                                    onChange={e => setMaxStorageGB(Number(e.target.value))}
-                                                    className="h-9 w-full rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                />
-                                            </FieldBlock>
-                                        </div>
-                                    </SettingSection>
-
-                                    <SettingSection
-                                        title={t('settings.section_logging_behavior')}
-                                        description={t('settings.section_logging_behavior_desc')}
-                                    >
-                                        <div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2">
-                                            <ToggleSetting
-                                                label={t('settings.early_request_body_snapshot')}
-                                                description={t('settings.early_request_body_snapshot_hint')}
-                                                checked={earlyRequestBodySnapshot}
-                                                onCheckedChange={setEarlyRequestBodySnapshot}
-                                            />
-                                            <ToggleSetting
-                                                label={t('settings.store_base64')}
-                                                description={t('settings.store_base64_hint')}
-                                                checked={storeBase64}
-                                                onCheckedChange={setStoreBase64}
-                                            />
-                                        </div>
-                                    </SettingSection>
-
-                                    <SettingSection
-                                        title={t('settings.section_sensitive_headers')}
-                                        description={t('settings.section_sensitive_headers_desc')}
-                                    >
-                                        <Textarea
-                                            value={sensitiveHeaders}
-                                            onChange={e => setSensitiveHeaders(e.target.value)}
-                                            rows={4}
-                                            className="min-h-[112px] w-full rounded-md border-input bg-background font-mono text-sm leading-relaxed transition-colors focus-visible:bg-background resize-y"
-                                            placeholder="Authorization&#10;x-api-key&#10;api-key"
-                                        />
-                                    </SettingSection>
-                                    </>
-                                    ) : (
-                                        <LoggingRules tab={loggingSection} embedded />
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {activeTab === 'system' && (
-                            <div className="mx-auto max-w-7xl space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300 motion-reduce:animate-none motion-reduce:duration-0">
-                                {metricsError && (
-                                    <div className="flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                                        <span>{metricsError}</span>
-                                    </div>
-                                )}
-
-                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                                    <MetricCard
-                                        label={t('settings.system_process_memory')}
-                                        value={formatBytes(metrics?.process.rss_bytes)}
-                                        detail={t('settings.system_heap_detail', {
-                                            alloc: formatBytes(metrics?.process.heap_alloc_bytes),
-                                            sys: formatBytes(metrics?.process.heap_sys_bytes),
-                                        })}
-                                    />
-                                    <MetricCard
-                                        label={t('settings.system_process_cpu')}
-                                        value={formatPercent(metrics?.process.cpu_percent)}
-                                        detail={t('settings.system_cpu_detail', {
-                                            seconds: metrics?.process.cpu_seconds?.toFixed(1) ?? '-',
-                                        })}
-                                    />
-                                    <MetricCard
-                                        label={t('settings.system_total_memory')}
-                                        value={formatPercent(memoryUsedPercent)}
-                                        detail={t('settings.system_memory_detail', {
-                                            used: formatBytes(metrics?.memory.used_bytes),
-                                            total: formatBytes(metrics?.memory.total_bytes),
-                                            source: metrics?.memory.source || '-',
-                                        })}
-                                    />
-                                    <MetricCard
-                                        label={t('settings.system_uptime')}
-                                        value={formatDuration(metrics?.runtime.uptime_seconds)}
-                                        detail={t('settings.system_runtime_detail', {
-                                            goroutines: metrics?.runtime.goroutines ?? '-',
-                                            cpu: metrics?.runtime.num_cpu ?? '-',
-                                        })}
-                                    />
-                                </div>
-
-                                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                                    <div className="rounded-md border border-input bg-background px-5 py-4">
-                                        <div className="mb-3 text-xs font-semibold text-muted-foreground">
-                                            {t('settings.system_runtime')}
-                                        </div>
-                                        <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
-                                            <dt className="text-muted-foreground">{t('settings.system_platform')}</dt>
-                                            <dd className="font-mono text-foreground">{metrics?.platform || '-'}</dd>
-                                            <dt className="text-muted-foreground">{t('settings.system_pid')}</dt>
-                                            <dd className="font-mono text-foreground">{metrics?.process.pid ?? '-'}</dd>
-                                            <dt className="text-muted-foreground">{t('settings.system_go_version')}</dt>
-                                            <dd className="break-all font-mono text-foreground">{metrics?.runtime.go_version || '-'}</dd>
-                                        </dl>
-                                    </div>
-                                    <div className="rounded-md border border-input bg-background px-5 py-4">
-                                        <div className="mb-3 flex items-center justify-between gap-3">
-                                            <div className="text-xs font-semibold text-muted-foreground">
-                                                {t('settings.system_snapshot')}
-                                            </div>
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => loadMetrics(true)}
-                                                disabled={metricsLoading}
-                                                className="h-8 rounded-lg px-2.5 text-xs"
-                                            >
-                                                <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", metricsLoading && "animate-spin")} />
-                                                {t('common.refresh')}
-                                            </Button>
-                                        </div>
-                                        <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
-                                            <dt className="text-muted-foreground">{t('settings.system_updated_at')}</dt>
-                                            <dd className="font-mono text-foreground">{metricsUpdatedAt}</dd>
-                                            <dt className="text-muted-foreground">{t('settings.system_available_memory')}</dt>
-                                            <dd className="font-mono text-foreground">{formatBytes(metrics?.memory.available_bytes)}</dd>
-                                            <dt className="text-muted-foreground">{t('settings.system_refresh_interval')}</dt>
-                                            <dd className="font-mono text-foreground">5s</dd>
-                                        </dl>
-                                    </div>
-                                </div>
-
-                                <div className="rounded-md border border-input bg-background px-5 py-4">
-                                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                                        <div>
-                                            <div className="text-xs font-semibold text-muted-foreground">
-                                                {t('settings.storage_usage_title')}
-                                            </div>
-                                            <div className="mt-2 text-sm text-muted-foreground">
-                                                {t('settings.storage_usage_calculated_at', {
-                                                    time: storageCalculatedAt,
-                                                })}
-                                            </div>
-                                        </div>
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            onClick={handleCalculateStorage}
-                                            disabled={storageLoading}
-                                            className="h-9 rounded-md"
-                                        >
-                                            <RefreshCw className={cn("mr-2 h-4 w-4", storageLoading && "animate-spin")} />
-                                            {t('settings.storage_usage_calculate')}
-                                        </Button>
-                                    </div>
-
-                                    {storageError && (
-                                        <div className="mb-4 flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                                            <span>{storageError}</span>
-                                        </div>
-                                    )}
-
-                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                                        <div className="rounded-lg border border-input bg-background px-4 py-3">
-                                            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                                                <Archive className="h-3.5 w-3.5" />
-                                                {t('settings.storage_usage_total')}
-                                            </div>
-                                            <div className="text-xl font-semibold text-foreground">
-                                                {formatBytes(storageUsage?.total_bytes)}
-                                            </div>
-                                            <div className="mt-1 text-xs text-muted-foreground">
-                                                {t('settings.storage_usage_blob_store', {
-                                                    store: storageUsage?.blob_store || '-',
-                                                })}
-                                            </div>
-                                        </div>
-                                        <div className="rounded-lg border border-input bg-background px-4 py-3">
-                                            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                                                <Database className="h-3.5 w-3.5" />
-                                                {t('settings.storage_usage_database')}
-                                            </div>
-                                            <div className="text-xl font-semibold text-foreground">
-                                                {formatBytes(storageUsage?.database_bytes)}
-                                            </div>
-                                            <div className="mt-1 text-xs text-muted-foreground">
-                                                {storageUsage
-                                                    ? t('settings.storage_usage_files', { count: storageUsage.database_files })
-                                                    : '-'}
-                                            </div>
-                                        </div>
-                                        <div className="rounded-lg border border-input bg-background px-4 py-3">
-                                            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                                                <Archive className="h-3.5 w-3.5" />
-                                                {t('settings.storage_usage_blobs')}
-                                            </div>
-                                            <div className="text-xl font-semibold text-foreground">
-                                                {formatBytes(storageUsage?.blob_bytes)}
-                                            </div>
-                                            <div className="mt-1 text-xs text-muted-foreground">
-                                                {storageUsage
-                                                    ? t('settings.storage_usage_files', { count: storageUsage.blob_files })
-                                                    : '-'}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <StorageCleanup onCompleted={() => { void handleCalculateStorage() }} />
-                                </div>
-
-                                <div className="rounded-md border border-input bg-background px-5 py-4">
-                                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                                        <div>
-                                            <div className="text-xs font-semibold text-muted-foreground">
-                                                {t('settings.update_title')}
-                                            </div>
-                                            <div className="mt-2 text-sm text-muted-foreground">
-                                                {t('settings.update_current_version', {
-                                                    version: config?.version ? `v${config.version.replace(/^v/, '')}` : '-',
-                                                })}
-                                            </div>
-                                        </div>
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            onClick={handleCheckUpdate}
-                                            disabled={updateLoading}
-                                            className="h-9 rounded-md"
-                                        >
-                                            <RefreshCw className={cn("mr-2 h-4 w-4", updateLoading && "animate-spin")} />
-                                            {t('settings.update_check')}
-                                        </Button>
-                                    </div>
-
-                                    {updateError && (
-                                        <div className="mb-4 flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                                            <span>{updateError}</span>
-                                        </div>
-                                    )}
-
-                                    {updateInfo && (
-                                        <div className="space-y-4">
-                                            <div className="flex flex-wrap items-center gap-3">
-                                                <Badge
-                                                    variant="outline"
-                                                    className={cn(
-                                                        "rounded-md px-3 py-1 text-xs font-semibold",
-                                                        updateInfo.update_available
-                                                            ? "border-warning/30 bg-warning/10 text-warning"
-                                                            : "border-success/30 bg-success/10 text-success"
-                                                    )}
-                                                >
-                                                    {updateInfo.update_available ? t('settings.update_available') : t('settings.update_latest')}
-                                                </Badge>
-                                                {updateInfo.update_available && (
-                                                    <span className="text-sm text-muted-foreground">
-                                                        {t('settings.update_latest_version', {
-                                                            version: updateInfo.latest_tag || `v${updateInfo.latest_version}`,
-                                                        })}
-                                                    </span>
-                                                )}
-                                            </div>
-
-                                            {updateInfo.update_available && (
-                                                <div className="flex flex-wrap gap-2">
-                                                    {updateInfo.matching_asset && (
-                                                        <Button asChild className="h-9 rounded-md">
-                                                            <a href={updateInfo.matching_asset.download_url} target="_blank" rel="noreferrer noopener">
-                                                                <Download className="mr-2 h-4 w-4" />
-                                                                {t('settings.update_download_asset', {
-                                                                    size: formatBytes(updateInfo.matching_asset.size),
-                                                                })}
-                                                            </a>
-                                                        </Button>
-                                                    )}
-                                                    <Button asChild variant="outline" className="h-9 rounded-md">
-                                                        <a href={updateInfo.release_url} target="_blank" rel="noreferrer noopener">
-                                                            <ExternalLink className="mr-2 h-4 w-4" />
-                                                            {t('settings.update_open_release')}
-                                                        </a>
-                                                    </Button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {activeTab === 'overrides' && (
-                            <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-300 motion-reduce:animate-none motion-reduce:duration-0">
-                                <div className="mx-auto max-w-7xl space-y-6">
-                                    <div className="inline-flex rounded-md border border-input bg-muted/30 p-1">
-                                        <button
-                                            type="button"
-                                            onClick={() => setActiveRuleTab('request_overrides')}
-                                            className={cn(
-                                                "rounded-lg px-4 py-2 text-sm font-semibold transition-colors",
-                                                activeRuleTab === 'request_overrides'
-                                                    ? "bg-background text-foreground"
-                                                    : "text-muted-foreground hover:text-foreground"
-                                            )}
-                                        >
-                                            {t('settings.rule_tab_request_overrides')}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setActiveRuleTab('usage_extraction')}
-                                            className={cn(
-                                                "rounded-lg px-4 py-2 text-sm font-semibold transition-colors",
-                                                activeRuleTab === 'usage_extraction'
-                                                    ? "bg-background text-foreground"
-                                                    : "text-muted-foreground hover:text-foreground"
-                                            )}
-                                        >
-                                            {t('settings.rule_tab_usage_extraction')}
-                                        </button>
-                                    </div>
-
-                                    {activeRuleTab === 'request_overrides' && (
-                                        <>
-                                    <div className="flex items-start gap-3 rounded-md border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
-                                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                                        <div className="space-y-1">
-                                            <p className="font-semibold">{t('settings.request_overrides_warning_title')}</p>
-                                            <p className="text-xs leading-6 opacity-90">{t('settings.request_overrides_warning')}</p>
-                                        </div>
-                                    </div>
-
-                                    <SettingSection title={t('settings.request_overrides_config')}>
-                                        <div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
-                                            <div className="flex items-center sm:pt-6">
-                                                <ToggleSetting
-                                                    label={t('settings.request_overrides_enable')}
-                                                    description={t('settings.request_overrides_enable_hint')}
-                                                    checked={requestOverridesEnabled}
-                                                    onCheckedChange={setRequestOverridesEnabled}
-                                                />
-                                            </div>
-
-                                            <FieldBlock
-                                                label={t('settings.request_overrides_max_body')}
-                                                hint={t('settings.request_overrides_max_body_hint')}
-                                                htmlFor="override-max-body"
-                                                unit="KB"
-                                            >
-                                                <Input
-                                                    id="override-max-body"
-                                                    type="number"
-                                                    min="1"
-                                                    value={overrideMaxBodyKB}
-                                                    onChange={e => setOverrideMaxBodyKB(Number(e.target.value))}
-                                                    className="h-9 w-full rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                                                />
-                                            </FieldBlock>
-                                        </div>
-                                    </SettingSection>
-
-                                    <SettingSection
-                                        title={t('settings.request_overrides_rules')}
-                                        description={t('settings.request_overrides_rules_hint')}
-                                    >
-                                        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-input bg-muted/30 px-3 py-2">
-                                            <p className="text-xs leading-5 text-muted-foreground">
-                                                {t('settings.request_overrides_scope_hint')}
-                                            </p>
-                                            <div className="flex shrink-0 items-center gap-2">
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    asChild
-                                                    className="h-8 text-xs font-semibold"
-                                                >
-                                                    <a
-                                                        href={t('settings.request_overrides_docs_url')}
-                                                        target="_blank"
-                                                        rel="noreferrer noopener"
-                                                    >
-                                                        <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-                                                        {t('settings.request_overrides_learn_more')}
-                                                    </a>
-                                                </Button>
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={handleAddOverrideExample}
-                                                    disabled={Boolean(overrideRulesParse.error)}
-                                                    className="h-8 text-xs font-semibold"
-                                                >
-                                                    <Plus className="mr-1.5 h-3.5 w-3.5" />
-                                                    {t('settings.request_overrides_insert_example')}
-                                                </Button>
-                                            </div>
-                                        </div>
-                                        <div className="grid gap-4 xl:grid-cols-[minmax(280px,0.32fr)_minmax(0,1fr)]">
-                                            <div className="rounded-md border border-input bg-background">
-                                                <div className="flex items-center justify-between gap-2 border-b border-input px-3 py-2">
-                                                    <span className="text-xs font-semibold text-muted-foreground">
-                                                        {t('settings.request_override_rule_list')}
-                                                    </span>
-                                                    <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={handleAddOverrideRule}
-                                                        className="h-7 px-2 text-xs"
-                                                    >
-                                                        <Plus className="mr-1 h-3.5 w-3.5" />
-                                                        {t('common.add')}
-                                                    </Button>
-                                                </div>
-                                                {overrideRulesParse.error ? (
-                                                    <div className="px-3 py-8 text-center text-xs text-danger">
-                                                        {overrideRulesParse.error}
-                                                    </div>
-                                                ) : overrideRuleObjects.length === 0 ? (
-                                                    <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                                                        {t('settings.request_override_no_rules')}
-                                                    </div>
-                                                ) : (
-                                                    <div className="max-h-[500px] divide-y divide-border/30 overflow-y-auto">
-                                                        {overrideRuleObjects.map((rule, index) => {
-                                                            const ruleName = getOverrideRuleName(rule, `rule-${index + 1}`)
-                                                            const selected = selectedOverrideRuleIndex === index
-                                                            const status = getRuleRuntimeStatus(rule, upstreams, overrideBindings, requestOverridesEnabled)
-                                                            const statusBadgeClass = cn(
-                                                                "h-5 rounded-md px-2 text-xs font-semibold",
-                                                                status.kind === 'active' && "border-success/40 bg-success/10 text-success",
-                                                                status.kind === 'blocked' && "border-warning/40 bg-warning/10 text-warning",
-                                                                status.kind === 'inactive' && "border-warning/40 bg-warning/10 text-warning",
-                                                                status.kind === 'unbound' && "border-input bg-muted/50 text-muted-foreground",
-                                                            )
-                                                            const statusText =
-                                                                status.kind === 'active'
-                                                                    ? t('settings.rule_status_active')
-                                                                    : status.kind === 'unbound'
-                                                                        ? t('settings.rule_status_unbound')
-                                                                        : status.kind === 'inactive'
-                                                                            ? t('settings.rule_status_inactive')
-                                                                        : status.reason === 'global'
-                                                                            ? t('settings.rule_status_blocked_global')
-                                                                            : status.reason === 'rule'
-                                                                                ? t('settings.rule_status_blocked_rule')
-                                                                                : t('settings.rule_status_blocked_bindings')
-                                                            const detail =
-                                                                    status.kind === 'active'
-                                                                    ? [
-                                                                        formatUpstreamList(status.enabledUpstreams, status.disabledUpstreams, t),
-                                                                        formatInactiveTargets(status.inactiveTargets, t),
-                                                                    ].filter(Boolean).join('  ·  ')
-                                                                    : status.kind === 'blocked'
-                                                                        ? [
-                                                                            formatUpstreamList(status.enabledUpstreams, status.disabledUpstreams, t),
-                                                                            formatInactiveTargets(status.inactiveTargets, t),
-                                                                        ].filter(Boolean).join('  ·  ')
-                                                                        : status.kind === 'inactive'
-                                                                            ? formatInactiveTargets(status.inactiveTargets, t)
-                                                                        : ''
-                                                            return (
-                                                                <button
-                                                                    key={`${ruleName}-${index}`}
-                                                                    type="button"
-                                                                    onClick={() => handleSelectOverrideRule(index)}
-                                                                    className={cn(
-                                                                        "flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/40",
-                                                                        selected && "bg-primary/10"
-                                                                    )}
-                                                                >
-                                                                    <FileCode className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                                                                    <span className="min-w-0 flex-1 space-y-1">
-                                                                        <span className="block truncate text-sm font-semibold text-foreground">
-                                                                            {ruleName}
-                                                                        </span>
-                                                                        <span className="flex flex-wrap items-center gap-1.5">
-                                                                            <Badge variant="outline" className={statusBadgeClass}>
-                                                                                {statusText}
-                                                                            </Badge>
-                                                                            {detail && (
-                                                                                <span className="min-w-0 truncate text-xs text-muted-foreground">
-                                                                                    {detail}
-                                                                                </span>
-                                                                            )}
-                                                                        </span>
-                                                                    </span>
-                                                                </button>
-                                                            )
-                                                        })}
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            <div className="rounded-md border border-input bg-background">
-                                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-input px-3 py-2">
-                                                    <div className="min-w-0">
-                                                        <div className="truncate text-sm font-semibold text-foreground">
-                                                            {overrideRuleObjects[selectedOverrideRuleIndex]
-                                                                ? getOverrideRuleName(overrideRuleObjects[selectedOverrideRuleIndex], `rule-${selectedOverrideRuleIndex + 1}`)
-                                                                : t('settings.request_override_no_rule_selected')}
-                                                        </div>
-                                                        <div className="text-xs text-muted-foreground">
-                                                            {t('settings.request_override_single_rule_hint')}
-                                                        </div>
-                                                    </div>
-                                                    {overrideRuleObjects[selectedOverrideRuleIndex] && (
-                                                        <div className="flex shrink-0 items-center gap-1">
-                                                            <Button
-                                                                type="button"
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                onClick={() => handleDuplicateOverrideRule(selectedOverrideRuleIndex)}
-                                                                className="h-8 w-8"
-                                                                aria-label={t('settings.rule_duplicate')}
-                                                            >
-                                                                <Copy className="h-3.5 w-3.5" />
-                                                            </Button>
-                                                            <Button
-                                                                type="button"
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                onClick={() => handleDeleteOverrideRule(selectedOverrideRuleIndex)}
-                                                                className="h-8 w-8 text-muted-foreground hover:text-danger"
-                                                                aria-label={t('common.delete')}
-                                                            >
-                                                                <Trash2 className="h-3.5 w-3.5" />
-                                                            </Button>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                {overrideRuleObjects[selectedOverrideRuleIndex] ? (
-                                                    <div className="space-y-4 p-3">
-                                                        <div className="grid gap-4 rounded-md border border-input bg-muted/20 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                                                            <FieldBlock label={t('settings.request_override_rule_name')}>
-                                                                <Input
-                                                                    value={selectedOverrideRuleName}
-                                                                    onChange={event => handleOverrideRuleNameChange(event.target.value)}
-                                                                    onBlur={handleCommitOverrideRuleName}
-                                                                    onKeyDown={event => {
-                                                                        if (event.key === 'Enter') event.currentTarget.blur()
-                                                                    }}
-                                                                    className="h-9 rounded-md border-input bg-background font-mono text-sm"
-                                                                />
-                                                                {selectedOverrideRuleNameError && (
-                                                                    <div className="text-xs text-danger">
-                                                                        {selectedOverrideRuleNameError}
-                                                                    </div>
-                                                                )}
-                                                            </FieldBlock>
-                                                            <div className="flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3">
-                                                                <Switch
-                                                                    id="selected-override-rule-enabled"
-                                                                    checked={getOverrideRuleEnabled(overrideRuleObjects[selectedOverrideRuleIndex])}
-                                                                    onCheckedChange={checked => handleToggleOverrideRule(selectedOverrideRuleIndex, checked)}
-                                                                    className="shrink-0 data-[state=unchecked]:bg-border/60"
-                                                                />
-                                                                <Label htmlFor="selected-override-rule-enabled" className="cursor-pointer text-sm font-medium">
-                                                                    {t('settings.rule_enabled')}
-                                                                </Label>
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="grid gap-4 lg:grid-cols-2">
-                                                            <div className="space-y-3 rounded-md border border-input bg-muted/20 p-4">
-                                                                <div>
-                                                                    <Label className="text-xs font-semibold text-muted-foreground">
-                                                                        {t('settings.request_override_match')}
-                                                                    </Label>
-                                                                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                                                                        {t('settings.request_override_match_hint')}
-                                                                    </p>
-                                                                </div>
-                                                                <Textarea
-                                                                    value={selectedOverrideMatchText}
-                                                                    onChange={event => handleOverrideMatchTextChange(event.target.value)}
-                                                                    rows={9}
-                                                                    spellCheck={false}
-                                                                    className="min-h-[220px] w-full resize-y rounded-lg border-input bg-background font-mono text-xs leading-relaxed"
-                                                                />
-                                                                {selectedOverrideMatchError && (
-                                                                    <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-                                                                        {selectedOverrideMatchError}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-
-                                                            <div className="space-y-3 rounded-md border border-input bg-muted/20 p-4">
-                                                                <div>
-                                                                    <Label className="text-xs font-semibold text-muted-foreground">
-                                                                        {t('settings.request_override_body_patch')}
-                                                                    </Label>
-                                                                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                                                                        {t('settings.request_override_body_patch_hint')}
-                                                                    </p>
-                                                                </div>
-                                                                <Textarea
-                                                                    value={selectedOverridePatchText}
-                                                                    onChange={event => handleOverridePatchTextChange(event.target.value)}
-                                                                    rows={9}
-                                                                    spellCheck={false}
-                                                                    className="min-h-[220px] w-full resize-y rounded-lg border-input bg-background font-mono text-xs leading-relaxed"
-                                                                />
-                                                                {selectedOverridePatchError && (
-                                                                    <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-                                                                        {selectedOverridePatchError}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="space-y-3 rounded-md border border-input bg-muted/20 p-4">
-                                                            <div className="flex items-start justify-between gap-3">
-                                                                <div>
-                                                                    <Label className="text-xs font-semibold text-muted-foreground">
-                                                                        {t('settings.request_override_headers')}
-                                                                    </Label>
-                                                                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                                                                        {t('settings.request_override_headers_hint')}
-                                                                    </p>
-                                                                </div>
-                                                                <Button
-                                                                    type="button"
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    onClick={handleAddHeaderOp}
-                                                                    className="h-7 shrink-0 px-2 text-xs"
-                                                                >
-                                                                    <Plus className="mr-1 h-3.5 w-3.5" />
-                                                                    {t('common.add')}
-                                                                </Button>
-                                                            </div>
-                                                            {getSelectedRuleHeaders().length > 0 ? (
-                                                                <div className="space-y-2">
-                                                                    {getSelectedRuleHeaders().map((header, hIdx) => (
-                                                                        <div key={hIdx} className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[100px_minmax(140px,1fr)_minmax(180px,2fr)_32px]">
-                                                                            <Select
-                                                                                value={header.op}
-                                                                                onValueChange={value => handleUpdateHeaderOp(hIdx, 'op', value)}
-                                                                            >
-                                                                                <SelectTrigger className="h-9 w-full rounded-lg border-input bg-background text-xs">
-                                                                                    <SelectValue />
-                                                                                </SelectTrigger>
-                                                                                <SelectContent>
-                                                                                    <SelectItem value="set">{t('settings.header_op_set')}</SelectItem>
-                                                                                    <SelectItem value="remove">{t('settings.header_op_remove')}</SelectItem>
-                                                                                </SelectContent>
-                                                                            </Select>
-                                                                            <Input
-                                                                                value={header.name}
-                                                                                onChange={event => handleUpdateHeaderOp(hIdx, 'name', event.target.value)}
-                                                                                placeholder={t('settings.header_name_placeholder')}
-                                                                                className="h-9 min-w-0 rounded-lg border-input bg-background text-xs"
-                                                                            />
-                                                                            <HeaderValueInput
-                                                                                value={header.value ?? ''}
-                                                                                onChange={value => handleUpdateHeaderOp(hIdx, 'value', value)}
-                                                                                placeholder={header.op === 'remove' ? '—' : t('settings.header_value_placeholder')}
-                                                                                disabled={header.op === 'remove'}
-                                                                                sensitive={isSensitiveHeaderName(header.name, sensitiveHeaders)}
-                                                                                showLabel={t('settings.show_sensitive_value')}
-                                                                                hideLabel={t('settings.hide_sensitive_value')}
-                                                                            />
-                                                                            <Button
-                                                                                type="button"
-                                                                                variant="ghost"
-                                                                                size="icon"
-                                                                                onClick={() => handleRemoveHeaderOp(hIdx)}
-                                                                                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-danger"
-                                                                            >
-                                                                                <Trash2 className="h-3.5 w-3.5" />
-                                                                            </Button>
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            ) : (
-                                                                <div className="rounded-lg border border-dashed border-input px-3 py-4 text-center text-xs text-muted-foreground">
-                                                                    {t('settings.request_override_no_headers')}
-                                                                </div>
-                                                            )}
-                                                        </div>
-
-                                                        <details className="group rounded-md border border-input bg-muted/20">
-                                                            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-xs font-semibold text-muted-foreground marker:content-none hover:text-foreground [&::-webkit-details-marker]:hidden">
-                                                                <span>{t('settings.request_override_final_preview')}</span>
-                                                                <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
-                                                            </summary>
-                                                            <div className="space-y-2 border-t border-input p-3">
-                                                                <p className="text-xs leading-5 text-muted-foreground">
-                                                                    {t('settings.request_override_final_preview_hint')}
-                                                                </p>
-                                                                <Textarea
-                                                                    value={selectedOverrideRulePreview}
-                                                                    readOnly
-                                                                    rows={12}
-                                                                    spellCheck={false}
-                                                                    className="min-h-[260px] w-full resize-y rounded-lg border-input bg-background font-mono text-xs leading-relaxed"
-                                                                />
-                                                                <div className="flex justify-end">
-                                                                    <Button type="button" variant="outline" size="sm" onClick={() => handleCopy(selectedOverrideRulePreview)} className="h-8 text-xs">
-                                                                        <Copy className="mr-1.5 h-3.5 w-3.5" />
-                                                                        {t('common.copy')}
-                                                                    </Button>
-                                                                </div>
-                                                            </div>
-                                                        </details>
-
-                                                        <div className="rounded-md border border-input bg-muted/10">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setSelectedRuleAdvancedOpen(open => !open)}
-                                                                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
-                                                            >
-                                                                <span>{t('settings.request_override_raw_rule')}</span>
-                                                                <span>{selectedRuleAdvancedOpen ? t('common.hide') : t('common.show')}</span>
-                                                            </button>
-                                                            {selectedRuleAdvancedOpen && (
-                                                                <div className="space-y-2 border-t border-input p-3">
-                                                                    <Textarea
-                                                                        value={selectedOverrideRuleText}
-                                                                        onChange={event => handleOverrideRuleTextChange(event.target.value)}
-                                                                        rows={14}
-                                                                        spellCheck={false}
-                                                                        className="min-h-[320px] w-full resize-y rounded-lg border-input bg-background font-mono text-xs leading-relaxed"
-                                                                    />
-                                                                    {selectedOverrideRuleError && (
-                                                                <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-                                                                    {selectedOverrideRuleError}
-                                                                </div>
-                                                            )}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <div className="px-4 py-16 text-center text-xs text-muted-foreground">
-                                                        {t('settings.request_override_no_rule_selected')}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        <div className="mt-4 rounded-md border border-input bg-muted/20">
-                                            <button
-                                                type="button"
-                                                onClick={() => setAdvancedRulesOpen(open => !open)}
-                                                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
-                                            >
-                                                <span>{t('settings.request_override_advanced_json')}</span>
-                                                <span>{advancedRulesOpen ? t('common.hide') : t('common.show')}</span>
-                                            </button>
-                                            {advancedRulesOpen && (
-                                                <div className="border-t border-input p-3">
-                                                    <Textarea
-                                                        value={overrideRulesText}
-                                                        onChange={e => setOverrideRulesText(e.target.value)}
-                                                        rows={12}
-                                                        spellCheck={false}
-                                                        className="min-h-[260px] w-full rounded-lg border-input bg-background font-mono text-xs leading-relaxed transition-colors focus-visible:bg-background resize-y"
-                                                        placeholder={requestOverrideExample}
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-                                    </SettingSection>
-
-                                        </>
-                                    )}
-
-                                    {activeRuleTab === 'usage_extraction' && (
-                                        <>
-                                    <SettingSection title={t('settings.usage_extraction_config')}>
-                                        <ToggleSetting
-                                            label={t('settings.usage_extraction_enable')}
-                                            description={t('settings.usage_extraction_enable_hint')}
-                                            checked={usageExtractionEnabled}
-                                            onCheckedChange={setUsageExtractionEnabled}
-                                        />
-                                    </SettingSection>
-
-                                    <SettingSection
-                                        title={t('settings.usage_extraction_rules')}
-                                        description={t('settings.usage_extraction_rules_hint')}
-                                    >
-                                            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-input bg-background px-3 py-2">
-                                                <p className="text-xs leading-5 text-muted-foreground">
-                                                    {t('settings.usage_extraction_scope_hint')}
-                                                </p>
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={handleMergeDefaultUsageRules}
-                                                    disabled={Boolean(usageRulesParse.error)}
-                                                    className="h-8 text-xs font-semibold"
-                                                >
-                                                    <Plus className="mr-1.5 h-3.5 w-3.5" />
-                                                    {t('settings.usage_extraction_insert_example')}
-                                                </Button>
-                                            </div>
-
-                                            <div className="grid gap-4 xl:grid-cols-[minmax(280px,0.32fr)_minmax(0,1fr)]">
-                                                <div className="rounded-md border border-input bg-background">
-                                                    <div className="flex items-center justify-between gap-2 border-b border-input px-3 py-2">
-                                                        <span className="text-xs font-semibold text-muted-foreground">
-                                                            {t('settings.usage_extraction_rule_list')}
-                                                        </span>
-                                                        <Button
-                                                            type="button"
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            onClick={handleAddUsageRule}
-                                                            className="h-7 px-2 text-xs"
-                                                        >
-                                                            <Plus className="mr-1 h-3.5 w-3.5" />
-                                                            {t('common.add')}
-                                                        </Button>
-                                                    </div>
-                                                    {usageRulesParse.error ? (
-                                                        <div className="px-3 py-8 text-center text-xs text-danger">
-                                                            {usageRulesParse.error}
-                                                        </div>
-                                                    ) : usageRuleObjects.length === 0 ? (
-                                                        <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                                                            {t('settings.usage_extraction_no_rules')}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="max-h-[420px] divide-y divide-border/30 overflow-y-auto">
-                                                            {usageRuleObjects.map((rule, index) => {
-                                                                const ruleName = getOverrideRuleName(rule, `usage-rule-${index + 1}`)
-                                                                const boundCount = Object.values(usageBindings).filter(binding => getBindingRuleNames(binding).includes(ruleName)).length
-                                                                    + upstreams.reduce((count, upstream) => count + Object.values(upstream.targets || {}).filter(target => (
-                                                                        target.usage_extraction && getBindingRuleNames(target.usage_extraction).includes(ruleName)
-                                                                    )).length, 0)
-                                                                const selected = selectedUsageRuleIndex === index
-                                                                return (
-                                                                    <button
-                                                                        key={`${ruleName}-${index}`}
-                                                                        type="button"
-                                                                        onClick={() => handleSelectUsageRule(index)}
-                                                                        className={cn(
-                                                                            "flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/40",
-                                                                            selected && "bg-primary/10"
-                                                                        )}
-                                                                    >
-                                                                        <FileCode className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                                                                        <span className="min-w-0 flex-1 space-y-1">
-                                                                            <span className="block truncate text-sm font-semibold text-foreground">
-                                                                                {ruleName}
-                                                                            </span>
-                                                                            <span className="flex flex-wrap items-center gap-1.5">
-                                                                                <Badge
-                                                                                    variant="outline"
-                                                                                    className={cn(
-                                                                                        "h-5 rounded-md px-1.5 text-xs",
-                                                                                        getOverrideRuleEnabled(rule)
-                                                                                            ? "border-success/30 bg-success/10 text-success"
-                                                                                            : "border-input bg-muted/50 text-muted-foreground"
-                                                                                    )}
-                                                                                >
-                                                                                    {getOverrideRuleEnabled(rule) ? t('settings.rule_enabled') : t('settings.rule_disabled')}
-                                                                                </Badge>
-                                                                                {boundCount > 0 && (
-                                                                                    <Badge variant="outline" className="h-5 rounded-md border-input bg-muted/50 px-1.5 text-xs text-muted-foreground">
-                                                                                        {t('settings.rule_bound_count', { count: boundCount })}
-                                                                                    </Badge>
-                                                                                )}
-                                                                            </span>
-                                                                        </span>
-                                                                    </button>
-                                                                )
-                                                            })}
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                <div className="rounded-md border border-input bg-background">
-                                                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-input px-3 py-2">
-                                                        <div className="min-w-0">
-                                                            <div className="truncate text-sm font-semibold text-foreground">
-                                                                {usageRuleObjects[selectedUsageRuleIndex]
-                                                                    ? getOverrideRuleName(usageRuleObjects[selectedUsageRuleIndex], `usage-rule-${selectedUsageRuleIndex + 1}`)
-                                                                    : t('settings.usage_extraction_no_rule_selected')}
-                                                            </div>
-                                                            <div className="text-xs text-muted-foreground">
-                                                                {t('settings.usage_extraction_single_rule_hint')}
-                                                            </div>
-                                                        </div>
-                                                        {usageRuleObjects[selectedUsageRuleIndex] && (
-                                                            <div className="flex shrink-0 items-center gap-1">
-                                                                <Button
-                                                                    type="button"
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    onClick={() => handleToggleUsageRule(selectedUsageRuleIndex, !getOverrideRuleEnabled(usageRuleObjects[selectedUsageRuleIndex]))}
-                                                                    className="h-8 px-2 text-xs"
-                                                                >
-                                                                    {getOverrideRuleEnabled(usageRuleObjects[selectedUsageRuleIndex])
-                                                                        ? t('settings.rule_disable')
-                                                                        : t('settings.rule_enable')}
-                                                                </Button>
-                                                                <Button
-                                                                    type="button"
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    onClick={() => handleDuplicateUsageRule(selectedUsageRuleIndex)}
-                                                                    className="h-8 w-8"
-                                                                    aria-label={t('settings.rule_duplicate')}
-                                                                >
-                                                                    <Copy className="h-3.5 w-3.5" />
-                                                                </Button>
-                                                                <Button
-                                                                    type="button"
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    onClick={() => handleDeleteUsageRule(selectedUsageRuleIndex)}
-                                                                    className="h-8 w-8 text-muted-foreground hover:text-danger"
-                                                                    aria-label={t('common.delete')}
-                                                                >
-                                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                                </Button>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    {usageRuleObjects[selectedUsageRuleIndex] ? (
-                                                        <div className="space-y-2 p-3">
-                                                            <Textarea
-                                                                value={selectedUsageRuleText}
-                                                                onChange={e => handleUsageRuleTextChange(e.target.value)}
-                                                                rows={14}
-                                                                spellCheck={false}
-                                                                className="min-h-[320px] w-full resize-y rounded-lg border-input bg-muted/20 font-mono text-xs leading-relaxed transition-colors focus-visible:bg-background"
-                                                            />
-                                                            {selectedUsageRuleError && (
-                                                                <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-                                                                    {selectedUsageRuleError}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="px-4 py-16 text-center text-xs text-muted-foreground">
-                                                            {t('settings.usage_extraction_no_rule_selected')}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            <div className="mt-4 rounded-md border border-input bg-background">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setUsageAdvancedRulesOpen(open => !open)}
-                                                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
-                                                >
-                                                    <span>{t('settings.usage_extraction_advanced_json')}</span>
-                                                    <span>{usageAdvancedRulesOpen ? t('common.hide') : t('common.show')}</span>
-                                                </button>
-                                                {usageAdvancedRulesOpen && (
-                                                    <div className="border-t border-input p-3">
-                                                        <Textarea
-                                                            value={usageRulesText}
-                                                            onChange={e => setUsageRulesText(e.target.value)}
-                                                            rows={12}
-                                                            spellCheck={false}
-                                                            className="min-h-[260px] w-full rounded-lg border-input bg-background font-mono text-xs leading-relaxed transition-colors focus-visible:bg-background resize-y"
-                                                            placeholder={usageExtractionExample}
-                                                        />
-                                                    </div>
-                                                )}
-                                            </div>
-                                    </SettingSection>
-
-                                        </>
-                                    )}
-
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                    {(activeTab === 'routing' || (activeTab === 'logging' && loggingSection === 'general') || activeTab === 'overrides') && (
-                        <div className="sticky bottom-0 z-30 -mx-4 border-t border-input bg-background px-4 py-3 sm:-mx-10 sm:px-10">
-                            <div className="mx-auto flex max-w-7xl items-center justify-end gap-4">
-                                <Button
-                                    type="button"
-                                    onClick={handleSaveAll}
-                                    disabled={saving}
-                                    variant="default"
-                                    size="lg"
-                                    className="h-9 min-w-[160px] rounded-md font-medium transition-all whitespace-nowrap"
-                                >
-                                    <Save className="mr-2 h-4 w-4 shrink-0" />
-                                    {t('common.save')}
-                                </Button>
-                            </div>
-                        </div>
+                    {activeTab === 'overrides' && (
+                        <OverridesTab
+                            t={t}
+                            activeRuleTab={activeRuleTab}
+                            setActiveRuleTab={setActiveRuleTab}
+                            requestOverridesEnabled={requestOverridesEnabled}
+                            setRequestOverridesEnabled={setRequestOverridesEnabled}
+                            overrideMaxBodyKB={overrideMaxBodyKB}
+                            setOverrideMaxBodyKB={setOverrideMaxBodyKB}
+                            overrideRulesText={overrideRulesText}
+                            setOverrideRulesText={setOverrideRulesText}
+                            overrideRulesParse={overrideRulesParse}
+                            overrideRuleObjects={overrideRuleObjects}
+                            selectedOverrideRuleIndex={selectedOverrideRuleIndex}
+                            selectedOverrideRuleName={selectedOverrideRuleName}
+                            selectedOverrideRuleError={selectedOverrideRuleError}
+                            selectedOverrideRuleNameError={selectedOverrideRuleNameError}
+                            selectedOverrideMatchError={selectedOverrideMatchError}
+                            selectedOverridePatchError={selectedOverridePatchError}
+                            selectedOverrideRulePreview={selectedOverrideRulePreview}
+                            selectedOverrideMatchText={selectedOverrideMatchText}
+                            selectedOverridePatchText={selectedOverridePatchText}
+                            selectedOverrideRuleText={selectedOverrideRuleText}
+                            selectedRuleAdvancedOpen={selectedRuleAdvancedOpen}
+                            setSelectedRuleAdvancedOpen={setSelectedRuleAdvancedOpen}
+                            advancedRulesOpen={advancedRulesOpen}
+                            setAdvancedRulesOpen={setAdvancedRulesOpen}
+                            overrideBindings={overrideBindings}
+                            upstreams={upstreams}
+                            sensitiveHeaders={sensitiveHeaders}
+                            usageExtractionEnabled={usageExtractionEnabled}
+                            setUsageExtractionEnabled={setUsageExtractionEnabled}
+                            usageRulesText={usageRulesText}
+                            setUsageRulesText={setUsageRulesText}
+                            usageRulesParse={usageRulesParse}
+                            usageRuleObjects={usageRuleObjects}
+                            selectedUsageRuleIndex={selectedUsageRuleIndex}
+                            selectedUsageRuleText={selectedUsageRuleText}
+                            selectedUsageRuleError={selectedUsageRuleError}
+                            usageAdvancedRulesOpen={usageAdvancedRulesOpen}
+                            setUsageAdvancedRulesOpen={setUsageAdvancedRulesOpen}
+                            usageBindings={usageBindings}
+                            handleAddOverrideExample={handleAddOverrideExample}
+                            handleAddOverrideRule={handleAddOverrideRule}
+                            handleSelectOverrideRule={handleSelectOverrideRule}
+                            handleDuplicateOverrideRule={handleDuplicateOverrideRule}
+                            handleDeleteOverrideRule={handleDeleteOverrideRule}
+                            handleToggleOverrideRule={handleToggleOverrideRule}
+                            handleOverrideRuleNameChange={handleOverrideRuleNameChange}
+                            handleCommitOverrideRuleName={handleCommitOverrideRuleName}
+                            handleOverrideMatchTextChange={handleOverrideMatchTextChange}
+                            handleOverridePatchTextChange={handleOverridePatchTextChange}
+                            handleOverrideRuleTextChange={handleOverrideRuleTextChange}
+                            handleAddHeaderOp={handleAddHeaderOp}
+                            handleUpdateHeaderOp={handleUpdateHeaderOp}
+                            handleRemoveHeaderOp={handleRemoveHeaderOp}
+                            getSelectedRuleHeaders={getSelectedRuleHeaders}
+                            handleCopy={handleCopy}
+                            handleMergeDefaultUsageRules={handleMergeDefaultUsageRules}
+                            handleAddUsageRule={handleAddUsageRule}
+                            handleSelectUsageRule={handleSelectUsageRule}
+                            handleToggleUsageRule={handleToggleUsageRule}
+                            handleDuplicateUsageRule={handleDuplicateUsageRule}
+                            handleDeleteUsageRule={handleDeleteUsageRule}
+                            handleUsageRuleTextChange={handleUsageRuleTextChange}
+                        />
                     )}
                 </div>
+                {(activeTab === 'routing' || (activeTab === 'logging' && loggingSection === 'general') || activeTab === 'overrides') && (
+                    <div className="sticky bottom-0 z-30 -mx-4 border-t border-input bg-background px-4 py-3 sm:-mx-10 sm:px-10">
+                        <div className="mx-auto flex max-w-7xl items-center justify-end gap-4">
+                            <Button
+                                type="button"
+                                onClick={handleSaveAll}
+                                disabled={saving}
+                                variant="default"
+                                size="lg"
+                                className="h-9 min-w-[160px] rounded-md font-medium transition-all whitespace-nowrap"
+                            >
+                                <Save className="mr-2 h-4 w-4 shrink-0" />
+                                {t('common.save')}
+                            </Button>
+                        </div>
+                    </div>
+                )}
+            </div>
         </div>
     )
 }

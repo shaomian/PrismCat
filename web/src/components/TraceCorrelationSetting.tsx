@@ -37,6 +37,6 @@ export function TraceCorrelationSetting() {
       <Switch id="trace-correlation-switch" className="mt-1 shrink-0" checked={status?.enabled ?? false} disabled={!status || busy} onCheckedChange={next => void change(next)} />
     </div>
     {status && status.dropped_observations > 0 && <p className="mt-3 text-xs text-warning">{t('correlation.dropped', { count: status.dropped_observations })}</p>}
-    {error && <div className="mt-3 flex items-center gap-2 text-xs"><p role="alert" className="text-destructive">{error}</p><Button variant="link" size="xs" disabled={busy} onClick={() => void refresh()}>{t('common.refresh')}</Button></div>}
+    {error && <div className="mt-3 flex items-center gap-2 text-xs"><p role="alert" className="text-danger">{error}</p><Button variant="link" size="xs" disabled={busy} onClick={() => void refresh()}>{t('common.refresh')}</Button></div>}
   </section>
 }

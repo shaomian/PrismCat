@@ -3,12 +3,14 @@ import { CaptureRecordingDialog, TraceCapturePanel } from '@/components/TraceCap
 import { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Network, AlertCircle, Copy, Search, Star, Pin, X, ChevronLeft, ChevronRight, Plus, Loader2, GitMerge } from 'lucide-react'
+import { Network, AlertCircle, Copy, Search, Star, Pin, X, ChevronLeft, ChevronRight, Plus, GitMerge } from 'lucide-react'
 import { copyText } from '@/lib/clipboard'
 import { fetchTraces, fetchUpstreams, type TraceSummary, type Upstream } from '@/lib/api'
-import { cn, formatDate, formatLatency } from '@/lib/utils'
+import { cn, formatDate, formatLatency, PANEL_CLASS } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
+import { EmptyState } from '@/components/EmptyState'
 import { TraceGroupingDialog } from '@/components/TraceGroupingDialog'
 import { TraceTaskControls } from '@/components/TraceTaskMetadata'
 import { TraceIdReference } from '@/components/TraceIdReference'
@@ -195,12 +197,12 @@ export function Traces() {
         </TabsList>
         <TabsContent value="traces" className="space-y-4">
       {/* Filter bar */}
-      <div className="space-y-2 rounded-lg border border-border bg-card p-2 md:p-3">
+      <div className={cn(PANEL_CLASS, 'space-y-2 p-2 md:p-3')}>
         <div className="flex items-center gap-2">
           <div className="relative min-w-0 flex-1">
-            <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"
+              startIcon={<Search />}
               aria-label={t('trace_manager.search_hint')}
               placeholder={t('trace_manager.search_hint')}
               value={draftQuery}
@@ -208,7 +210,7 @@ export function Traces() {
               onCompositionStart={() => setComposing(true)}
               onCompositionEnd={event => { setComposing(false); setDraftQuery(event.currentTarget.value) }}
               onKeyDown={event => { if (event.key === 'Enter' && !composing && !event.nativeEvent.isComposing) { event.preventDefault(); handleSearch() } }}
-              className="h-9 pl-9 pr-8 text-sm [&::-webkit-search-cancel-button]:appearance-none"
+              className="h-9 pr-8 text-sm [&::-webkit-search-cancel-button]:appearance-none"
             />
             {draftQuery && <Button type="button" size="icon-xs" variant="ghost" className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={t('trace_filters.clear_search')} onClick={() => { exitSelection(); setDraftQuery(''); setFilter(previous => ({ ...previous, query: '', offset: 0 })); syncFilterURL('', filter.label) }}><X className="size-3.5" /></Button>}
           </div>
@@ -251,41 +253,40 @@ export function Traces() {
 
       {/* Traces table */}
       {loading ? (
-        <div role="status" className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground"><Loader2 className="size-5 animate-spin" />{t('common.loading')}</div>
+        <div role="status" className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground"><Spinner />{t('common.loading')}</div>
       ) : currentPage?.failed ? (
         <div role="alert" className="flex flex-col items-center justify-center gap-3 py-20 text-sm text-muted-foreground"><AlertCircle className="size-6" /><p>{t('traces.load_failed')}</p><Button variant="outline" size="sm" onClick={() => setReload(previous => previous + 1)}>{t('common.refresh')}</Button></div>
       ) : traces.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20">
-          <Network className="mb-4 h-10 w-10 text-muted-foreground/40" />
-          <p className="text-sm font-medium text-foreground">{t(narrowed ? 'trace_filters.no_matches' : filter.archived ? 'task_management.empty_archived' : 'traces.no_traces')}</p>
-          {narrowed && <p className="mt-1 text-xs text-muted-foreground">{t('trace_filters.no_matches_hint')}</p>}
-          {!narrowed && !filter.archived && <p className="mt-1 max-w-md text-center text-xs text-muted-foreground">
-            {t('traces.no_traces_hint')}
-          </p>}
-
-          {/* 空状态负责教会用户怎么触发这个功能 —— 不知道要发这个请求头的人
-              永远看不到这页有内容,会以为功能坏了 */}
-          {!narrowed && !filter.archived && <div className="mt-6 w-full max-w-xl">
-            <p className="mb-2 text-xs text-muted-foreground">{t('traces.no_traces_example')}</p>
-            <div className="flex items-start gap-2 rounded-lg border border-border bg-muted p-3">
-              <pre className="min-w-0 flex-1 overflow-x-auto font-mono text-xs leading-5 text-foreground">
-                {traceExample}
-              </pre>
-              <Button
-                size="icon"
-                variant="outline"
-                className="h-7 w-7 shrink-0 border border-input bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
-                aria-label={t('json_viewer.copy')}
-                onClick={async () => {
-                  if (await copyText(traceExample)) toast.success(t('log_detail.copy_success'))
-                  else toast.error(t('log_detail.copy_failed'))
-                }}
-              >
-                <Copy className="h-3.5 w-3.5" />
-              </Button>
+        <EmptyState
+          icon={Network}
+          title={t(narrowed ? 'trace_filters.no_matches' : filter.archived ? 'task_management.empty_archived' : 'traces.no_traces')}
+          description={narrowed ? t('trace_filters.no_matches_hint') : !filter.archived ? t('traces.no_traces_hint') : undefined}
+          className="py-20"
+          action={!narrowed && !filter.archived ? (
+            /* 空状态负责教会用户怎么触发这个功能 —— 不知道要发这个请求头的人
+               永远看不到这页有内容,会以为功能坏了 */
+            <div className="w-full max-w-xl">
+              <p className="mb-2 text-xs text-muted-foreground">{t('traces.no_traces_example')}</p>
+              <div className="flex items-start gap-2 rounded-lg border border-border bg-muted p-3">
+                <pre className="min-w-0 flex-1 overflow-x-auto text-left font-mono text-xs leading-5 text-foreground">
+                  {traceExample}
+                </pre>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-7 w-7 shrink-0 border border-input bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+                  aria-label={t('json_viewer.copy')}
+                  onClick={async () => {
+                    if (await copyText(traceExample)) toast.success(t('log_detail.copy_success'))
+                    else toast.error(t('log_detail.copy_failed'))
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             </div>
-          </div>}
-        </div>
+          ) : undefined}
+        />
       ) : (
         <>
           {/* Desktop table */}

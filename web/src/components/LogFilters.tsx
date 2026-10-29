@@ -143,9 +143,9 @@ export function LogFilters({
         <div className="flex flex-col gap-2 px-0 py-2 sm:px-4 sm:pr-6">
             {/* 工具条：搜索 + 时间 + 筛选开关 + 操作 */}
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <div className="relative flex-1 group">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/75 transition-colors group-focus-within:text-primary" />
+                <div className="flex-1">
                     <Input
+                        startIcon={<Search />}
                         placeholder={t('filters.search_path')}
                         value={draft.path || ''}
                         onChange={(e) => setDraft({ ...draft, path: e.target.value })}
@@ -153,7 +153,7 @@ export function LogFilters({
                             if (e.key === 'Enter') handleSearch()
                         }}
                         className={cn(
-                            "h-8 pl-9 border border-input bg-background transition-all hover:bg-accent focus-visible:bg-background",
+                            "h-8 border border-input bg-background transition-all hover:bg-accent focus-visible:bg-background",
                             isPathChanged && "border-primary/50 ring-1 ring-primary/20"
                         )}
                     />

@@ -12,8 +12,9 @@ import {
   type ExperimentRun, type RunResult,
 } from '@/lib/experiments'
 import { copyText } from '@/lib/clipboard'
-import { cn, formatLatency } from '@/lib/utils'
+import { cn, formatLatency, PANEL_CLASS } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/EmptyState'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -27,7 +28,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 const ReviewPanel = lazy(() => import('@/components/review/ReviewPanel'))
 const ReviewTemplates = lazy(() => import('@/components/review/ReviewTemplates'))
 
-const panel = 'space-y-3 rounded-lg border border-border bg-card p-4'
+const panel = cn(PANEL_CLASS, 'space-y-3 p-4')
 const selectClass = 'h-8 rounded-md border border-input bg-background px-2 text-sm'
 
 function runLabel(run: ExperimentRun) {
@@ -162,7 +163,7 @@ function ExperimentList() {
           </div>
         </article>
       })}</div>
-      {!items.length && <div className="space-y-3 rounded-lg border border-dashed border-border p-8 text-center"><p className="text-sm text-muted-foreground">{t(loading ? 'common.loading' : archived ? 'task_management.empty_archived' : 'review.empty_cards')}</p>{!loading && !archived && <Button variant="outline" onClick={() => setPicker(true)}>{t('review.create_first')}</Button>}</div>}
+      {!items.length && <EmptyState title={t(loading ? 'common.loading' : archived ? 'task_management.empty_archived' : 'review.empty_cards')} action={!loading && !archived ? <Button variant="outline" onClick={() => setPicker(true)}>{t('review.create_first')}</Button> : undefined} className="rounded-lg border border-dashed border-border p-8" />}
       <Pagination offset={offset} total={total} disabled={loading} onChange={value => { setOffset(value); exitSelection() }} />
     </> : <Suspense fallback={<p>{t('common.loading')}</p>}><ReviewTemplates manage disabled={busy} onChoose={template => void create(template)} /></Suspense>}
     <Dialog open={picker} onOpenChange={open => { if (!busy) setPicker(open) }}><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{t('review.choose_template')}</DialogTitle><DialogDescription>{t('review.choose_template_hint')}</DialogDescription></DialogHeader><Suspense fallback={<p>{t('common.loading')}</p>}><ReviewTemplates disabled={busy} onChoose={template => void create(template)} /></Suspense></DialogContent></Dialog>

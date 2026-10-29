@@ -69,7 +69,7 @@ export function CaptureRecordingDialog({ upstreams, status, onClose, onStarted }
         <div className="space-y-2">
           <Label htmlFor="capture-name">{t('correlation.name')}<span className="font-normal text-muted-foreground">{t('correlation.optional')}</span></Label>
           <Input id="capture-name" value={name} maxLength={200} disabled={busy} aria-invalid={nameInvalid} aria-describedby="capture-name-hint" placeholder={t('correlation.auto_name_placeholder')} onChange={event => setName(event.target.value)} />
-          <p id="capture-name-hint" className={cn('break-words text-xs', nameInvalid ? 'text-destructive' : 'text-muted-foreground')}>
+          <p id="capture-name-hint" className={cn('break-words text-xs', nameInvalid ? 'text-danger' : 'text-muted-foreground')}>
             {nameInvalid ? t('correlation.name_too_long') : t('correlation.auto_name_hint', { name: suggestedName })}
           </p>
         </div>
@@ -151,7 +151,7 @@ export function TraceCapturePanel({ revision, recording, onChanged }: { revision
       <label className="inline-flex items-center gap-1.5"><input type="checkbox" disabled={!manageableRuns.length} checked={manageableRuns.length > 0 && selectedItems.length === manageableRuns.length} onChange={event => setSelection({ key, active: true, ids: event.target.checked ? manageableRuns.map(run => run.id) : [] })} />{t('task_management.select_page')}</label>
       <TaskBatchActions kind="capture" items={selectedItems} archived={archived} disabled={!!busy} onChanged={managementChanged} />
     </div>}
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     {runs.length === 0 ? <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border py-16 text-center">
       {loading ? <Loader2 className="size-6 animate-spin text-muted-foreground" /> : <Radio className="size-7 text-muted-foreground/60" />}
       <p className="text-sm text-muted-foreground">{t(loading ? 'common.loading' : error ? 'correlation.failed' : 'correlation.no_captures')}</p>
@@ -251,7 +251,7 @@ function CaptureRunDetail({ run, onClose }: { run: CaptureRun; onClose: () => vo
           </div>
           <div>
             <div className="mb-2 flex items-center justify-between gap-2"><h3 className="text-sm font-medium">{t('correlation.request_records')}</h3><Button size="icon-sm" variant="ghost" aria-label={t('common.refresh')} disabled={loading} onClick={() => setReload(value => value + 1)}><RefreshCw className={cn('size-4', loading && 'animate-spin')} /></Button></div>
-            {error && <p role="alert" className="py-2 text-xs text-destructive">{error}</p>}
+            {error && <p role="alert" className="py-2 text-xs text-danger">{error}</p>}
             {logs.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">{t(loading ? 'common.loading' : error ? 'correlation.failed' : 'correlation.no_requests')}</p>}
             <div className="divide-y divide-border">
               {logs.map(entry => <div key={entry.id} className="task-item space-y-2 py-3 text-xs">

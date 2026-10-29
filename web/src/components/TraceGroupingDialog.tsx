@@ -51,10 +51,10 @@ export function TraceGroupingDialog({ action, traceIds, logIds, onClose, onAppli
         <p className="text-sm">{action === 'merge' ? t('trace_grouping.source_traces', { count: traceIds.length }) : t('trace_grouping.selected_requests', { count: logIds?.length ?? 0 })}</p>
         {action !== 'split' && <div className="space-y-1.5"><p className="text-xs font-medium">{t('trace_grouping.target')}</p><TraceSearch value={target} onInput={setTarget} onSelect={setTarget} disabled={busy} excludeId={traceIds.length === 1 ? traceIds[0] : undefined} allowExplicit={false} /></div>}
         {ready && !current && <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />{t('common.loading')}</p>}
-        {current?.error && <div role="alert" className="space-y-2 text-xs text-destructive"><p>{current.error}</p><Button size="xs" variant="outline" onClick={() => setRevision(value => value + 1)}>{t('common.refresh')}</Button></div>}
+        {current?.error && <div role="alert" className="space-y-2 text-xs text-danger"><p>{current.error}</p><Button size="xs" variant="outline" onClick={() => setRevision(value => value + 1)}>{t('common.refresh')}</Button></div>}
         {preview && <div className="space-y-2 rounded-md bg-muted px-3 py-3 text-sm">
           <p className="break-words">{t('trace_grouping.preview', { count: preview.log_count, target: action === 'split' ? t('trace_grouping.new_trace') : preview.target_name || preview.target_trace_id })}</p>
-          {preview.reason && <p role="alert" className="text-xs text-destructive">{t(`trace_grouping.reasons.${preview.reason}`)}</p>}
+          {preview.reason && <p role="alert" className="text-xs text-danger">{t(`trace_grouping.reasons.${preview.reason}`)}</p>}
         </div>}
         <p className="text-xs leading-relaxed text-muted-foreground">{t('trace_grouping.preserve_hint')}</p>
       </div>

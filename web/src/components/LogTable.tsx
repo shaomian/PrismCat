@@ -1,5 +1,5 @@
-import { cn, formatDate, formatLatency, METHOD_CLASS, getStatusColor } from '@/lib/utils'
-import { BookmarkCheck, ChevronRight, Clock3, Network, Server, SlidersHorizontal, Tag as TagIcon, Tags, Zap } from 'lucide-react'
+import { cn, formatDate, formatLatency, METHOD_CLASS, SELECTED_ROW_CLASS, getStatusColor } from '@/lib/utils'
+import { BookmarkCheck, ChevronRight, Clock3, Inbox, Network, Server, SlidersHorizontal, Tag as TagIcon, Tags, Zap } from 'lucide-react'
 import type { RequestLog } from '@/lib/api'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -12,6 +12,7 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { Skeleton } from "@/components/ui/skeleton"
+import { EmptyState } from '@/components/EmptyState'
 import {
     Tooltip,
     TooltipContent,
@@ -244,13 +245,12 @@ export function LogTable({ logs, loading, filtered, onSelect, selectedId }: LogT
 
     if (logs.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center py-20 sm:py-24 text-muted-foreground bg-card rounded-lg px-6">
-                <div className="text-5xl sm:text-6xl mb-6 grayscale opacity-50">📭</div>
-                <div className="text-lg sm:text-xl font-semibold tracking-tight text-foreground/70 text-center">{t(filtered ? 'log_table.no_matches' : 'log_table.no_logs')}</div>
-                <p className="text-sm mt-2 max-w-[280px] text-center leading-relaxed font-medium text-muted-foreground/80">
-                    {t(filtered ? 'log_table.adjust_filters' : 'log_table.send_requests_hint')}
-                </p>
-            </div>
+            <EmptyState
+                icon={Inbox}
+                title={t(filtered ? 'log_table.no_matches' : 'log_table.no_logs')}
+                description={t(filtered ? 'log_table.adjust_filters' : 'log_table.send_requests_hint')}
+                className="py-20 sm:py-24"
+            />
         )
     }
 
@@ -267,8 +267,8 @@ export function LogTable({ logs, loading, filtered, onSelect, selectedId }: LogT
                         detailLabel={t('common.details')}
                         savedLabel={t('log_annotation.saved')}
                         streamingLabel={t('log_detail.streaming')}
-                        modifiedLabel={t('log_detail.modified', 'MODIFIED')}
-                        tokensLabel={t('log_table.tokens', 'Tokens')}
+                        modifiedLabel={t('log_detail.modified')}
+                        tokensLabel={t('log_table.tokens')}
                         showUsage={showUsage}
                     />
                 ))}
@@ -285,7 +285,7 @@ export function LogTable({ logs, loading, filtered, onSelect, selectedId }: LogT
                             <TableHead className="w-[150px] font-medium text-xs">{t('log_table.upstream')}</TableHead>
                             <TableHead className="font-medium text-xs">{t('log_table.path')}</TableHead>
                             {showUsage && (
-                                <TableHead className="w-[90px] font-medium text-xs text-right">{t('log_table.tokens', 'Tokens')}</TableHead>
+                                <TableHead className="w-[90px] font-medium text-xs text-right">{t('log_table.tokens')}</TableHead>
                             )}
                             <TableHead className="w-[100px] font-medium text-xs text-right">{t('log_table.latency')}</TableHead>
                             <TableHead className="w-[180px] font-medium text-xs text-right">{t('log_table.time')}</TableHead>
@@ -300,10 +300,8 @@ export function LogTable({ logs, loading, filtered, onSelect, selectedId }: LogT
                                 aria-label={t('common.details')}
                                 className={cn(
                                     'group cursor-pointer border-b transition-colors',
-                                    // 详情抽屉盖住右侧,选中态只能靠左半边被看见:
-                                    // 除了底色,还要一条左侧竖条,否则 bg-accent(96% 灰)和未选中几乎没差别
                                     selectedId === log.id
-                                        ? 'bg-primary/[0.07] hover:bg-primary/[0.09] dark:bg-primary/[0.14] dark:hover:bg-primary/[0.16] [&>td:first-child]:shadow-[inset_2px_0_0_0_hsl(var(--primary))]'
+                                        ? SELECTED_ROW_CLASS
                                         : 'hover:bg-muted/60'
                                 )}
                             >
@@ -389,7 +387,7 @@ export function LogTable({ logs, loading, filtered, onSelect, selectedId }: LogT
                                                     <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                                                 </TooltipTrigger>
                                                 <TooltipContent side="right">
-                                                    <p className="text-xs font-medium">{t('log_detail.request_override', 'Request Override')}</p>
+                                                    <p className="text-xs font-medium">{t('log_detail.request_override')}</p>
                                                 </TooltipContent>
                                             </Tooltip>
                                         )}
@@ -411,7 +409,7 @@ export function LogTable({ logs, loading, filtered, onSelect, selectedId }: LogT
                                                     </span>
                                                 </TooltipTrigger>
                                                 <TooltipContent side="right">
-                                                    <p className="text-xs font-medium">{t('log_annotation.label', 'Label')}: {label}</p>
+                                                    <p className="text-xs font-medium">{t('log_annotation.label')}: {label}</p>
                                                 </TooltipContent>
                                             </Tooltip>
                                         ))}

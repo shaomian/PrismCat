@@ -120,6 +120,16 @@ type LogStats struct {
 	AvgLatency     float64          `json:"avg_latency_ms"`
 	ByUpstream     map[string]int64 `json:"by_upstream"`
 	ByStatusCode   map[int]int64    `json:"by_status_code"`
+	// 只读趋势序列,供仪表盘迷你趋势图使用;新增字段不影响旧客户端
+	TrendIntervalMs int64             `json:"trend_interval_ms,omitempty"`
+	Trend           []StatsTrendPoint `json:"trend,omitempty"`
+}
+
+// StatsTrendPoint 一个时间桶内的请求计数
+type StatsTrendPoint struct {
+	StartUnixMs int64 `json:"start_unix_ms"`
+	Total       int64 `json:"total"`
+	Errors      int64 `json:"errors"`
 }
 
 // TraceSummary trace 列表的聚合摘要

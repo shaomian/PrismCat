@@ -288,7 +288,7 @@ export function LoggingRules({ tab = 'models', embedded = false }: LoggingRulesP
                     <span className="text-xs font-medium text-muted-foreground">{t('logging_rules.tag')}</span>
                     <Input value={selectedTemplate.tag} onChange={event => updateSelectedTemplate({ tag: event.target.value })} className="font-mono" />
                   </label>
-                  <Button variant="ghost" size="icon" onClick={handleDeleteTemplate} aria-label={t('common.delete')} className="text-muted-foreground hover:text-destructive"><Trash2 /></Button>
+                  <Button variant="ghost" size="icon" onClick={handleDeleteTemplate} aria-label={t('common.delete')} className="text-muted-foreground hover:text-danger"><Trash2 /></Button>
                 </div>
 
                 {exactSystemDefault && (
@@ -367,7 +367,7 @@ export function LoggingRules({ tab = 'models', embedded = false }: LoggingRulesP
                 <Button size="icon-sm" variant="outline" onClick={applyIgnoredSearch} aria-label={t('common.search')}><Search /></Button>
                 <Button size="icon-sm" variant="outline" onClick={resetIgnoredSearch} aria-label={t('common.reset')}><X /></Button>
                 <Button size="icon-sm" variant="outline" onClick={() => void loadIgnored()} aria-label={t('common.refresh')}><RefreshCw /></Button>
-                <Button size="icon-sm" variant="outline" onClick={() => void handleDeleteIgnored(ignoredFilter.upstream || '')} aria-label={t('logging_rules.clear')} className="text-muted-foreground hover:text-destructive"><Trash2 /></Button>
+                <Button size="icon-sm" variant="outline" onClick={() => void handleDeleteIgnored(ignoredFilter.upstream || '')} aria-label={t('logging_rules.clear')} className="text-muted-foreground hover:text-danger"><Trash2 /></Button>
               </div>
             </div>
             {selectedIgnored.size > 0 && templates.length > 0 && (
@@ -409,7 +409,7 @@ export function LoggingRules({ tab = 'models', embedded = false }: LoggingRulesP
                   <div className="col-start-3 row-start-3 flex justify-end gap-1 xl:col-auto xl:row-auto">
                     <Button size="icon-xs" variant="ghost" onClick={async () => { if (await copyText(record.path)) toast.success(t('log_detail.copy_success')) }} aria-label={t('json_viewer.copy')}><Copy /></Button>
                     <Button size="icon-xs" variant="ghost" onClick={() => void handleAddToAllowlist(record)} aria-label={canAllow ? t('logging_rules.add_to_allowlist') : t('logging_rules.edit_upstream_rules')}><Plus /></Button>
-                    <Button size="icon-xs" variant="ghost" onClick={() => void handleDeleteIgnored(record.upstream, record.path)} aria-label={t('common.delete')} className="hover:text-destructive"><Trash2 /></Button>
+                    <Button size="icon-xs" variant="ghost" onClick={() => void handleDeleteIgnored(record.upstream, record.path)} aria-label={t('common.delete')} className="hover:text-danger"><Trash2 /></Button>
                   </div>
                 </div>
               )

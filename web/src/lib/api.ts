@@ -95,6 +95,15 @@ export interface LogStats {
     avg_latency_ms: number
     by_upstream: Record<string, number>
     by_status_code: Record<string, number>
+    /** 统计窗口按固定桶数切分的时间序列,供迷你趋势图使用 */
+    trend_interval_ms?: number
+    trend?: StatsTrendPoint[]
+}
+
+export interface StatsTrendPoint {
+    start_unix_ms: number
+    total: number
+    errors: number
 }
 
 export interface Upstream {

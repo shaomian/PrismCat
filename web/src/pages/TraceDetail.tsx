@@ -8,6 +8,8 @@ import {
 import { fetchTraceDetail, fetchTraceTimeline, fetchTraceTimelineEntry, fetchTraceDiagram, fetchLog, traceExportUrl, type TraceDetail as TraceDetailType, type TraceTimeline, type RequestLog, type TraceMetadata, type TraceDiagram as TraceDiagramData } from '@/lib/api'
 import { cn, formatLatency, formatDate, getStatusColor, METHOD_CLASS } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
+import { PageLoading } from '@/components/PageLoading'
 import { TraceTaskManager } from '@/components/TraceTaskMetadata'
 import { TraceGroupingDialog } from '@/components/TraceGroupingDialog'
 import type { GroupingAction } from '@/lib/trace-grouping'
@@ -189,12 +191,7 @@ export function TraceDetail() {
   }
 
   if (loading) {
-    return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        <div className="text-sm font-medium text-muted-foreground">{t('common.loading')}</div>
-      </div>
-    )
+    return <PageLoading />
   }
 
   if (!detail || !summary) {
@@ -304,7 +301,7 @@ export function TraceDetail() {
         <TabsContent value="conversation" className="pt-4">
           {!timeline ? (
             <div className="flex min-h-[20vh] items-center justify-center">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <Spinner />
             </div>
           ) : (
             <TraceTimelineView
@@ -327,7 +324,7 @@ export function TraceDetail() {
           {diagramView === 'dependencies' && <p className="mb-3 text-xs text-muted-foreground">{t('correlation.diagram_hint')}</p>}
           {!diagram ? (
             <div className="flex min-h-[20vh] items-center justify-center">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <Spinner />
             </div>
           ) : (
             <TraceDiagram code={diagram.mermaid} labels={diagram.labels} onOpenLog={handleOpenLog} />

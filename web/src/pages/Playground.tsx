@@ -14,15 +14,8 @@ import { Separator } from '@/components/ui/separator'
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const
 
-const METHOD_COLORS: Record<string, string> = {
-    GET: 'bg-success/10 text-success border-success/30',
-    POST: 'bg-info/10 text-info border-info/30',
-    PUT: 'bg-warning/10 text-warning border-warning/30',
-    PATCH: 'bg-warning/10 text-warning border-warning/30',
-    DELETE: 'bg-danger/10 text-danger border-danger/30',
-    HEAD: 'bg-primary/10 text-primary border-primary/30',
-    OPTIONS: 'bg-muted text-muted-foreground border-border',
-}
+// HTTP 方法不携带成败语义,方法选择器统一中性,不按方法分色(与 lib/utils.ts METHOD_CLASS 同一规则)
+const METHOD_BUTTON_CLASS = 'bg-muted text-muted-foreground border-border'
 
 interface HeaderEntry {
     key: string
@@ -72,8 +65,8 @@ function ViewToggle({
     return (
         <div className="flex items-center gap-1 rounded-md border border-border bg-background p-1">
             {([
-                { value: 'pretty', label: t('log_detail.view_pretty', 'Pretty') },
-                { value: 'raw', label: t('log_detail.view_raw', 'Raw') },
+                { value: 'pretty', label: t('log_detail.view_pretty') },
+                { value: 'raw', label: t('log_detail.view_raw') },
             ] as const).map((option) => (
                 <Button
                     key={option.value}
@@ -310,7 +303,7 @@ export function Playground() {
                         onClick={() => setMethodOpen(!methodOpen)}
                         className={cn(
                             'flex items-center gap-1 px-3 py-2.5 rounded-md border text-xs font-semibold transition-all min-w-[80px] justify-between',
-                            METHOD_COLORS[method] || METHOD_COLORS['GET']
+                            METHOD_BUTTON_CLASS
                         )}
                     >
                         {method}
@@ -339,8 +332,8 @@ export function Playground() {
 
                 <div className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-background p-1">
                     {([
-                        { value: 'upstream', label: t('playground.target_upstream', 'Upstream') },
-                        { value: 'url', label: t('playground.target_url', 'URL') },
+                        { value: 'upstream', label: t('playground.target_upstream') },
+                        { value: 'url', label: t('playground.target_url') },
                     ] as const).map((option) => (
                         <button
                             key={option.value}
@@ -413,7 +406,7 @@ export function Playground() {
                         type="url"
                         value={targetUrl}
                         onChange={(e) => setTargetUrl(e.target.value)}
-                        placeholder={t('playground.custom_url_placeholder', 'https://api.openai.com/v1/chat/completions')}
+                        placeholder={t('playground.custom_url_placeholder')}
                         className={cn('flex-1 min-w-[260px] px-3 py-2.5 rounded-md bg-background border border-input text-sm font-mono placeholder:text-muted-foreground/40 transition-all', FOCUS_RING)}
                     />
                 )}
@@ -489,8 +482,8 @@ export function Playground() {
                                         )}
                                     >
                                         {requestBodyJsonError
-                                            ? t('playground.json_invalid', 'Invalid JSON')
-                                            : t('playground.json_valid', 'JSON')}
+                                            ? t('playground.json_invalid')
+                                            : t('playground.json_valid')}
                                     </Badge>
                                 )}
                                 <Button
@@ -502,13 +495,13 @@ export function Playground() {
                                     className="h-7 gap-1.5 px-2.5 text-xs font-medium"
                                 >
                                     <Braces className="h-3.5 w-3.5" />
-                                    {t('playground.format_json', 'Format')}
+                                    {t('playground.format_json')}
                                 </Button>
                             </div>
                             <div className="flex items-center gap-1 rounded-md border border-border bg-background p-1">
                                 {([
-                                    { value: 'raw', label: t('log_detail.view_raw', 'Raw') },
-                                    { value: 'pretty', label: t('log_detail.view_pretty', 'Pretty') },
+                                    { value: 'raw', label: t('log_detail.view_raw') },
+                                    { value: 'pretty', label: t('log_detail.view_pretty') },
                                 ] as const).map((option) => (
                                     <Button
                                         key={option.value}
@@ -543,7 +536,7 @@ export function Playground() {
                                     <JsonViewer data={parsedRequestBody ?? body} />
                                 ) : (
                                     <div className="flex h-full items-center justify-center text-xs italic text-muted-foreground/40">
-                                        {t('playground.empty_state', 'Configure request parameters and send')}
+                                        {t('playground.empty_state')}
                                     </div>
                                 )}
                             </div>

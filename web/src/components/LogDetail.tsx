@@ -1,18 +1,18 @@
 import { TraceAssociationEditor } from '@/components/TraceAssociationEditor'
 import { toast } from 'sonner'
-import { cn, formatDate, formatLatency, formatSize, getStatusColor, METHOD_CLASS, FOCUS_RING } from '@/lib/utils'
+import { cn, formatDate, formatLatency, formatSize, getStatusColor, METHOD_CLASS, FOCUS_RING, PANEL_CLASS } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
-import { Copy, Check, Zap, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, FileCode, ListTree, Layers, RotateCcw, Maximize2, Minimize2, ExternalLink, Terminal, Bookmark, BookmarkCheck, Tags, Search, X } from 'lucide-react'
+import { Check, Zap, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FileCode, ListTree, Layers, RotateCcw, Maximize2, Minimize2, ExternalLink, Terminal, Bookmark, BookmarkCheck, Tags } from 'lucide-react'
 import { fetchBlob, fetchLogBody, updateLogAnnotation } from '@/lib/api'
-import type { LiveLogEvent, RequestLog } from '@/lib/api'
-import { startTransition, createContext, useCallback, useContext, useDeferredValue, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import type { RequestLog } from '@/lib/api'
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { JsonViewer, type JsonExpandMode, HighlightText } from './JsonViewer'
+import { JsonViewer, type JsonExpandMode } from './JsonViewer'
 import { JsonDiffViewer } from './JsonDiffViewer'
 import { BlobPanel } from './BlobPanel'
 import { mergeStreamBody } from '@/lib/streamMerge'
-import { collectTextSearchMatches, createJsonSearchPlan, MAX_RENDERED_SEARCH_MATCHES, type JsonSearchPlan } from '@/lib/jsonSearch'
+import { createJsonSearchPlan, type JsonSearchPlan } from '@/lib/jsonSearch'
 import { logRequestDiffPath } from '@/lib/routes'
 import { buildCurlCommand } from '@/lib/curlExport'
 import {
@@ -24,364 +24,27 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-
-interface LogDetailProps {
-    log: RequestLog | null
-    loading?: boolean
-    onClose: () => void
-    onLogChange?: (log: RequestLog) => void
-    onNavigateLog?: (direction: LogNavigationDirection) => void
-    canNavigatePreviousLog?: boolean
-    canNavigateNextLog?: boolean
-}
-
-type LogNavigationDirection = 'previous' | 'next'
-type BodyViewMode = 'pretty' | 'raw'
-type RequestViewMode = BodyViewMode | 'diff'
-type ResponseViewMode = BodyViewMode | 'merged'
-type PanelWidthMode = 'wide' | 'full'
-
-const logDetailWidthStorageKey = 'prismcat.logDetail.width'
-const logDetailExpandedStorageKey = 'prismcat.logDetail.expanded'
-const autoLoadFullBodyLimit = 10 * 1024 * 1024
-
-const defaultExpandedSections = {
-    requestHeaders: false,
-    requestBody: false,
-    responseHeaders: false,
-    responseBody: false,
-}
-
-type LogDetailSection = keyof typeof defaultExpandedSections
-
-// UI 辅助上下文：CopyButton/SectionHeader 等小组件提升到模块作用域后
-//（避免流式刷新时每次 render 都产生新组件类型导致整棵子树重挂载），
-// 通过 context 拿到与本次渲染相关的回调/状态。
-interface LogDetailUIHelpers {
-    copiedField: string | null
-    copyToClipboard: (text: string, field: string) => void
-    expandedSections: Record<LogDetailSection, boolean>
-    toggleSection: (section: LogDetailSection) => void
-}
-
-const LogDetailUIContext = createContext<LogDetailUIHelpers | null>(null)
-
-function useLogDetailUI(): LogDetailUIHelpers {
-    const helpers = useContext(LogDetailUIContext)
-    if (!helpers) throw new Error('LogDetailUIContext missing')
-    return helpers
-}
-
-function CopyButton({ text, field, className }: { text: string; field: string; className?: string }) {
-    const { t } = useTranslation()
-    const { copiedField, copyToClipboard } = useLogDetailUI()
-    const label = copiedField === field ? t('common.copied') : t('common.copy')
-    // 不挂 tooltip:复制图标本身就是共识,气泡只是把"复制"两个字弹在
-    // 你正要点的位置上挡手。aria-label 留着给读屏和键盘用户
-    return (
-        <Button
-            variant="ghost"
-            size="icon"
-            onClick={(e) => {
-                e.stopPropagation()
-                copyToClipboard(text, field)
-            }}
-            className={cn("h-7 w-7 rounded-md hover:bg-primary/10 hover:text-primary transition-all", className)}
-            aria-label={label}
-        >
-            {copiedField === field ? (
-                <Check className="h-3.5 w-3.5 text-success" />
-            ) : (
-                <Copy className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
-        </Button>
-    )
-}
-
-function SearchToggle({ active, onClick }: { active: boolean; onClick: () => void }) {
-    const { t } = useTranslation()
-    return (
-        <Tooltip>
-            <TooltipTrigger asChild>
-                <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={onClick}
-                    className={cn(
-                        "h-7 w-7 rounded-md transition-all",
-                        active ? "bg-primary/10 text-primary hover:bg-primary/15" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                    )}
-                    aria-label={t('body_search.search', 'Search')}
-                >
-                    <Search className="h-3.5 w-3.5" />
-                </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={4}>{t('body_search.search', 'Search')}</TooltipContent>
-        </Tooltip>
-    )
-}
-
-function ViewToggle({
-    value,
-    options,
-    onChange,
-}: {
-    value: string
-    options: Array<{ value: string; label: string }>
-    onChange: (value: string) => void
-}) {
-    return (
-        <div className="flex items-center gap-1 rounded-lg bg-muted p-1">
-            {options.map((option) => (
-                <Button
-                    key={option.value}
-                    type="button"
-                    variant={value === option.value ? 'secondary' : 'ghost'}
-                    size="sm"
-                    onClick={() => onChange(option.value)}
-                    className={cn(
-                        "h-6 rounded-md px-2 text-xs font-medium transition-all",
-                        value === option.value
-                            ? "border border-border bg-background text-foreground hover:bg-background"
-                            : "text-muted-foreground hover:bg-background/70 hover:text-foreground"
-                    )}
-                >
-                    {option.label}
-                </Button>
-            ))}
-        </div>
-    )
-}
-
-function ExpandToggle({
-    mode,
-    onChange,
-}: {
-    mode: JsonExpandMode
-    onChange: (mode: JsonExpandMode) => void
-}) {
-    const { t } = useTranslation()
-    const willExpand = mode !== 'all'
-    const label = willExpand ? t('log_detail.expand_all') : t('log_detail.collapse_all')
-    return (
-        <Tooltip>
-            <TooltipTrigger asChild>
-                <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => onChange(willExpand ? 'all' : 'none')}
-                    className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                    aria-label={label}
-                >
-                    {willExpand ? <ChevronsUpDown className="h-3.5 w-3.5" /> : <ChevronsDownUp className="h-3.5 w-3.5" />}
-                </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={4}>{label}</TooltipContent>
-        </Tooltip>
-    )
-}
-
-function SectionHeader({
-    title,
-    section,
-    icon: Icon,
-    extra,
-}: {
-    title: string
-    section: LogDetailSection
-    icon: ComponentType<{ className?: string }>
-    extra?: ReactNode
-}) {
-    const { expandedSections, toggleSection } = useLogDetailUI()
-    return (
-        <div className="flex items-center justify-between gap-3 py-2.5">
-            <button
-                type="button"
-                onClick={() => toggleSection(section)}
-                className="group -mx-1 flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-0.5 text-left transition-colors"
-            >
-                <div className={cn(
-                    "rounded-md p-1.5 transition-colors",
-                    expandedSections[section]
-                        ? "bg-primary/10 text-primary ring-1 ring-primary/20"
-                        : "bg-muted text-muted-foreground group-hover:bg-secondary"
-                )}>
-                    <Icon className="h-3.5 w-3.5" />
-                </div>
-                <span className="text-xs font-medium text-foreground group-hover:text-primary transition-colors">
-                    {title}
-                </span>
-                {expandedSections[section] ? (
-                    <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
-                ) : (
-                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                )}
-            </button>
-            {extra ? <div className="shrink-0">{extra}</div> : null}
-        </div>
-    )
-}
-
-function getInitialPanelWidthMode(): PanelWidthMode {
-    if (typeof window === 'undefined') return 'wide'
-
-    const stored = window.localStorage.getItem(logDetailWidthStorageKey)
-    if (stored === 'full') {
-        return stored
-    }
-
-    return 'wide'
-}
-
-function getInitialExpandedSections(): typeof defaultExpandedSections {
-    if (typeof window === 'undefined') return defaultExpandedSections
-    try {
-        const raw = window.localStorage.getItem(logDetailExpandedStorageKey)
-        if (!raw) return defaultExpandedSections
-        const parsed = JSON.parse(raw) as Partial<typeof defaultExpandedSections>
-        return {
-            requestHeaders: typeof parsed?.requestHeaders === 'boolean' ? parsed.requestHeaders : defaultExpandedSections.requestHeaders,
-            requestBody: typeof parsed?.requestBody === 'boolean' ? parsed.requestBody : defaultExpandedSections.requestBody,
-            responseHeaders: typeof parsed?.responseHeaders === 'boolean' ? parsed.responseHeaders : defaultExpandedSections.responseHeaders,
-            responseBody: typeof parsed?.responseBody === 'boolean' ? parsed.responseBody : defaultExpandedSections.responseBody,
-        }
-    } catch {
-        return defaultExpandedSections
-    }
-}
-
-interface BodySearchStats {
-    matchCount: number
-    truncated: boolean
-}
-
-function createTextSearchStats(text: string, term: string): BodySearchStats {
-    const result = collectTextSearchMatches(text, term, MAX_RENDERED_SEARCH_MATCHES)
-    return { matchCount: result.ranges.length, truncated: result.truncated }
-}
-
-function navigateSearchMatch(container: HTMLElement | null, direction: 'prev' | 'next') {
-    if (!container) return;
-    const matches = Array.from(container.querySelectorAll<HTMLElement>('[data-search-match]'));
-    if (!matches.length) return;
-    const prev = container.querySelector<HTMLElement>('[data-search-match-active]');
-    if (prev) prev.removeAttribute('data-search-match-active');
-    const currentIdx = prev ? matches.indexOf(prev) : -1;
-    let nextIdx: number;
-    if (direction === 'next') {
-        nextIdx = currentIdx + 1 >= matches.length ? 0 : currentIdx + 1;
-    } else {
-        nextIdx = currentIdx - 1 < 0 ? matches.length - 1 : currentIdx - 1;
-    }
-    matches[nextIdx].setAttribute('data-search-match-active', '');
-    matches[nextIdx].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-function clearActiveSearchMatch(container: HTMLElement | null) {
-    container?.querySelector<HTMLElement>('[data-search-match-active]')?.removeAttribute('data-search-match-active');
-}
-
-function RawBodyViewer({ text, searchTerm, maxMatches }: { text: string; searchTerm?: string; maxMatches: number }) {
-    return (
-        <pre className="whitespace-pre-wrap break-all text-xs font-mono leading-relaxed text-foreground select-text">
-            {searchTerm ? <HighlightText text={text} searchTerm={searchTerm} maxMatches={maxMatches} /> : text}
-        </pre>
-    );
-}
-
-/** 概览卡的标签列 */
-function OverviewLabel({ children }: { children: ReactNode }) {
-    return <dt className="whitespace-nowrap font-medium text-muted-foreground">{children}</dt>
-}
-
-function UsageMetric({ label, value }: { label: string; value?: number }) {
-    return (
-        <span className="whitespace-nowrap">
-            <span className="text-muted-foreground">{label}</span>{' '}
-            <span className="font-mono font-medium text-foreground">
-                {typeof value === 'number' ? value.toLocaleString() : '-'}
-            </span>
-        </span>
-    )
-}
-
-function BodySearchBar({
-    searchTerm,
-    onSearchTermChange,
-    matchCount,
-    truncated,
-    pending,
-    onNavigate,
-    onClose,
-}: {
-    searchTerm: string;
-    onSearchTermChange: (term: string) => void;
-    matchCount: number;
-    truncated: boolean;
-    pending: boolean;
-    onNavigate: (dir: 'prev' | 'next') => void;
-    onClose: () => void;
-}) {
-    const { t } = useTranslation();
-    const matchLabel = pending
-        ? '…'
-        : truncated
-            ? t('body_search.match_count_truncated', { count: matchCount, defaultValue: '{{count}}+ matches' })
-            : matchCount > 0
-                ? t('body_search.match_count', { count: matchCount })
-                : t('body_search.no_matches', 'No matches')
-    return (
-        <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 bg-muted/20">
-            <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <input
-                autoFocus
-                value={searchTerm}
-                onChange={(e) => onSearchTermChange(e.target.value)}
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault()
-                        if (!pending && matchCount > 0) onNavigate(e.shiftKey ? 'prev' : 'next')
-                    }
-                    if (e.key === 'Escape') { e.preventDefault(); onClose(); }
-                }}
-                placeholder={t('body_search.placeholder', 'Search in body...')}
-                className="flex-1 min-w-0 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
-            />
-            {searchTerm && (
-                <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">
-                    {matchLabel}
-                </span>
-            )}
-            <div className="flex items-center">
-                <button
-                    type="button"
-                    onClick={() => onNavigate('prev')}
-                    disabled={!searchTerm || pending || matchCount === 0}
-                    className="h-6 w-6 inline-flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
-                >
-                    <ChevronUp className="h-3 w-3" />
-                </button>
-                <button
-                    type="button"
-                    onClick={() => onNavigate('next')}
-                    disabled={!searchTerm || pending || matchCount === 0}
-                    className="h-6 w-6 inline-flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
-                >
-                    <ChevronDown className="h-3 w-3" />
-                </button>
-            </div>
-            <button
-                type="button"
-                onClick={onClose}
-                className="h-6 w-6 inline-flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-                <X className="h-3 w-3" />
-            </button>
-        </div>
-    );
-}
+import { LogDetailUIContext, type LogDetailUIHelpers } from './logdetail/context'
+import { BodySearchBar, CopyButton, ExpandToggle, OverviewLabel, RawBodyViewer, SearchToggle, SectionHeader, UsageMetric, ViewToggle } from './logdetail/controls'
+import { clearActiveSearchMatch, createTextSearchStats, navigateSearchMatch, type BodySearchStats } from './logdetail/bodySearch'
+import {
+    firstHeaderValue,
+    getInitialExpandedSections,
+    getInitialPanelWidthMode,
+    isBinaryPlaceholder,
+    logDetailExpandedStorageKey,
+    logDetailWidthStorageKey,
+    normalizedAnnotation,
+    parseLabelDraft,
+    parseLiveEvent,
+    shouldAutoLoadBody,
+    shouldSubscribeLive,
+    textByteSize,
+    type LogDetailProps,
+    type PanelWidthMode,
+    type RequestViewMode,
+    type ResponseViewMode,
+} from './logdetail/helpers'
 
 export function LogDetail({
     log,
@@ -547,7 +210,7 @@ export function LogDetail({
         draftLabels.join('\n') !== (annotation.labels ?? []).join('\n')
     const annotationSummary = annotation.note || annotation.labels.length
         ? [annotation.note, ...annotation.labels.map(label => `#${label}`)].filter(Boolean).join(' · ')
-        : t('log_annotation.empty_summary', 'No note or labels')
+        : t('log_annotation.empty_summary')
     const hasUsage = displayLog?.usage_input_tokens !== undefined ||
         displayLog?.usage_output_tokens !== undefined ||
         displayLog?.usage_total_tokens !== undefined
@@ -747,7 +410,7 @@ export function LogDetail({
     // 原来外面还套一层 section 卡(border + bg-card + p-5),导致
     // bg-muted/30 → bg-card → bg-muted/50 三层色差极小的盒子套盒子
     const groupLabelClassName = "px-1 text-xs font-medium text-muted-foreground"
-    const blockCardClassName = "rounded-lg border border-border bg-card px-3"
+    const blockCardClassName = cn(PANEL_CLASS, "px-3")
     // 复制按钮跟在长度不一的值后面,多行图标 x 位置对不齐会形成毛边。
     // 桌面端平时隐藏(位置仍占住,不产生跳动),悬停该行或键盘聚焦时才出现;
     // 触屏没有 hover,小屏就一直显示
@@ -790,21 +453,21 @@ export function LogDetail({
                             {displayLog.status_code || '---'}
                         </SheetTitle>
                         {displayLog.streaming && (
-                            <Badge variant="secondary" className="border-none bg-primary/10 text-primary font-medium text-xs">
+                            <Badge variant="soft" className="font-medium">
                                 <Zap className="mr-1 h-3 w-3 fill-current" />
-                                {t('log_detail.streaming', 'STREAMING')}
+                                {t('log_detail.streaming')}
                             </Badge>
                         )}
                         {displayLog.error && (
-                            <Badge variant="destructive" className="border-none bg-danger/10 text-danger font-medium text-xs">
+                            <Badge variant="danger" className="font-medium">
                                 <AlertTriangle className="mr-1 h-3 w-3" />
-                                {t('common.error', 'ERROR')}
+                                {t('common.error')}
                             </Badge>
                         )}
                         {/* 与日志表保持一致:"已修改"是属性不是警告 */}
                         {displayLog.request_override_applied && (
                             <Badge variant="outline" className="border-border bg-muted text-muted-foreground font-medium text-xs">
-                                {t('log_detail.modified', 'MODIFIED')}
+                                {t('log_detail.modified')}
                             </Badge>
                         )}
                         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-muted-foreground">
@@ -840,13 +503,13 @@ export function LogDetail({
                                                     disabled={!canNavigatePreviousLog}
                                                     onClick={() => onNavigateLog('previous')}
                                                     className="h-7 w-7 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary disabled:opacity-35"
-                                                    aria-label={t('log_detail.previous_log', 'Previous log')}
+                                                    aria-label={t('log_detail.previous_log')}
                                                 >
                                                     <ChevronLeft className="h-3.5 w-3.5" />
                                                 </Button>
                                             </TooltipTrigger>
                                             <TooltipContent side="top" sideOffset={4}>
-                                                {t('log_detail.previous_log', 'Previous log')}
+                                                {t('log_detail.previous_log')}
                                             </TooltipContent>
                                         </Tooltip>
                                         <Tooltip>
@@ -858,13 +521,13 @@ export function LogDetail({
                                                     disabled={!canNavigateNextLog}
                                                     onClick={() => onNavigateLog('next')}
                                                     className="h-7 w-7 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary disabled:opacity-35"
-                                                    aria-label={t('log_detail.next_log', 'Next log')}
+                                                    aria-label={t('log_detail.next_log')}
                                                 >
                                                     <ChevronRight className="h-3.5 w-3.5" />
                                                 </Button>
                                             </TooltipTrigger>
                                             <TooltipContent side="top" sideOffset={4}>
-                                                {t('log_detail.next_log', 'Next log')}
+                                                {t('log_detail.next_log')}
                                             </TooltipContent>
                                         </Tooltip>
                                     </div>
@@ -878,8 +541,8 @@ export function LogDetail({
                                             onClick={() => setPanelWidthMode(current => current === 'full' ? 'wide' : 'full')}
                                             className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-primary/10 hover:text-primary"
                                             aria-label={panelWidthMode === 'full'
-                                                ? t('log_detail.exit_fullscreen', 'Exit fullscreen')
-                                                : t('log_detail.enter_fullscreen', 'Fullscreen')}
+                                                ? t('log_detail.exit_fullscreen')
+                                                : t('log_detail.enter_fullscreen')}
                                         >
                                             {panelWidthMode === 'full'
                                                 ? <Minimize2 className="h-4 w-4" />
@@ -888,8 +551,8 @@ export function LogDetail({
                                     </TooltipTrigger>
                                     <TooltipContent side="top" sideOffset={4}>
                                         {panelWidthMode === 'full'
-                                            ? t('log_detail.exit_fullscreen', 'Exit fullscreen')
-                                            : t('log_detail.enter_fullscreen', 'Fullscreen')}
+                                            ? t('log_detail.exit_fullscreen')
+                                            : t('log_detail.enter_fullscreen')}
                                     </TooltipContent>
                                 </Tooltip>
                                 <Button
@@ -905,7 +568,7 @@ export function LogDetail({
                                     ) : (
                                         <Terminal className="h-3 w-3" />
                                     )}
-                                    {t('log_detail.copy_as_curl', 'Copy as cURL')}
+                                    {t('log_detail.copy_as_curl')}
                                 </Button>
                                 <Button
                                     variant="outline"
@@ -1149,7 +812,7 @@ export function LogDetail({
                                         <span className="text-xs font-medium text-muted-foreground">{formatSize(requestBodyDisplaySize)}</span>
                                         {displayLog.truncated && (
                                             <Badge variant="outline" className="h-5 text-xs border-warning/40 text-warning bg-warning/5 px-1.5 font-semibold">
-                                                {t('log_detail.truncated_tag', 'TRUNCATED')}
+                                                {t('log_detail.truncated_tag')}
                                             </Badge>
                                         )}
                                     </div>
@@ -1176,7 +839,7 @@ export function LogDetail({
 
                                     {showsOriginalRequestBody && (
                                         <Badge variant="outline" className="w-fit border-warning/30 bg-warning/5 text-xs font-semibold text-warning">
-                                            {t('log_detail.request_body_original_fallback', 'Original body before failed override')}
+                                            {t('log_detail.request_body_original_fallback')}
                                         </Badge>
                                     )}
 
@@ -1186,10 +849,10 @@ export function LogDetail({
                                                 <ViewToggle
                                                     value={requestViewMode}
                                                     options={[
-                                                        { value: 'pretty', label: t('log_detail.view_pretty', 'Pretty') },
-                                                        { value: 'raw', label: t('log_detail.view_raw', 'Raw') },
+                                                        { value: 'pretty', label: t('log_detail.view_pretty') },
+                                                        { value: 'raw', label: t('log_detail.view_raw') },
                                                         ...(hasRequestBodyDiff
-                                                            ? [{ value: 'diff', label: t('log_detail.view_diff', 'Diff') }]
+                                                            ? [{ value: 'diff', label: t('log_detail.view_diff') }]
                                                             : []),
                                                     ]}
                                                     onChange={(value) => setRequestViewMode(value as RequestViewMode)}
@@ -1207,13 +870,13 @@ export function LogDetail({
                                                                     size="icon"
                                                                     onClick={() => window.open(logRequestDiffPath(displayLog.id), '_blank', 'noopener,noreferrer')}
                                                                     className="h-7 w-7 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
-                                                                    aria-label={t('log_detail.open_diff', 'Open Diff')}
+                                                                    aria-label={t('log_detail.open_diff')}
                                                                 >
                                                                     <ExternalLink className="h-3.5 w-3.5" />
                                                                 </Button>
                                                             </TooltipTrigger>
                                                             <TooltipContent side="top" sideOffset={4}>
-                                                                {t('log_detail.open_diff', 'Open Diff')}
+                                                                {t('log_detail.open_diff')}
                                                             </TooltipContent>
                                                         </Tooltip>
                                                     )}
@@ -1249,7 +912,7 @@ export function LogDetail({
                                         </div>
                                     ) : (
                                         <div className={cn(emptyStateClassName, "text-xs italic text-muted-foreground")}>
-                                            {loading ? t('common.loading') : t('log_detail.no_body', '--- EMPTY BODY ---')}
+                                            {loading ? t('common.loading') : t('log_detail.no_body')}
                                         </div>
                                     )}
                                 </div>
@@ -1295,7 +958,7 @@ export function LogDetail({
                                         <span className="text-xs font-medium text-muted-foreground">{formatSize(displayLog.response_body_size)}</span>
                                         {displayLog.truncated && (
                                             <Badge variant="outline" className="h-5 text-xs border-warning/40 text-warning bg-warning/5 px-1.5 font-semibold">
-                                                {t('log_detail.truncated_tag', 'TRUNCATED')}
+                                                {t('log_detail.truncated_tag')}
                                             </Badge>
                                         )}
                                     </div>
@@ -1340,12 +1003,12 @@ export function LogDetail({
                                                     value={responseViewMode}
                                                     options={displayLog.streaming
                                                         ? [
-                                                            { value: 'raw', label: t('log_detail.view_raw', 'Raw') },
-                                                            { value: 'merged', label: t('log_detail.stream_merged', 'Merged') },
+                                                            { value: 'raw', label: t('log_detail.view_raw') },
+                                                            { value: 'merged', label: t('log_detail.stream_merged') },
                                                         ]
                                                         : [
-                                                            { value: 'pretty', label: t('log_detail.view_pretty', 'Pretty') },
-                                                            { value: 'raw', label: t('log_detail.view_raw', 'Raw') },
+                                                            { value: 'pretty', label: t('log_detail.view_pretty') },
+                                                            { value: 'raw', label: t('log_detail.view_raw') },
                                                         ]}
                                                     onChange={(value) => setResponseViewMode(value as ResponseViewMode)}
                                                 />
@@ -1396,7 +1059,7 @@ export function LogDetail({
                                         </div>
                                     ) : (
                                         <div className={cn(emptyStateClassName, "text-xs italic text-muted-foreground")}>
-                                            {loading ? t('common.loading') : t('log_detail.no_body', '--- EMPTY BODY ---')}
+                                            {loading ? t('common.loading') : t('log_detail.no_body')}
                                         </div>
                                     )}
                                 </div>
@@ -1431,106 +1094,4 @@ export function LogDetail({
         </Sheet>
         </LogDetailUIContext.Provider>
     )
-}
-
-function shouldSubscribeLive(log: RequestLog): boolean {
-    return log.latency_ms === 0 && !log.error
-}
-
-function parseLiveEvent(event: MessageEvent<string>): LiveLogEvent | null {
-    try {
-        const payload = JSON.parse(event.data) as LiveLogEvent
-        if (!payload || typeof payload !== 'object' || !('type' in payload)) {
-            return null
-        }
-        return payload
-    } catch {
-        return null
-    }
-}
-
-function isBinaryPlaceholder(body: string) {
-    return body.trimStart().startsWith('[binary content omitted;')
-}
-
-function shouldAutoLoadBody({
-    blobRef,
-    bodySize,
-    contentType,
-    previewBody,
-    fullBody,
-    loading,
-    previewOnly,
-}: {
-    blobRef?: string
-    bodySize?: number
-    contentType: string
-    previewBody: string
-    fullBody: string | null
-    loading: boolean
-    previewOnly: boolean
-}) {
-    if (!blobRef || fullBody !== null || loading || previewOnly) return false
-    if (!bodySize || bodySize > autoLoadFullBodyLimit) return false
-    if (isBinaryPlaceholder(previewBody)) return false
-    return isAutoLoadableTextContent(contentType, previewBody)
-}
-
-function isAutoLoadableTextContent(contentType: string, previewBody: string) {
-    const mediaType = contentType.split(';')[0]?.trim().toLowerCase() ?? ''
-    if (!mediaType) return Boolean(previewBody.trim())
-    if (mediaType.startsWith('text/')) return true
-    if (
-        mediaType === 'application/json' ||
-        mediaType === 'application/xml' ||
-        mediaType === 'application/x-ndjson' ||
-        mediaType === 'application/x-www-form-urlencoded' ||
-        mediaType === 'application/graphql' ||
-        mediaType === 'application/javascript'
-    ) {
-        return true
-    }
-    return mediaType.endsWith('+json') || mediaType.endsWith('+xml')
-}
-
-function normalizedAnnotation(annotation: RequestLog['annotation'] | undefined) {
-    return {
-        saved: annotation?.saved ?? false,
-        status: annotation?.status ?? 'none',
-        note: annotation?.note ?? '',
-        labels: annotation?.labels ?? [],
-    }
-}
-
-function parseLabelDraft(value: string) {
-    const seen = new Set<string>()
-    const labels: string[] = []
-    value
-        .split(/[,，\n]/)
-        .map(item => item.trim())
-        .filter(Boolean)
-        .forEach((label) => {
-            if (seen.has(label)) return
-            seen.add(label)
-            labels.push(label)
-        })
-    return labels
-}
-
-function textByteSize(text: string) {
-    return new TextEncoder().encode(text).length
-}
-
-function firstHeaderValue(headers: Record<string, string[]> | undefined, name: string) {
-    if (!headers) return ''
-    const direct = headers[name]
-    if (direct?.length) return direct[0]
-
-    const lowerName = name.toLowerCase()
-    for (const [key, values] of Object.entries(headers)) {
-        if (key.toLowerCase() === lowerName && values.length) {
-            return values[0]
-        }
-    }
-    return ''
 }

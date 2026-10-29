@@ -50,7 +50,7 @@ export function LoggingPathRuleEditor({ rules, onChange, disabled = false, compa
                         disabled={disabled}
                         aria-label={t('logging_rules.remove_rule')}
                         onClick={() => onChange(rules.filter((_, current) => current !== index))}
-                        className="text-muted-foreground hover:text-destructive"
+                        className="text-muted-foreground hover:text-danger"
                     >
                         <Trash2 />
                     </Button>

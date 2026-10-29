@@ -48,7 +48,7 @@ export function JsonDiffViewer({ beforeText, afterText }: JsonDiffViewerProps) {
             <div className="space-y-3">
                 <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-warning">
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    <span>{t('json_diff.json_required', 'Diff needs both sides to be valid JSON. Showing raw bodies instead.')}</span>
+                    <span>{t('json_diff.json_required')}</span>
                 </div>
                 <RawSideBySide beforeText={beforeText} afterText={afterText} />
             </div>
@@ -58,7 +58,7 @@ export function JsonDiffViewer({ beforeText, afterText }: JsonDiffViewerProps) {
     if (diff.changes.length === 0) {
         return (
             <div className="rounded-lg border border-dashed border-border bg-background px-4 py-8 text-center text-xs font-medium text-muted-foreground">
-                {t('json_diff.no_changes', 'No JSON changes')}
+                {t('json_diff.no_changes')}
             </div>
         )
     }
@@ -68,7 +68,7 @@ export function JsonDiffViewer({ beforeText, afterText }: JsonDiffViewerProps) {
     return (
         <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
-                <span>{t('json_diff.summary', '{{count}} changes', { count: diff.changes.length })}</span>
+                <span>{t('json_diff.summary', { count: diff.changes.length })}</span>
                 <DiffCount type="added" count={counts.added} />
                 <DiffCount type="removed" count={counts.removed} />
                 <DiffCount type="changed" count={counts.changed} />
@@ -108,13 +108,13 @@ function DiffChangeRow({ change }: { change: JsonDiffChange }) {
             </div>
             <div className="grid gap-px bg-border/50 lg:grid-cols-2">
                 <DiffValuePanel
-                    title={t('json_diff.before', 'Before')}
+                    title={t('json_diff.before')}
                     value={change.before}
                     side="before"
                     state={change.type === 'added' ? 'missing' : 'removed'}
                 />
                 <DiffValuePanel
-                    title={t('json_diff.after', 'After')}
+                    title={t('json_diff.after')}
                     value={change.after}
                     side="after"
                     state={change.type === 'removed' ? 'missing' : 'added'}
@@ -159,7 +159,7 @@ function DiffValuePanel({
             </div>
             {value === undefined ? (
                 <div className="rounded-md border border-dashed border-border bg-background px-3 py-4 text-xs italic text-muted-foreground">
-                    {t('json_diff.missing', 'Missing')}
+                    {t('json_diff.missing')}
                 </div>
             ) : (
                 <pre
@@ -192,8 +192,8 @@ function RawSideBySide({ beforeText, afterText }: JsonDiffViewerProps) {
     const { t } = useTranslation()
     return (
         <div className="grid gap-px overflow-hidden rounded-lg border border-border bg-border/50 sm:grid-cols-2">
-            <RawPanel title={t('json_diff.before', 'Before')} text={beforeText} />
-            <RawPanel title={t('json_diff.after', 'After')} text={afterText} />
+            <RawPanel title={t('json_diff.before')} text={beforeText} />
+            <RawPanel title={t('json_diff.after')} text={afterText} />
         </div>
     )
 }

@@ -32,7 +32,7 @@ export function TraceLabelEditor({ labels, input, onChange, onInputChange, disab
         onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { composing.current = false; type(event.currentTarget.value) }}
         onKeyDown={event => { if (event.key === 'Enter' && !composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); commit(input) } }} />
     </div>
-    <p id={`${id}-hint`} className={cn('text-xs', tooMany ? 'text-destructive' : 'text-muted-foreground')} role={tooMany ? 'alert' : undefined}>{tooMany ? t('trace_labels.limit', { count: maxTraceLabels }) : t('trace_labels.input_hint')}</p>
+    <p id={`${id}-hint`} className={cn('text-xs', tooMany ? 'text-danger' : 'text-muted-foreground')} role={tooMany ? 'alert' : undefined}>{tooMany ? t('trace_labels.limit', { count: maxTraceLabels }) : t('trace_labels.input_hint')}</p>
   </div>
 }
 

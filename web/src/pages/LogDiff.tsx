@@ -7,6 +7,8 @@ import { toast } from 'sonner'
 import { TextDiffViewer } from '@/components/TextDiffViewer'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/EmptyState'
+import { PageLoading } from '@/components/PageLoading'
 import { fetchLog, type RequestLog } from '@/lib/api'
 import { cn, formatDate, formatSize, METHOD_CLASS, getStatusColor } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
@@ -66,7 +68,7 @@ export function LogDiff() {
 
     const { log, loading } = currentState
     const error = currentState.error === 'missing-id'
-        ? t('log_diff.missing_id', 'Missing log id')
+        ? t('log_diff.missing_id')
         : currentState.error
     const originalBody = log?.request_body_original ?? ''
     const finalBody = log?.request_body_final ?? ''
@@ -85,21 +87,17 @@ export function LogDiff() {
     }
 
     if (loading) {
-        return (
-            <div className="flex min-h-[55vh] flex-col items-center justify-center gap-4">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                <div className="text-sm font-medium text-muted-foreground">{t('common.loading')}</div>
-            </div>
-        )
+        return <PageLoading className="min-h-[55vh]" />
     }
 
     if (error || !log) {
         return (
             <DiffPageShell>
                 <EmptyState
-                    icon={<AlertTriangle className="h-5 w-5" />}
+                    icon={AlertTriangle}
                     title={t('common.error')}
-                    message={error || t('app.load_log_detail_failed')}
+                    description={error || t('app.load_log_detail_failed')}
+                    className="min-h-[46vh] rounded-lg border border-dashed border-border bg-card px-6 py-16"
                 />
             </DiffPageShell>
         )
@@ -119,7 +117,7 @@ export function LogDiff() {
                             </span>
                             {log.request_override_applied && (
                                 <Badge variant="outline" className="border-warning/30 bg-warning/10 text-xs font-medium text-warning">
-                                    {t('log_detail.modified', 'MODIFIED')}
+                                    {t('log_detail.modified')}
                                 </Badge>
                             )}
                         </div>
@@ -146,13 +144,13 @@ export function LogDiff() {
                         <Button asChild variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
                             <Link to="/">
                                 <ArrowLeft className="h-3.5 w-3.5" />
-                                {t('log_diff.back_to_logs', 'Back to Logs')}
+                                {t('log_diff.back_to_logs')}
                             </Link>
                         </Button>
                         {hasDiff && (
                             <Button type="button" variant="outline" size="sm" onClick={copyFinalBody} className="h-8 gap-1.5 text-xs">
                                 <Copy className="h-3.5 w-3.5" />
-                                {t('log_diff.copy_final', 'Copy Final')}
+                                {t('log_diff.copy_final')}
                             </Button>
                         )}
                     </div>
@@ -162,15 +160,16 @@ export function LogDiff() {
                     <div className="rounded-lg border border-border bg-card p-4">
                         <div className="mb-4 flex items-center gap-2 text-xs font-medium text-muted-foreground">
                             <FileCode className="h-4 w-4 text-primary" />
-                            {t('log_diff.request_diff', 'Request Diff')}
+                            {t('log_diff.request_diff')}
                         </div>
                         <TextDiffViewer beforeText={originalBody} afterText={finalBody} />
                     </div>
                 ) : (
                     <EmptyState
-                        icon={<FileCode className="h-5 w-5" />}
-                        title={t('log_diff.no_diff_title', 'No request diff')}
-                        message={t('log_diff.no_diff_message', 'This log does not contain a modified request body.')}
+                        icon={FileCode}
+                        title={t('log_diff.no_diff_title')}
+                        description={t('log_diff.no_diff_message')}
+                        className="min-h-[46vh] rounded-lg border border-dashed border-border bg-card px-6 py-16"
                     />
                 )}
             </div>
@@ -182,24 +181,6 @@ function DiffPageShell({ children }: { children: ReactNode }) {
     return (
         <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5">
             {children}
-        </div>
-    )
-}
-
-function EmptyState({
-    icon,
-    title,
-    message,
-}: {
-    icon: ReactNode
-    title: string
-    message: string
-}) {
-    return (
-        <div className="flex min-h-[46vh] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-card px-6 py-16 text-center">
-            <div className="rounded-md bg-muted p-3 text-muted-foreground">{icon}</div>
-            <div className="text-sm font-medium text-foreground">{title}</div>
-            <div className="max-w-md text-xs leading-6 text-muted-foreground">{message}</div>
         </div>
     )
 }
