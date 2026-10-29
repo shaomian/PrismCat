@@ -4,7 +4,7 @@
 
 ![GitHub Release](https://img.shields.io/github/v/release/shaomian/PrismCat) ![License](https://img.shields.io/github/license/shaomian/PrismCat) ![Docker Image](https://img.shields.io/badge/image-ghcr.io%2Fshaomian%2Fprismcat-blue)
 
-> 基于 [PrismCat](https://github.com/paopaoandlingyia/PrismCat) 独立维护的分支 —— 沿用同一 MIT License。
+> 基于 [PrismCat](https://github.com/paopaoandlingyia/PrismCat) 独立维护的分支 —— 沿用同一 [MIT License](LICENSE)。
 
 v2.1.0 新增自动调用链、录制批次、AI 对比复盘与任务管理，详见 [更新记录](CHANGELOG.md)。
 
@@ -12,6 +12,8 @@ v2.1.0 新增自动调用链、录制批次、AI 对比复盘与任务管理，�
 
 PrismCat 是一个**自托管的 LLM API 透明代理与调试控制台**。
 只需改一行 `base_url`，即可完整记录你的应用与 OpenAI / Claude / Gemini / Ollama 等任意 LLM API 之间的所有通信 —— 包括流式响应 (SSE)。
+
+从查看单条请求，到串联 Agent 的完整任务，再到比较不同 Agent / 模型的表现：支持自动调用链、录制批次、基础数据对比，以及按观测点生成的 AI 复盘报告和可复用模板。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/logs-dark.png">
@@ -25,6 +27,7 @@ PrismCat 是一个**自托管的 LLM API 透明代理与调试控制台**。
 |---|---|
 | "为什么 Token 消耗这么大？我的 Prompt 明明很短啊" | 看到 SDK / 框架偷偷注入的 system prompt 和 few-shot 示例 |
 | "Agent 跑着跑着就失控了，不知道它中间干了什么" | 每次调用都已经记下来了，几天后照样能回溯完整行为链路 |
+| "换了 Agent 或模型，想知道同一任务的表现有什么变化" | 对比耗时、Token、请求数和错误数，再按自己关心的观测点查看 AI 复盘与日志依据 |
 | "流式输出有时候会卡住或截断" | 完整记录每一个 SSE chunk，分得清是模型、网关还是客户端的问题 |
 | "Function Calling 返回的 JSON 总是格式错误" | 抓到模型返回的原始文本，在 Playground 里改 Prompt 重发 |
 | "多人共用一个 API Key，谁的请求出了问题？" | 用 `X-PrismCat-Tag` 给请求打标签，按用户或项目筛选 |
@@ -102,23 +105,36 @@ PrismCat 使用**子域名路由**实现透明代理。当你在 Settings 里添
 ### 完整的流量观测
 - 记录完整的请求头、请求体、响应头、响应体，支持关键字搜索与高亮
 - **SSE 流式响应**完整捕获，支持查看原始流或合并后的完整文本
+- **Responses WebSocket** 支持按每轮模型调用记录请求与响应事件，复用时间线、用量提取与分析
 - JSON 自动格式化美化，大段 Base64（如内嵌图片）智能折叠并支持一键预览，告别刷屏
-- 任意请求一键复制为可执行的 **cURL 命令**
+- HTTP 请求一键复制为可执行的 **cURL 命令**
 
 ![Image Preview](assets/image_preview.png)
 
 
 ### 一键重放 (Playground)
-看到一条失败的请求？点击 **Replay**，在浏览器里直接修改 Prompt、参数，一键重发，秒级定位问题。不用重新跑你的 Python/Node 脚本。
+看到一条失败的 HTTP 请求？点击 **Replay**，在浏览器里直接修改 Prompt、参数，一键重发，秒级定位问题。不用重新跑你的 Python/Node 脚本。WebSocket 调用暂不支持 HTTP 重放或 cURL 导出。
 
-### Trace 关联 & 用量追踪
-自动将相关请求关联为 Trace 链路，并从响应中提取 Token 用量。内置 OpenAI、Anthropic、Gemini 提取规则，也支持自定义。
+### 自动调用链与录制批次
+- 无需客户端添加自定义 Trace 请求头，可按协议引用、工具调用与上下文推断任务归属；自动关联默认关闭，显式 Trace ID 优先
+- 在调用链详情查看对话时序、请求关联图、关联依据与前序关系，支持手动调整请求归属
+- 按代理入口开始和停止录制，收集一次任务的已记录请求；无需开启自动关联也能使用普通录制批次
 
-调用链 AI 分析和对比实验共用分析模型设置，支持 OpenAI 兼容与 Anthropic 原生协议。可同步接口提供的模型列表后选择，也可手动填写模型 ID；详细用法见 [对比实验与 AI 任务复盘](EXPERIMENTS_CN.md)。
+支持 HTTP/SSE 的 OpenAI Chat Completions、Responses、Anthropic Messages、Gemini，以及 Responses WebSocket。自动关联属于推断，证据不足时保留未确定状态。详见 [自动调用链使用说明](AUTO_TRACE_CN.md)。
 
-支持无自定义请求头的自动任务关联、测试批次录制和人工纠正，参见 [自动调用链使用说明](./AUTO_TRACE_CN.md)。
-调用链、录制批次、复盘与模板的归档、删除及手动过期清理，见 [任务管理与清理](TASK_MANAGEMENT_CN.md)。
+### Agent / 模型对比与 AI 任务复盘
+- 将已有调用链或录制批次加入复盘卡片，直接比较**耗时、Token、请求数和错误数**；查看基础数据不调用 AI
+- 按“选任务 → 选观测点 → 看结果”复盘：选择 2–8 个任务，自定义关心的问题，或让 AI 提出候选观测点后自行确认
+- 提供代码开发、渗透测试、逆向分析和自由复盘模板，也可保存自己的观测点与分析要求，适配其他场景
+- 点击后才调用 AI 查证日志，生成带日志依据、推断标记和改进建议的报告；支持查看原始依据、保存历史报告和继续追问
 
+调用链 AI 分析和对比复盘共用模型设置，支持 OpenAI 兼容与 Anthropic 原生协议，可同步模型列表或手动填写模型 ID。复盘模型与被测 Agent 使用的模型各自独立，分析用量单独展示。详见 [对比实验与 AI 任务复盘](EXPERIMENTS_CN.md)。
+
+### 用量追踪
+从响应中提取 Token 用量，内置 OpenAI、Anthropic、Gemini 规则，也支持自定义。需开启 Usage 提取并在对应上游绑定规则；缺失用量显示为未知，不当作零，开启后不会自动重算历史日志。
+
+### 任务管理与清理
+调用链、已停止的录制批次、复盘卡片和自定义模板支持归档、恢复、删除及批量管理。删除前预览影响范围并检查引用和进行中状态；可手动清理过期日志，并保留收藏、复盘引用等保护。归档只隐藏项目，不释放存储。详见 [任务管理与清理](TASK_MANAGEMENT_CN.md)。
 
 ### 目标预设
 一个稳定的代理入口，背后挂多组完整目标，在 Settings 里一键切换，客户端不用动。
@@ -133,7 +149,8 @@ PrismCat 使用**子域名路由**实现透明代理。当你在 Settings 里添
 > **🔒 严格 opt-in，PrismCat 不会自作主张。** 默认就是透明转发——必须 (1) 手动打开总开关、(2) 定义规则、(3) 把规则绑定到具体上游，三步全做完请求才会被改写。任何一步没配置，请求都按字节原样透传。
 
 ### 隐私与安全
-- **纯本地部署**，数据存在本地 SQLite + 文件系统，不经过任何第三方服务器
+- **自托管部署**，日志保存在本地 SQLite + 文件系统
+- AI 分析与复盘仅在点击时调用，并会将所需日志与补充材料发送到你配置的模型服务
 - 自动对 `Authorization`、`api-key` 等敏感头部脱敏
 
 ### 日志标签
@@ -438,22 +455,6 @@ PrismCat 使用异步日志写入，代理本身的延迟通常在 1ms 以内。
 
 ---
 
-## 社区
+## 致谢
 
-- [LinuxDo 讨论帖](https://linux.do/t/topic/1623556/33)
-
----
-
-## 支持 PrismCat
-
-如果 PrismCat 帮你节省了调试 LLM 应用的时间，也欢迎请我喝杯咖啡：
-
-[在爱发电支持 PrismCat](https://afdian.com/a/etgpao)
-
----
-
-## License
-
-[MIT License](LICENSE)
-
-Agent/模型实验对比、复盘模板与 AI 复盘：[使用说明](EXPERIMENTS_CN.md)。
+感谢 [原项目 PrismCat](https://github.com/paopaoandlingyia/PrismCat) 的开源贡献。

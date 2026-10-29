@@ -4,7 +4,7 @@
 
 ![GitHub Release](https://img.shields.io/github/v/release/shaomian/PrismCat) ![License](https://img.shields.io/github/license/shaomian/PrismCat) ![Docker Image](https://img.shields.io/badge/image-ghcr.io%2Fshaomian%2Fprismcat-blue)
 
-> Independently maintained fork of [PrismCat](https://github.com/paopaoandlingyia/PrismCat) — released under the same MIT License.
+> Independently maintained fork of [PrismCat](https://github.com/paopaoandlingyia/PrismCat) — released under the same [MIT License](LICENSE).
 
 v2.1.0 adds automatic task traces, capture runs, AI comparison reviews and task management. See the [release notes](CHANGELOG.md).
 
@@ -12,6 +12,8 @@ v2.1.0 adds automatic task traces, capture runs, AI comparison reviews and task 
 
 PrismCat is a **self-hosted, transparent proxy and debugging console for LLM APIs**.
 Change one line — your `base_url` — and instantly see every request and response between your app and OpenAI / Claude / Gemini / Ollama / any LLM API, including streaming (SSE).
+
+Go from inspecting a single request to following a complete Agent task and comparing different Agents or models, with automatic task traces, capture runs, basic metrics, AI reviews organized by selected observations, and reusable templates.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/logs-dark.png">
@@ -25,6 +27,7 @@ Change one line — your `base_url` — and instantly see every request and resp
 |---|---|
 | "Why is my token usage so high? My prompt is short!" | See the hidden system prompts and few-shot examples your SDK silently injects |
 | "My Agent went rogue and I have no idea what it did" | Every call is already recorded — review the full behavior chain days later |
+| "I switched Agents or models — what changed on the same task?" | Compare duration, tokens, requests and errors, then review selected observations with AI and supporting logs |
 | "Streaming output freezes or gets truncated" | Every SSE chunk is captured — tell whether it's the model, the gateway, or your client |
 | "Function Calling keeps returning broken JSON" | Capture the raw output, tweak the prompt in the Playground, resend |
 | "Multiple people share one API key — whose request failed?" | Tag requests with `X-PrismCat-Tag` and filter by user or project |
@@ -102,23 +105,36 @@ Your App                     PrismCat                      OpenAI
 ### Full Traffic Observability
 - Complete request/response headers and bodies with keyword search and highlighting
 - **SSE streaming** captured in full — view raw chunks or the merged result
+- **Responses WebSocket** records individual model calls and response events for timeline views, usage extraction and analysis
 - Auto-formatted JSON, smart Base64 folding (no more drowning in image data) with one-click image preview
-- Copy any request as a ready-to-run **cURL command**
+- Copy HTTP requests as ready-to-run **cURL commands**
 
 ![Image Preview](assets/image_preview.png)
 
 
 ### One-Click Replay (Playground)
-See a failed request? Hit **Replay**, tweak the prompt or parameters right in your browser, and resend instantly. No need to re-run your Python/Node script.
+See a failed HTTP request? Hit **Replay**, tweak the prompt or parameters right in your browser, and resend instantly. No need to re-run your Python/Node script. HTTP replay and cURL export are not currently available for WebSocket calls.
 
-### Trace & Usage Tracking
-Automatically correlate related requests into traces, and extract token usage from responses. Built-in extraction rules for OpenAI, Anthropic, and Gemini — or define your own.
+### Automatic Task Traces & Capture Runs
+- Infer task membership from protocol references, tool calls and context without custom client trace headers; automatic correlation is off by default and explicit trace IDs take priority
+- Inspect conversation timelines, request relationship diagrams, correlation evidence and predecessors, with manual corrections when needed
+- Start and stop a capture run for a proxy endpoint to collect its logged requests during a task; ordinary capture runs work without automatic correlation
 
-Trace AI analysis and comparison reviews share model settings, with OpenAI-compatible Chat Completions and native Anthropic Messages support. Sync available models from your API or enter a model ID manually. See [comparison reviews](./EXPERIMENTS_CN.md) for details (Chinese).
+Supports OpenAI Chat Completions and Responses, Anthropic Messages, and Gemini over HTTP/SSE, plus Responses WebSocket. Automatic correlation is an inference and remains uncertain when evidence is insufficient. See [Automatic traces](AUTO_TRACE.md).
 
-Automatic task correlation, capture runs, and manual corrections work without custom trace headers. See [Automatic traces](./AUTO_TRACE.md).
-For archiving, deletion and manual expired-log cleanup, see [Task management and cleanup](TASK_MANAGEMENT.md).
+### Agent / Model Comparisons & AI Task Reviews
+- Add existing traces or capture runs to a review card and compare **duration, tokens, request counts and error counts**; viewing basic metrics does not call AI
+- Choose tasks, select observations, then review the results: select 2–8 tasks, write your own questions, or ask AI for candidate observations and confirm the ones you want
+- Start with code development, penetration testing, reverse analysis or free-form templates, and save your own observations and analysis instructions for other scenarios
+- Click to let AI inspect logs and produce a report with supporting logs, inference labels and improvement suggestions; open source logs, revisit saved reports and ask follow-up questions
 
+Trace analysis and comparison reviews share model settings, supporting OpenAI-compatible APIs and native Anthropic Messages. Sync a model list or enter a model ID manually. The review model is independent of the tested Agent's model, with its usage shown separately. See the [comparison and AI review guide (Chinese)](EXPERIMENTS_CN.md).
+
+### Usage Tracking
+Extract token usage from responses with built-in OpenAI, Anthropic and Gemini rules, or define your own. Enable Usage extraction and bind rules to the relevant upstream. Missing usage remains unknown rather than zero, and enabling extraction does not automatically recalculate historical logs.
+
+### Task Management & Cleanup
+Archive, restore, delete and batch-manage traces, stopped capture runs, review cards and custom templates. Preview deletion scope with reference and activity checks, or manually clean expired logs while preserving retention protections such as favorites and review references. Archiving only hides items and does not reclaim storage. See [Task management and cleanup](TASK_MANAGEMENT.md).
 
 ### Target Presets
 One stable proxy endpoint, several complete targets behind it — switch between them from Settings without touching the client.
@@ -133,7 +149,8 @@ Rewrite outbound requests without touching your code — set, remove, or conditi
 > **🔒 Strictly opt-in.** PrismCat is a transparent proxy by default and **never** touches your requests unless you (1) flip the master switch, (2) define rules, and (3) bind them to specific upstreams. Skip any of those steps and every byte is forwarded untouched.
 
 ### Privacy & Security
-- **Fully local** — data stays in local SQLite + filesystem, no third-party servers
+- **Self-hosted** — logs are stored in local SQLite + filesystem
+- AI analysis and reviews run only when clicked and send the required logs and supplementary material to your configured model service
 - Automatic masking of sensitive headers (`Authorization`, `api-key`)
 
 ### Log Tagging
@@ -438,16 +455,6 @@ PrismCat uses asynchronous log writing. The proxy overhead is typically under 1m
 
 ---
 
-## Support PrismCat
+## Acknowledgments
 
-If PrismCat helps you debug LLM apps or saves you time, you can support the project here:
-
-[Support PrismCat on Afdian](https://afdian.com/a/etgpao)
-
----
-
-## License
-
-[MIT License](LICENSE)
-
-Agent/model comparisons, reusable review cards and AI review: [guide (Chinese)](EXPERIMENTS_CN.md).
+Thanks to the [original PrismCat project](https://github.com/paopaoandlingyia/PrismCat) for its open-source contribution.
