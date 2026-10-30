@@ -42,8 +42,25 @@ type Correlator struct {
 	idle       time.Duration
 }
 
+// 索引边界的默认值。config 包负责校验和归一化(见 NormalizeCorrelation),
+// 两处的默认数字必须保持一致。
+const (
+	DefaultMaxEntries = 2048
+	DefaultIdle       = 30 * time.Minute
+)
+
 func NewCorrelator() *Correlator {
-	return &Correlator{nodes: map[string]*Observation{}, index: map[string]map[string]bool{}, waiters: map[string]map[string]bool{}, maxEntries: 2048, idle: 30 * time.Minute}
+	return &Correlator{nodes: map[string]*Observation{}, index: map[string]map[string]bool{}, waiters: map[string]map[string]bool{}, maxEntries: DefaultMaxEntries, idle: DefaultIdle}
+}
+
+// Tune 调整索引边界,供配置热更新复用。非正值忽略,保持当前值。
+func (c *Correlator) Tune(maxEntries int, idle time.Duration) {
+	if maxEntries > 0 {
+		c.maxEntries = maxEntries
+	}
+	if idle > 0 {
+		c.idle = idle
+	}
 }
 
 func domain(o *Observation) string { return o.Scope + "\x00" + o.Request.Format }

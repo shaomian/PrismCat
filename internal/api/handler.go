@@ -1056,7 +1056,11 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 				RetentionDays   *int   `json:"retention_days"`
 				MaxStorageBytes *int64 `json:"max_storage_bytes"`
 			} `json:"storage"`
-			Correlation      *config.CorrelationConfig      `json:"trace_correlation"`
+			Correlation *struct {
+				Enabled     *bool `json:"enabled"`
+				MaxEntries  *int  `json:"max_entries"`
+				IdleMinutes *int  `json:"idle_minutes"`
+			} `json:"trace_correlation"`
 			RequestOverrides *config.RequestOverridesConfig `json:"request_overrides"`
 			UsageExtraction  *config.UsageExtractionConfig  `json:"usage_extraction"`
 			Analysis         *struct {
@@ -1127,7 +1131,17 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if req.Correlation != nil {
-				c.Correlation = *req.Correlation
+				// 指针字段做部分更新:老前端只传 enabled 时不覆盖调优值
+				if req.Correlation.Enabled != nil {
+					c.Correlation.Enabled = *req.Correlation.Enabled
+				}
+				if req.Correlation.MaxEntries != nil {
+					c.Correlation.MaxEntries = *req.Correlation.MaxEntries
+				}
+				if req.Correlation.IdleMinutes != nil {
+					c.Correlation.IdleMinutes = *req.Correlation.IdleMinutes
+				}
+				c.Correlation = config.NormalizeCorrelation(c.Correlation)
 			}
 			if req.RequestOverrides != nil {
 				c.Overrides = config.NormalizeRequestOverrides(*req.RequestOverrides)

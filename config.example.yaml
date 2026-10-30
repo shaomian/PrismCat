@@ -5,6 +5,12 @@ trace_correlation:
   # Disabled by default. Groups HTTP/SSE model calls using protocol references
   # and conservative context matching; does not inject headers or modify bodies.
   enabled: false
+  # 自动关联的内存索引条数上限，超出按最旧淘汰。范围 16–100000，默认 2048。
+  # 显式 Trace ID 与单任务录制是权威声明，不经过这套索引，不受此限制。
+  max_entries: 2048
+  # 稀疏调用的匹配窗口（分钟），窗口外的观测不再参与自动关联。范围 1–1440，默认 30。
+  # 半天级别、调用间隔可能超过半小时的长任务建议用显式 Trace ID 或单任务录制。
+  idle_minutes: 30
 
 server:
   # 监听地址。默认 127.0.0.1（仅本机访问，安全）。

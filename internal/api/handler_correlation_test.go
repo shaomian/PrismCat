@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -158,5 +159,80 @@ func TestCaptureStatusAndPagedHistoryWithAsyncRepository(t *testing.T) {
 		if rr := request("GET", "/api/capture-runs?"+query, ""); rr.Code != 400 {
 			t.Fatalf("invalid pagination accepted: %s", query)
 		}
+	}
+}
+
+func TestCorrelationStatusAndPartialTuningUpdate(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("trace_correlation:\n  enabled: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	repo, err := storage.NewSQLiteRepository(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	h := New(cfg, repo, nil, nil)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	request := func(method, path, body string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return rr
+	}
+	readStatus := func() (enabled bool, maxEntries, idleMinutes int) {
+		t.Helper()
+		rr := request("GET", "/api/trace-correlation/status", "")
+		var status struct {
+			Enabled     bool `json:"enabled"`
+			MaxEntries  int  `json:"max_entries"`
+			IdleMinutes int  `json:"idle_minutes"`
+		}
+		if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &status) != nil {
+			t.Fatalf("status: %d %s", rr.Code, rr.Body)
+		}
+		return status.Enabled, status.MaxEntries, status.IdleMinutes
+	}
+
+	if enabled, max, idle := readStatus(); !enabled || max != config.DefaultCorrelationMaxEntries || idle != config.DefaultCorrelationIdleMinutes {
+		t.Fatalf("initial tuning: enabled=%v max=%d idle=%d", enabled, max, idle)
+	}
+
+	// 只更新空闲窗口:其余字段(含 enabled)必须保持不变
+	if rr := request("PUT", "/api/config", `{"trace_correlation":{"idle_minutes":90}}`); rr.Code != 200 {
+		t.Fatalf("update idle: %d %s", rr.Code, rr.Body)
+	}
+	if enabled, max, idle := readStatus(); !enabled || max != config.DefaultCorrelationMaxEntries || idle != 90 {
+		t.Fatalf("after idle update: enabled=%v max=%d idle=%d", enabled, max, idle)
+	}
+
+	// 超出范围收敛到上限,已调字段不被覆盖
+	if rr := request("PUT", "/api/config", `{"trace_correlation":{"max_entries":500000}}`); rr.Code != 200 {
+		t.Fatalf("update max: %d %s", rr.Code, rr.Body)
+	}
+	if _, max, idle := readStatus(); max != config.MaxCorrelationMaxEntries || idle != 90 {
+		t.Fatalf("after max update: max=%d idle=%d", max, idle)
+	}
+
+	// 现有前端只传 enabled 的旧请求形式不能清掉调优值
+	if rr := request("PUT", "/api/config", `{"trace_correlation":{"enabled":false}}`); rr.Code != 200 {
+		t.Fatalf("toggle enabled: %d %s", rr.Code, rr.Body)
+	}
+	if enabled, max, idle := readStatus(); enabled || max != config.MaxCorrelationMaxEntries || idle != 90 {
+		t.Fatalf("after toggle: enabled=%v max=%d idle=%d", enabled, max, idle)
+	}
+
+	// 调优值随 Save 落盘,重载后仍然生效
+	reloaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if snap := reloaded.CorrelationSnapshot(); snap.Enabled || snap.MaxEntries != config.MaxCorrelationMaxEntries || snap.IdleMinutes != 90 {
+		t.Fatalf("persisted tuning: %+v", snap)
 	}
 }

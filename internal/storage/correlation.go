@@ -111,6 +111,13 @@ func (a *AsyncRepository) processCorrelation(o *trace.Observation, entry *Reques
 	}
 	a.correlationMu.Lock()
 	defer a.correlationMu.Unlock()
+	// 配置热更新跟随:每条观测处理前对齐一次内存边界,成本是一次快照读
+	idleWindow := trace.DefaultIdle
+	if a.cfg != nil {
+		snapshot := a.cfg.CorrelationSnapshot()
+		a.correlator.Tune(snapshot.MaxEntries, snapshot.IdleWindow())
+		idleWindow = snapshot.IdleWindow()
+	}
 	// A final snapshot may have been queued before the user removed its trace.
 	var deleted bool
 	if err := store.db.QueryRow("SELECT EXISTS(SELECT 1 FROM deleted_log_ids WHERE id=?)", entry.ID).Scan(&deleted); err != nil || deleted {
@@ -130,9 +137,9 @@ func (a *AsyncRepository) processCorrelation(o *trace.Observation, entry *Reques
 		changed.Assignment = assignment
 		a.correlator.Restore(changed)
 	}
-	// Feature summaries are recoverable only within the active 30-minute window.
+	// Feature summaries are recoverable only within the active idle window.
 	if time.Since(a.correlationPruned) > time.Minute {
-		if _, err := store.db.Exec("UPDATE trace_assignments SET features='' WHERE features!='' AND updated_at<?", time.Now().Add(-30*time.Minute).UnixMilli()); err != nil {
+		if _, err := store.db.Exec("UPDATE trace_assignments SET features='' WHERE features!='' AND updated_at<?", time.Now().Add(-idleWindow).UnixMilli()); err != nil {
 			log.Printf("trace feature cleanup failed: %v", err)
 		}
 		a.correlationPruned = time.Now()

@@ -666,7 +666,11 @@ export async function removeUpstream(name: string): Promise<void> {
 
 // 应用配置类型
 export interface AppConfig {
-    trace_correlation: { enabled: boolean }
+    trace_correlation: {
+        enabled: boolean
+        max_entries?: number
+        idle_minutes?: number
+    }
     version: string
     server: {
         proxy_domains: string[]
@@ -726,7 +730,11 @@ export async function updateLogAnnotation(
 }
 
 export interface ConfigUpdate {
-    trace_correlation?: { enabled: boolean }
+    trace_correlation?: {
+        enabled?: boolean
+        max_entries?: number
+        idle_minutes?: number
+    }
     server?: {
         enable_path_routing?: boolean
         path_routing_prefix?: string
@@ -956,6 +964,8 @@ export async function assignLogTrace(id: string, trace_id: string, revision: num
 
 export interface CorrelationStatus {
     enabled: boolean
+    max_entries: number
+    idle_minutes: number
     queued_bytes: number
     dropped_observations: number
     active_captures: { id: string; upstream: string }[]

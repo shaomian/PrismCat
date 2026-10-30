@@ -342,7 +342,11 @@ func Load(path string) (*Config, error) {
 		Overrides: RequestOverridesConfig{
 			MaxBodyBytes: 1 << 20,
 		},
-		Usage:     defaultUsageExtractionConfig(),
+		Usage: defaultUsageExtractionConfig(),
+		Correlation: CorrelationConfig{
+			MaxEntries:  DefaultCorrelationMaxEntries,
+			IdleMinutes: DefaultCorrelationIdleMinutes,
+		},
 		Upstreams: make(map[string]UpstreamConfig),
 	}
 
@@ -421,6 +425,7 @@ func Load(path string) (*Config, error) {
 	c.LogRules = logRules
 	c.Overrides = NormalizeRequestOverrides(c.Overrides)
 	c.Usage = NormalizeUsageExtraction(c.Usage)
+	c.Correlation = NormalizeCorrelation(c.Correlation)
 	c.Analysis.Protocol, err = NormalizeAnalysisProtocol(c.Analysis.Protocol)
 	if err != nil {
 		return nil, err

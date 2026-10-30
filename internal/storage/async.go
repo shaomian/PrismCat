@@ -80,6 +80,11 @@ func NewAsyncRepository(inner Repository, cfg *config.Config, buffer int, blobs 
 
 	if store, ok := inner.(*SQLiteRepository); ok {
 		a.correlator = trace.NewCorrelator()
+		// 启动时应用一次关联调优;后续配置热更新由 processCorrelation 里的 Tune 跟随
+		if a.cfg != nil {
+			snap := a.cfg.CorrelationSnapshot()
+			a.correlator.Tune(snap.MaxEntries, snap.IdleWindow())
+		}
 		if observations, err := store.loadObservations(); err == nil {
 			for _, o := range observations {
 				a.correlator.Restore(o)

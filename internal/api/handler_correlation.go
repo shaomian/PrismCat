@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/shaomian/PrismCat/internal/config"
 	"github.com/shaomian/PrismCat/internal/storage"
 )
 
@@ -23,7 +24,12 @@ func (h *Handler) handleCorrelationStatus(w http.ResponseWriter, r *http.Request
 			status[key] = value
 		}
 	}
-	status["enabled"] = h.cfg.CorrelationSnapshot().Enabled
+	// 归一化后展示:未经 Load 的原始配置(0 值)也能显示生效值
+	snapshot := config.NormalizeCorrelation(h.cfg.CorrelationSnapshot())
+	status["enabled"] = snapshot.Enabled
+	// 内存边界的当前生效值,供设置页展示与编辑
+	status["max_entries"] = snapshot.MaxEntries
+	status["idle_minutes"] = snapshot.IdleMinutes
 	type activeCapture struct {
 		ID       string `json:"id"`
 		Upstream string `json:"upstream"`
