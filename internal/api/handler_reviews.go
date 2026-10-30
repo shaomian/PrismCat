@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/shaomian/PrismCat/internal/config"
 	"github.com/shaomian/PrismCat/internal/storage"
 	"github.com/shaomian/PrismCat/internal/timeline"
+	"github.com/shaomian/PrismCat/internal/trace"
 )
 
 // Only the small public analysis configuration is needed by the review page.
@@ -174,6 +176,22 @@ func (h *Handler) handleExperimentReview(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		h.jsonResponse(w, map[string]any{"reports": v, "total": total})
+		return
+	}
+	if len(parts) >= 2 && parts[0] == "reports" && r.Method == http.MethodDelete {
+		if err := repo.DeleteReviewReport(parts[1], e.ID); err != nil {
+			if errors.Is(err, storage.ErrReportActive) {
+				h.jsonError(w, "report is still running", 409)
+				return
+			}
+			if errors.Is(err, sql.ErrNoRows) {
+				h.jsonError(w, "report not found", 404)
+				return
+			}
+			h.experimentError(w, err)
+			return
+		}
+		h.jsonResponse(w, map[string]string{"status": "ok"})
 		return
 	}
 	if len(parts) >= 2 && parts[0] == "reports" && r.Method == http.MethodGet {
@@ -505,7 +523,50 @@ func (h *Handler) suggestReviewPoints(w http.ResponseWriter, ctx context.Context
 }
 func reviewTools() []map[string]any {
 	tools := analysis.DefaultTools()
-	return append(tools, map[string]any{"type": "function", "function": map[string]any{"name": "get_task_requests", "description": "List captured request metadata for one selected task. Use offset to page; at most 20 requests per call.", "parameters": map[string]any{"type": "object", "properties": map[string]any{"run_id": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer"}}, "required": []string{"run_id"}}}})
+	return append(tools, map[string]any{"type": "function", "function": map[string]any{
+		"name":        "get_task_requests",
+		"description": "List captured model requests for one selected task. Optionally narrow them: query matches path, error text or up to 4KB of request/response preview (ASCII case-insensitive); errors_only keeps failed requests only. Use offset to page; at most 20 requests per call.",
+		"parameters": map[string]any{"type": "object", "properties": map[string]any{
+			"run_id":      map[string]any{"type": "string"},
+			"offset":      map[string]any{"type": "integer"},
+			"query":       map[string]any{"type": "string", "description": "Optional keyword to match path, error text or body preview"},
+			"errors_only": map[string]any{"type": "boolean", "description": "Optional; keep only failed requests"},
+		}, "required": []string{"run_id"}},
+	}})
+}
+
+// reviewSearchWindow 是过滤检索每次拉取的原始行窗口(也是游标推进步长)。
+// 统计的 2000 条上限已取消,数万条的任务靠关键词预过滤,一次拉 200 行原始数据
+// 再在 Go 里过 SupportedPath,保证 24 次调用预算也能覆盖超长任务。
+const reviewSearchWindow = 200
+
+// requestMatchSnippet 返回关键词在路径/错误/正文预览中首次命中的前后
+// 约 90 字符单行上下文;未命中返回空串。查询参数大小写不敏感,与 SQL 的
+// LIKE 行为对齐。
+func requestMatchSnippet(query string, log *storage.RequestLog) string {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return ""
+	}
+	for _, text := range []string{log.Path, log.Error, log.RequestBody, log.ResponseBody} {
+		if text == "" {
+			continue
+		}
+		idx := strings.Index(strings.ToLower(text), q)
+		if idx < 0 {
+			continue
+		}
+		start := max(idx-45, 0)
+		end := min(idx+len(q)+45, len(text))
+		snippet := strings.TrimSpace(strings.Map(func(r rune) rune {
+			if r == '\n' || r == '\r' || r == '\t' {
+				return ' '
+			}
+			return r
+		}, text[start:end]))
+		return "…" + snippet + "…"
+	}
+	return ""
 }
 
 type reviewExecutor struct {
@@ -541,38 +602,82 @@ func (e *reviewExecutor) ExecuteToolCall(ctx context.Context, name string, args 
 		out = v
 	case "get_task_requests":
 		var p struct {
-			RunID  string `json:"run_id"`
-			Offset int    `json:"offset"`
+			RunID      string `json:"run_id"`
+			Offset     int    `json:"offset"`
+			Query      string `json:"query"`
+			ErrorsOnly bool   `json:"errors_only"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
 			return "", err
 		}
-		found := false
-		var b strings.Builder
+		inReport := false
 		for _, t := range e.tasks {
-			if t.RunID != p.RunID {
-				continue
+			if t.RunID == p.RunID {
+				inReport = true
+				break
 			}
-			found = true
-			fmt.Fprintf(&b, "Task %s has %d captured requests.\n", t.RunID, len(t.Metrics.LogIDs))
-			start := min(max(0, p.Offset), len(t.Metrics.LogIDs))
-			end := min(start+20, len(t.Metrics.LogIDs))
-			for i := start; i < end; i++ {
-				if ctx.Err() != nil {
-					return "", ctx.Err()
-				}
-				id := t.Metrics.LogIDs[i]
-				log, err := e.h.repo.GetLog(id)
-				if err != nil {
-					fmt.Fprintf(&b, "#%d log_id=%s unavailable\n", i+1, id)
+		}
+		if !inReport {
+			return "", errors.New("task not in this report")
+		}
+		var b strings.Builder
+		if p.Query == "" && !p.ErrorsOnly {
+			// 不带过滤参数:保持原有全量分页行为不变
+			for _, t := range e.tasks {
+				if t.RunID != p.RunID {
 					continue
 				}
-				fmt.Fprintf(&b, "#%d log_id=%s %s %s status=%d latency=%dms\n", i+1, id, log.Method, reviewClip(log.Path, 200), log.StatusCode, log.Latency)
+				fmt.Fprintf(&b, "Task %s has %d captured requests.\n", t.RunID, len(t.Metrics.LogIDs))
+				start := min(max(0, p.Offset), len(t.Metrics.LogIDs))
+				end := min(start+20, len(t.Metrics.LogIDs))
+				for i := start; i < end; i++ {
+					if ctx.Err() != nil {
+						return "", ctx.Err()
+					}
+					id := t.Metrics.LogIDs[i]
+					log, err := e.h.repo.GetLog(id)
+					if err != nil {
+						fmt.Fprintf(&b, "#%d log_id=%s unavailable\n", i+1, id)
+						continue
+					}
+					fmt.Fprintf(&b, "#%d log_id=%s %s %s status=%d latency=%dms\n", i+1, id, log.Method, reviewClip(log.Path, 200), log.StatusCode, log.Latency)
+				}
+				fmt.Fprintf(&b, "next_offset=%d\n", end)
 			}
-			fmt.Fprintf(&b, "next_offset=%d\n", end)
-		}
-		if !found {
-			return "", errors.New("task not in this report")
+		} else {
+			// 带过滤参数:SQL 按任务圈定 + 关键词/失败预筛,Go 再过 SupportedPath
+			searcher, ok := e.h.repo.(interface {
+				SearchExperimentLogs(context.Context, string, string, bool, int, int) ([]*storage.RequestLog, error)
+			})
+			if !ok {
+				return "", errors.New("task search unavailable")
+			}
+			rows, err := searcher.SearchExperimentLogs(ctx, p.RunID, strings.TrimSpace(p.Query), p.ErrorsOnly, reviewSearchWindow, max(0, p.Offset))
+			if err != nil {
+				return "", err
+			}
+			fmt.Fprintf(&b, "Task %s requests matching filter (query=%q errors_only=%v):\n", p.RunID, p.Query, p.ErrorsOnly)
+			shown := 0
+			for _, log := range rows {
+				if shown >= 20 {
+					break
+				}
+				if !trace.SupportedPath(log.Path) {
+					continue
+				}
+				shown++
+				fmt.Fprintf(&b, "#%d log_id=%s %s %s status=%d latency=%dms", shown, log.ID, log.Method, reviewClip(log.Path, 200), log.StatusCode, log.Latency)
+				if p.Query != "" {
+					if match := requestMatchSnippet(p.Query, log); match != "" {
+						fmt.Fprintf(&b, " match: %s", match)
+					}
+				}
+				b.WriteByte('\n')
+			}
+			// 窗口拉满说明后面可能还有原始行;不满即数据见底,不输出 next_offset
+			if len(rows) == reviewSearchWindow {
+				fmt.Fprintf(&b, "next_offset=%d\n", max(0, p.Offset)+len(rows))
+			}
 		}
 		out = b.String()
 	default:
@@ -581,6 +686,31 @@ func (e *reviewExecutor) ExecuteToolCall(ctx context.Context, name string, args 
 	out = reviewClip(out, min(12000, e.bytes))
 	e.bytes -= len(out)
 	return out, nil
+}
+
+// reviewToolTrace 把执行器包一层,把每次工具调用与返回以 SSE 事件透出,
+// 前端"分析过程"明细由此而来。只透名称、参数摘要和结果预览,不透全文。
+type reviewToolTrace struct {
+	inner *reviewExecutor
+	send  func(any) error
+}
+
+func (w *reviewToolTrace) ExecuteToolCall(ctx context.Context, name string, args json.RawMessage) (string, error) {
+	if err := w.send(map[string]any{"type": "tool", "name": name, "args": reviewClip(string(args), 200)}); err != nil {
+		return "", err
+	}
+	out, err := w.inner.ExecuteToolCall(ctx, name, args)
+	event := map[string]any{"type": "tool_result", "name": name, "remaining": w.inner.remaining}
+	if err != nil {
+		event["error"] = err.Error()
+	} else {
+		event["chars"] = len(out)
+		event["preview"] = reviewClip(strings.ReplaceAll(strings.ReplaceAll(out, "\n", " "), "\r", " "), 120)
+	}
+	if sendErr := w.send(event); sendErr != nil && err == nil {
+		return "", sendErr
+	}
+	return out, err
 }
 func (h *Handler) runReview(w http.ResponseWriter, ctx context.Context, repo storage.ReviewRepository, report benchmark.ReviewReport, parent *benchmark.ReviewReport, lang string, cfg config.AnalysisConfig) {
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
@@ -599,6 +729,7 @@ func (h *Handler) runReview(w http.ResponseWriter, ctx context.Context, repo sto
 	now := time.Now()
 	calls := 0
 	exec := &reviewExecutor{h: h, tasks: report.Tasks, allowed: reviewLogSet(report.Tasks), remaining: 24, bytes: 128 << 10}
+	wrapped := &reviewToolTrace{inner: exec, send: send}
 	readyErr := send(map[string]any{"type": "ready", "report_id": report.ID})
 	contextText := h.reviewContext(ctx, report.Tasks, true)
 	selectedConfig := report.Config
@@ -622,7 +753,7 @@ func (h *Handler) runReview(w http.ResponseWriter, ctx context.Context, repo sto
 	var result *analysis.ChatResult
 	err := readyErr
 	if err == nil {
-		result, err = analysis.RunChat(ctx, cfg, messages, analysis.StreamOptions{TraceID: "review-" + report.ID, Tools: reviewTools()}, exec, analysis.Callbacks{
+		result, err = analysis.RunChat(ctx, cfg, messages, analysis.StreamOptions{TraceID: "review-" + report.ID, Tools: reviewTools()}, wrapped, analysis.Callbacks{
 			OnDelta: func(s string) error {
 				if body.Len()+len(s) > 128<<10 {
 					return errors.New("review_output_too_long")

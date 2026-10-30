@@ -1,12 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronUp, Download, Loader2, Settings2, Sparkles, Square, History } from 'lucide-react'
+import { ChevronDown, ChevronUp, Download, Loader2, Settings2, Sparkles, Square, History, Trash2, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchAnalysisConfig, type AppConfig } from '@/lib/api'
 import { saveExperiment, type Experiment } from '@/lib/experiments'
-import { fetchReport, fetchReports, mergeSuggestedPoints, presetTemplates, reviewError, suggestPoints, type ReviewConfig, type ReviewReport, type ReportSummary } from '@/lib/review'
+import { deleteReport, fetchReport, fetchReports, mergeSuggestedPoints, presetTemplates, reviewError, suggestPoints, type ReviewConfig, type ReviewReport, type ReportSummary } from '@/lib/review'
 import { reviewReportFilename, reviewReportMarkdown } from '@/lib/review-report'
-import { getReviewSession, startReview, stopReview, subscribeReview } from '@/lib/review-stream'
+import { getReviewSession, startReview, stopReview, subscribeReview, type ReviewToolCall } from '@/lib/review-stream'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -14,6 +14,27 @@ import ObservationPicker from './ObservationPicker'
 import ReviewReportView from './ReviewReportView'
 import ReviewTemplates, { SaveTemplateDialog } from './ReviewTemplates'
 const ModelSettings = lazy(() => import('@/components/AnalysisModelSettings'))
+
+/** 分析过程的调用流水。运行中在状态行展开,完成后本次会话内可回看。 */
+function ToolCallList({ calls }: { calls: ReviewToolCall[] }) {
+  const { t } = useTranslation()
+  return <div className="mt-2 max-h-64 space-y-1.5 overflow-y-auto rounded-md bg-muted/50 p-3 text-xs leading-5">
+    {calls.map((call, index) => (
+      <div key={index} className="flex flex-col gap-0.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="shrink-0 font-medium text-foreground">{call.name}</span>
+          <code className="min-w-0 flex-1 truncate text-muted-foreground">{call.args}</code>
+          <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground">
+            {call.remaining !== undefined && <span>{t('review.activity_remaining', { count: call.remaining })}</span>}
+            <span>{call.error ? t('review.activity_failed') : call.chars !== undefined ? t('review.activity_chars', { count: call.chars }) : '…'}</span>
+          </span>
+        </div>
+        {call.preview && <p className="truncate text-muted-foreground">{call.preview}</p>}
+        {call.error && <p className="text-danger">{call.error}</p>}
+      </div>
+    ))}
+  </div>
+}
 
 interface Props {
   experiment: Experiment
@@ -45,6 +66,7 @@ export default function ReviewPanel({ experiment, selected, taskPicker, preparat
   const [historyOffset, setHistoryOffset] = useState(0)
   const [historyTotal, setHistoryTotal] = useState(0)
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [historyRevision, setHistoryRevision] = useState(0)
   const [question, setQuestion] = useState('')
   const [loadingReport, setLoadingReport] = useState('')
   const suggestionController = useRef<AbortController | null>(null)
@@ -87,7 +109,7 @@ export default function ReviewPanel({ experiment, selected, taskPicker, preparat
       }
     }).catch(reason => { if (!canceled) setError(reviewError(reason, t)) }).finally(() => { if (!canceled) setHistoryLoaded(true) })
     return () => { canceled = true }
-  }, [experiment.id, session.version, historyOffset, t, onRestoreSelection])
+  }, [experiment.id, session.version, historyOffset, historyRevision, t, onRestoreSelection])
 
   const analyze = async () => {
     setError(''); setChosen(null); setSaving(true)
@@ -124,6 +146,16 @@ export default function ReviewPanel({ experiment, selected, taskPicker, preparat
       setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (reason) { toast.error((reason as Error).message) }
   }
+  const removeReport = async (item: ReportSummary) => {
+    if (!window.confirm(t('review.delete_report_confirm'))) return
+    try {
+      await deleteReport(experiment.id, item.id)
+      if (chosen?.id === item.id) setChosen(null)
+      if (lastReport?.id === item.id) setLastReport(null)
+      setHistoryRevision(value => value + 1)
+      toast.success(t('review.report_deleted'))
+    } catch (reason) { setError(reviewError(reason, t)) }
+  }
   const changed = !!report && (JSON.stringify(report.config) !== JSON.stringify(draft) || [...selected].sort().join(',') !== report.tasks.map(task => task.run_id).sort().join(','))
   return <div className="space-y-6">
     {loadingInitialReport && <p className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />{t('common.loading')}</p>}
@@ -145,7 +177,25 @@ export default function ReviewPanel({ experiment, selected, taskPicker, preparat
       <Button type="button" size="sm" variant="ghost" className="h-auto max-w-full whitespace-normal text-left text-xs text-muted-foreground" disabled={busy || suggesting} onClick={() => setSettings(true)}><Settings2 className="size-3.5 shrink-0" />{!modelLoaded ? t('common.loading') : modelReady ? t('review.using_model', { model: model?.model }) : t('review.model_settings')}</Button>
       <div className="flex flex-wrap items-center gap-3"><span className="text-xs text-muted-foreground">{selected.length < 2 ? t('review.choose_two') : t('review.ready_hint', { count: selected.length })}</span>{session.running ? <Button variant="outline" onClick={() => stopReview(experiment.id)}><Square className="size-4" />{t('review.stop')}</Button> : <Button disabled={busy || suggesting || !modelReady || selected.length < 2 || !draft.selected.length || draft.points.some(point => !point.name.trim())} onClick={() => void analyze()}><Sparkles className="size-4" />{t('review.start')}</Button>}</div>
     </div>}
-    {session.running && <div role="status" className="flex flex-wrap items-center gap-2 text-sm"><Loader2 className="size-4 shrink-0 animate-spin" />{t(`review.phases.${session.phase}`)}<span className="ml-auto text-xs text-muted-foreground">{t('review.continues_hint')}</span></div>}
+    {session.running && (session.calls.length ? (
+      <details role="status" className="text-sm" data-testid="review-activity">
+        <summary className="flex cursor-pointer flex-wrap items-center gap-2">
+          <Loader2 className="size-4 shrink-0 animate-spin" />
+          {t(`review.phases.${session.phase}`)}
+          <span className="text-xs text-muted-foreground">{t('review.activity_title', { count: session.calls.filter(call => call.chars !== undefined || call.error).length })}</span>
+          <span className="ml-auto text-xs text-muted-foreground">{t('review.continues_hint')}</span>
+        </summary>
+        <ToolCallList calls={session.calls} />
+      </details>
+    ) : (
+      <div role="status" className="flex flex-wrap items-center gap-2 text-sm"><Loader2 className="size-4 shrink-0 animate-spin" />{t(`review.phases.${session.phase}`)}<span className="ml-auto text-xs text-muted-foreground">{t('review.continues_hint')}</span></div>
+    ))}
+    {!session.running && session.calls.length > 0 && (
+      <details className="text-xs text-muted-foreground">
+        <summary className="flex w-fit cursor-pointer items-center gap-1"><Wrench className="size-3.5" />{t('review.activity_title', { count: session.calls.filter(call => call.chars !== undefined || call.error).length })}</summary>
+        <ToolCallList calls={session.calls} />
+      </details>
+    )}
     {(error || session.error) && <p role="alert" className="text-sm text-danger">{error || reviewError(new Error(session.error), t)}</p>}
     {report && !session.running && <section ref={reportAnchor} className="scroll-mt-20 space-y-5 border-t border-border pt-5" aria-label={t('review.report_title')}>
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4"><div className="min-w-0 space-y-1"><h3 className="font-medium">{t(report.question ? 'review.followup_result' : 'review.report_title')}</h3><p className="break-words text-xs text-muted-foreground">{t('review.report_meta', { model: report.model, time: new Date(report.created_at).toLocaleString() })}</p></div><Button type="button" size="sm" variant="outline" disabled={!completed} onClick={download}><Download className="size-3.5" />{t('review.export_markdown')}</Button></header>
@@ -155,10 +205,11 @@ export default function ReviewPanel({ experiment, selected, taskPicker, preparat
       {completed && <details className="border-t border-border pt-4 text-sm"><summary className="w-fit cursor-pointer">{t('review.followup')}</summary><div className="mt-3 flex flex-col gap-2 sm:flex-row"><Textarea aria-label={t('review.followup')} placeholder={t('review.followup_placeholder')} value={question} rows={2} maxLength={2600} onChange={event => setQuestion(event.target.value)} /><Button className="self-end" disabled={busy || suggesting || !question.trim() || !modelReady} onClick={() => { setChosen(null); setError(''); setEditing(false); scrollAfterReview.current = true; const text = question.trim(); void startReview(experiment.id, { parent_id: report.id, question: text, language }).then(() => { if (getReviewSession(experiment.id).error) scrollAfterReview.current = false; else setQuestion('') }) }}>{t('review.followup')}</Button></div></details>}
     </section>}
     {(history.length > 0 || completed) && <div className="flex flex-wrap items-start justify-between gap-3 border-t border-border pt-3">
-      {history.length > 0 && <details className="min-w-0 flex-1 text-xs"><summary className="flex w-fit cursor-pointer items-center gap-1 text-muted-foreground"><History className="size-3.5" />{t('review.history', { count: historyTotal })}</summary><div className="mt-2 space-y-1">{history.map(item => <button type="button" className="flex w-full items-center justify-between gap-3 rounded p-2 text-left hover:bg-accent disabled:opacity-50" key={item.id} disabled={busy || !!loadingReport} aria-pressed={report?.id === item.id} onClick={async () => {
+      {history.length > 0 && <details className="min-w-0 flex-1 text-xs"><summary className="flex w-fit cursor-pointer items-center gap-1 text-muted-foreground"><History className="size-3.5" />{t('review.history', { count: historyTotal })}</summary><div className="mt-2 space-y-1">{history.map(item => <div key={item.id} className="flex items-center gap-1"><button type="button" className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded p-2 text-left hover:bg-accent disabled:opacity-50" disabled={busy || !!loadingReport} aria-pressed={report?.id === item.id} onClick={async () => {
         setLoadingReport(item.id)
         try { const value = await fetchReport(experiment.id, item.id); scrollAfterReview.current = value.status === 'completed'; setChosen(value) } catch (reason) { setError(reviewError(reason, t)) } finally { setLoadingReport('') }
-      }}><span className="truncate">{new Date(item.created_at).toLocaleString()} · {item.question || t('review.last_result')}</span><span className="shrink-0">{loadingReport === item.id ? t('common.loading') : t(`review.status.${item.status}`)}</span></button>)}</div>{historyTotal > 10 && <div className="mt-2 flex gap-2"><Button size="xs" variant="outline" disabled={busy || !historyOffset} onClick={() => setHistoryOffset(Math.max(0, historyOffset - 10))}>{t('correlation.previous')}</Button><Button size="xs" variant="outline" disabled={busy || historyOffset + 10 >= historyTotal} onClick={() => setHistoryOffset(historyOffset + 10)}>{t('correlation.next')}</Button></div>}</details>}
+      }}><span className="truncate">{new Date(item.created_at).toLocaleString()} · {item.question || t('review.last_result')}</span><span className="shrink-0">{loadingReport === item.id ? t('common.loading') : t(`review.status.${item.status}`)}</span></button>
+        {item.status !== 'running' && <Button type="button" size="icon-xs" variant="ghost" className="shrink-0 text-muted-foreground hover:text-danger" disabled={busy || !!loadingReport} aria-label={t('review.delete_report')} onClick={() => { void removeReport(item) }}><Trash2 className="size-3.5" /></Button>}</div>)}</div>{historyTotal > 10 && <div className="mt-2 flex gap-2"><Button size="xs" variant="outline" disabled={busy || !historyOffset} onClick={() => setHistoryOffset(Math.max(0, historyOffset - 10))}>{t('correlation.previous')}</Button><Button size="xs" variant="outline" disabled={busy || historyOffset + 10 >= historyTotal} onClick={() => setHistoryOffset(historyOffset + 10)}>{t('correlation.next')}</Button></div>}</details>}
       {completed && <Button type="button" size="sm" variant="ghost" className="ml-auto text-xs text-muted-foreground" disabled={busy} onClick={() => setSavingTemplate(report.config)}>{t('review.save_as_template')}</Button>}
     </div>}
     {settings && <Suspense fallback={<p>{t('common.loading')}</p>}><ModelSettings value={model} onClose={() => setSettings(false)} onSaved={value => { setModel(value); setSettings(false) }} /></Suspense>}

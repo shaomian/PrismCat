@@ -90,3 +90,19 @@ func (a *AsyncRepository) ExperimentLogs(ctx context.Context, id string, l int) 
 	}
 	return r.ExperimentLogs(ctx, id, l)
 }
+
+// SearchExperimentLogs 走窄接口断言,不强迫所有 ExperimentRepository 实现
+// (含测试桩)都补上可选的检索能力。
+func (a *AsyncRepository) SearchExperimentLogs(ctx context.Context, id, query string, errorsOnly bool, limit, offset int) ([]*RequestLog, error) {
+	r, e := a.experimentStore()
+	if e != nil {
+		return nil, e
+	}
+	searcher, ok := r.(interface {
+		SearchExperimentLogs(context.Context, string, string, bool, int, int) ([]*RequestLog, error)
+	})
+	if !ok {
+		return nil, errors.New("task search unavailable")
+	}
+	return searcher.SearchExperimentLogs(ctx, id, query, errorsOnly, limit, offset)
+}

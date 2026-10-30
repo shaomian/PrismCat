@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/shaomian/PrismCat/internal/benchmark"
 )
+
+// ErrReportActive 表示报告仍在分析中,不能删除。报告证据的保留保护挂在
+// 卡片 keep 标志和运行状态上,删除已完成的历史报告不影响任务日志保留。
+var ErrReportActive = errors.New("report is still running")
 
 type ReviewRepository interface {
 	ListReviewTemplates(string, int, int) ([]benchmark.ReviewTemplateSummary, int64, error)
@@ -19,6 +24,7 @@ type ReviewRepository interface {
 	GetReviewReport(string) (benchmark.ReviewReport, error)
 	CreateReviewReport(benchmark.ReviewReport) error
 	FinishReviewReport(benchmark.ReviewReport) error
+	DeleteReviewReport(string, string) error
 }
 
 func (r *SQLiteRepository) migrateReviews() error {
@@ -238,4 +244,23 @@ func (r *SQLiteRepository) FinishReviewReport(v benchmark.ReviewReport) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// DeleteReviewReport 删除一份已完成的历史报告;归属校验在查询里完成,
+// 不属于该卡片的报告按不存在处理。运行中的报告拒绝删除。
+func (r *SQLiteRepository) DeleteReviewReport(id, experimentID string) error {
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+	var status string
+	if err := r.db.QueryRow("SELECT status FROM review_reports WHERE id=? AND experiment_id=?", id, experimentID).Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return sql.ErrNoRows
+		}
+		return err
+	}
+	if status == "running" {
+		return ErrReportActive
+	}
+	_, err := r.db.Exec("DELETE FROM review_reports WHERE id=?", id)
+	return err
 }

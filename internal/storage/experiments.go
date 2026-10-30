@@ -555,3 +555,56 @@ func (r *SQLiteRepository) ExperimentLogs(ctx context.Context, id string, limit 
 	}
 	return logs, rows.Err()
 }
+
+// searchBodyPreviewBytes 限制关键词检索扫描的正文前缀长度。数据库里的正文
+// 可能达到数 MB;截前缀既约束 LIKE 扫描成本,又恰好覆盖保留的可读预览。
+const searchBodyPreviewBytes = 4096
+
+// SearchExperimentLogs 返回某个实验任务日志的原始行窗口,可按关键词或
+// "仅失败"收窄。关键词用 LIKE(SQLite 默认对 ASCII 大小写不敏感)匹配
+// 路径、错误文本与两侧正文预览;行内附同样的预览,供命中片段渲染。
+// SupportedPath 过滤留在调用方,SQL 不重复协议知识;offset 是原始行
+// 游标,调用方用 len(rows) 推进。范围圈定与 ExperimentLogs 完全一致。
+func (r *SQLiteRepository) SearchExperimentLogs(ctx context.Context, id, query string, errorsOnly bool, limit, offset int) ([]*RequestLog, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	conditions := []string{
+		"((capture_run_id!='' AND capture_run_id=(SELECT capture_run_id FROM experiment_runs WHERE id=?)) OR trace_id IN (SELECT et.trace_id FROM experiment_run_traces et WHERE run_id=? AND NOT EXISTS(SELECT 1 FROM experiment_trace_snapshots s WHERE s.run_id=et.run_id AND s.trace_id=et.trace_id)) OR EXISTS(SELECT 1 FROM experiment_trace_samples s WHERE s.run_id=? AND s.log_id=l.id))",
+		"method='POST'",
+		"COALESCE(tag,'') NOT LIKE 'prismcat-analysis%'",
+	}
+	args := []any{searchBodyPreviewBytes, searchBodyPreviewBytes, id, id, id}
+	if errorsOnly {
+		conditions = append(conditions, "(status_code>=400 OR COALESCE(error,'')!='')")
+	}
+	if query != "" {
+		like := "%" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(query) + "%"
+		conditions = append(conditions, "(path LIKE ? ESCAPE '\\' OR COALESCE(error,'') LIKE ? ESCAPE '\\' OR SUBSTR(COALESCE(request_body,''),1,?) LIKE ? ESCAPE '\\' OR SUBSTR(COALESCE(response_body,''),1,?) LIKE ? ESCAPE '\\')")
+		args = append(args, like, like, searchBodyPreviewBytes, like, searchBodyPreviewBytes, like)
+	}
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+	SELECT id,created_at,method,path,status_code,latency_ms,COALESCE(error,''),trace_id,SUBSTR(COALESCE(request_body,''),1,?),SUBSTR(COALESCE(response_body,''),1,?)
+	FROM request_logs l WHERE %s ORDER BY created_at_unix_ms,id LIMIT ? OFFSET ?`,
+		strings.Join(conditions, " AND ")), append(args, limit, offset)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	logs := []*RequestLog{}
+	for rows.Next() {
+		entry := &RequestLog{}
+		if err = rows.Scan(&entry.ID, &entry.CreatedAt, &entry.Method, &entry.Path, &entry.StatusCode, &entry.Latency, &entry.Error, &entry.TraceID, &entry.RequestBody, &entry.ResponseBody); err != nil {
+			return nil, err
+		}
+		entry.CreatedAt = entry.CreatedAt.UTC()
+		logs = append(logs, entry)
+	}
+	return logs, rows.Err()
+}

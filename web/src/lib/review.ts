@@ -26,6 +26,7 @@ export const saveTemplate = (value: ReviewTemplate) => {
 }
 export const fetchReports = (id: string, offset = 0) => request<{ reports: ReportSummary[]; total: number }>(`${reviewBase(id)}/reports?offset=${offset}&limit=10`)
 export const fetchReport = (id: string, report: string) => request<ReviewReport>(`${reviewBase(id)}/reports/${encodeURIComponent(report)}`)
+export const deleteReport = (id: string, report: string) => request<{ status: string }>(`${reviewBase(id)}/reports/${encodeURIComponent(report)}`, { method: 'DELETE' })
 export const fetchReviewLog = (id: string, report: string, log: string) => request<import('./api').RequestLog>(`${reviewBase(id)}/reports/${encodeURIComponent(report)}/logs/${encodeURIComponent(log)}`)
 export const suggestPoints = (id: string, revision: number, runIds: string[], config: ReviewConfig, language: string, signal: AbortSignal) => request<{ points: ReviewPoint[] }>(`${reviewBase(id)}/suggest`, { ...jsonInit('POST', { revision, run_ids: runIds, config, language }), signal })
 

@@ -1,11 +1,13 @@
 package storage
 
 import (
+	"database/sql"
 	"errors"
-	"github.com/shaomian/PrismCat/internal/benchmark"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/shaomian/PrismCat/internal/benchmark"
 )
 
 func reviewTestConfig() benchmark.ReviewConfig {
@@ -132,5 +134,38 @@ func TestReviewRestartMarksUnfinishedReportsInterrupted(t *testing.T) {
 	}
 	if err = r.CreateReviewReport(benchmark.ReviewReport{ID: "retry", ExperimentID: e.ID, Status: "running", CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("interrupted report blocked retry: %v", err)
+	}
+}
+
+func TestDeleteReviewReport(t *testing.T) {
+	r := mustNewSQLiteRepoForTest(t)
+	defer r.Close()
+	e := testExperiment(t, r)
+	other := testExperiment(t, r)
+
+	// 运行中的报告拒绝删除
+	if err := r.CreateReviewReport(benchmark.ReviewReport{ID: "active", ExperimentID: e.ID, Status: "running", Config: reviewTestConfig(), CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.DeleteReviewReport("active", e.ID); !errors.Is(err, ErrReportActive) {
+		t.Fatalf("running report deleted: %v", err)
+	}
+	// 归属校验:别的卡片的报告按不存在处理
+	if err := r.DeleteReviewReport("active", other.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("foreign experiment accepted: %v", err)
+	}
+
+	// 完成后可删除,历史随之消失
+	if err := r.FinishReviewReport(benchmark.ReviewReport{ID: "active", ExperimentID: e.ID, Status: "completed", Config: reviewTestConfig(), CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.DeleteReviewReport("active", e.ID); err != nil {
+		t.Fatalf("delete completed report: %v", err)
+	}
+	if _, total, err := r.ListReviewReports(e.ID, 0, 10); err != nil || total != 0 {
+		t.Fatalf("deleted report still listed: %d %v", total, err)
+	}
+	if err := r.DeleteReviewReport("active", e.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("double delete accepted: %v", err)
 	}
 }

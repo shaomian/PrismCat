@@ -62,3 +62,10 @@ func (a *AsyncRepository) FinishReviewReport(v benchmark.ReviewReport) error {
 	}
 	return r.FinishReviewReport(v)
 }
+func (a *AsyncRepository) DeleteReviewReport(id, experimentID string) error {
+	r, e := a.reviewStore()
+	if e != nil {
+		return e
+	}
+	return r.DeleteReviewReport(id, experimentID)
+}
