@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -122,5 +123,110 @@ func TestExperimentWorkflowComparisonAndOwnership(t *testing.T) {
 	pinned.TopAt = -1
 	if rr = request("PUT", "/api/traces/task-a/metadata", pinned); rr.Code != 400 {
 		t.Fatalf("negative top position accepted: %d %s", rr.Code, rr.Body)
+	}
+}
+
+// 历史上统计截断在前 2000 条,超长任务的耗时/请求数/Token 会失真,
+// 且复盘 AI 的证据分页只能看到被截断的日志清单。放开上限后统计必须全量。
+func TestExperimentStatisticsCountBeyondLegacySamplingCap(t *testing.T) {
+	repo, err := storage.NewSQLiteRepository(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	mux := http.NewServeMux()
+	h := New(&config.Config{}, repo, nil, nil)
+	h.RegisterRoutes(mux)
+	request := func(method, path string, value any) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(value)
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, httptest.NewRequest(method, path, strings.NewReader(string(body))))
+		return rr
+	}
+	e := benchmark.Experiment{Name: "Big task", Keep: true}
+	rr := request("POST", "/api/experiments", e)
+	if rr.Code != 200 {
+		t.Fatalf("create: %d %s", rr.Code, rr.Body)
+	}
+	if err = json.Unmarshal(rr.Body.Bytes(), &e); err != nil {
+		t.Fatal(err)
+	}
+
+	const total = 2005
+	base := time.Now().Add(-time.Hour)
+	for i := 0; i < total; i++ {
+		if err = repo.SaveLog(&storage.RequestLog{
+			ID:         fmt.Sprintf("big-log-%d", i),
+			TraceID:    "big-task",
+			CreatedAt:  base.Add(time.Duration(i) * time.Second),
+			Upstream:   "agent",
+			Method:     "POST",
+			Path:       "/v1/chat/completions",
+			StatusCode: 200,
+			Latency:    10,
+		}); err != nil {
+			t.Fatalf("save log %d: %v", i, err)
+		}
+	}
+	if err = repo.SaveLog(&storage.RequestLog{ID: "small-log-1", TraceID: "small-task", CreatedAt: base, Upstream: "agent", Method: "POST", Path: "/v1/chat/completions", StatusCode: 200, Latency: 10}); err != nil {
+		t.Fatal(err)
+	}
+
+	runIDs := []string{}
+	for _, traceID := range []string{"big-task", "small-task"} {
+		run := benchmark.Run{Name: traceID, State: "completed", Conditions: benchmark.Conditions{Agent: "a"}, TraceIDs: []string{traceID}}
+		rr = request("POST", "/api/experiments/"+e.ID+"/runs", run)
+		if rr.Code != 200 {
+			t.Fatalf("create run %s: %d %s", traceID, rr.Code, rr.Body)
+		}
+		if err = json.Unmarshal(rr.Body.Bytes(), &run); err != nil {
+			t.Fatal(err)
+		}
+		runIDs = append(runIDs, run.ID)
+	}
+
+	// 统计单元:全部 2005 条都要计入,且不再标记 sampled
+	bigRun := benchmark.Run{Name: "big-task", State: "completed", Conditions: benchmark.Conditions{Agent: "a"}, TraceIDs: []string{"big-task"}}
+	rr = request("GET", "/api/experiments/"+e.ID+"/runs/"+runIDs[0], nil)
+	if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &bigRun) != nil {
+		t.Fatalf("load run: %d %s", rr.Code, rr.Body)
+	}
+	result, err := h.measureExperimentRun(httptest.NewRequest(http.MethodGet, "/", nil), repo, bigRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metrics.Requests != total {
+		t.Fatalf("requests = %d, want %d (legacy cap truncated statistics)", result.Metrics.Requests, total)
+	}
+	if result.Metrics.Sampled {
+		t.Fatal("sampled = true, want false")
+	}
+	// 复盘 AI 的证据分页遍历这份 LogIDs,必须是全量
+	if len(result.Metrics.LogIDs) != total {
+		t.Fatalf("log ids = %d, want %d", len(result.Metrics.LogIDs), total)
+	}
+
+	// 对比接口:统计全量,但响应不携带逐条日志 ID(与 publicReview 同策略)
+	rr = request("GET", "/api/experiments/"+e.ID+"/compare?runs="+strings.Join(runIDs, ","), nil)
+	if rr.Code != 200 {
+		t.Fatalf("compare: %d %s", rr.Code, rr.Body)
+	}
+	var c benchmark.Comparison
+	if err = json.Unmarshal(rr.Body.Bytes(), &c); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(c.Results))
+	}
+	for _, res := range c.Results {
+		if len(res.Metrics.LogIDs) != 0 {
+			t.Fatalf("compare response leaked %d log IDs", len(res.Metrics.LogIDs))
+		}
+	}
+	if res := c.Results[0]; res.Metrics.Requests != total || res.Metrics.Sampled {
+		t.Fatalf("big run metrics: requests=%d sampled=%v", res.Metrics.Requests, res.Metrics.Sampled)
+	}
+	if got := strings.Contains(rr.Body.String(), "big-log-0"); got {
+		t.Fatal("compare response contains individual log IDs")
 	}
 }

@@ -201,6 +201,12 @@ func (h *Handler) handleExperimentDetail(w http.ResponseWriter, r *http.Request)
 			results = append(results, result)
 		}
 		comparison := benchmark.Compare(experiment, results)
+		// 与 publicReview 同策略:证据清单留在服务端(复盘 AI 用内存中的全量
+		// LogIDs 分页检索),对比/导出响应只携带紧凑指标,避免超大任务的响应
+		// 被数万个日志 ID 撑到数 MB
+		for i := range comparison.Results {
+			comparison.Results[i].Metrics.LogIDs = []string{}
+		}
 		if parts[1] == "export" {
 			w.Header().Set("Content-Disposition", `attachment; filename="prismcat-experiment.json"`)
 		}
@@ -299,14 +305,20 @@ func (h *Handler) handleExperimentDetail(w http.ResponseWriter, r *http.Request)
 	h.jsonError(w, "not found", 404)
 }
 
+// experimentStatsLogLimit 是统计的兜底上限。ExperimentLogs 只读元数据列
+// (定长小行,不含正文),十万级也是毫秒级 SQL 与几 MB 内存;上限只防极端任务
+// 拖垮进程。复盘 AI 的证据工具分页遍历同一份 LogIDs,因此这里放开后
+// AI 可检索的日志范围也随之变为全量。
+const experimentStatsLogLimit = 200000
+
 func (h *Handler) measureExperimentRun(r *http.Request, repo storage.ExperimentRepository, run benchmark.Run) (benchmark.Result, error) {
-	logs, err := repo.ExperimentLogs(r.Context(), run.ID, 2001)
+	logs, err := repo.ExperimentLogs(r.Context(), run.ID, experimentStatsLogLimit+1)
 	if err != nil {
 		return benchmark.Result{}, err
 	}
-	sampled := len(logs) > 2000
+	sampled := len(logs) > experimentStatsLogLimit
 	if sampled {
-		logs = logs[:2000]
+		logs = logs[:experimentStatsLogLimit]
 	}
 	samples := []benchmark.Sample{}
 	for _, log := range logs {

@@ -890,7 +890,7 @@
         },
         "warnings": {
             "no_logs": "No model request logs yet.",
-            "sampled": "Only the first 2000 logs are included.",
+            "sampled": "An unusually large number of logs; only a leading portion was measured, so counts may be low.",
             "partial_usage": "Some token data is missing; known usage is shown.",
             "run_not_completed": "Capture or requests are still active; data may change.",
             "task_changed": "These runs have different task descriptions.",
