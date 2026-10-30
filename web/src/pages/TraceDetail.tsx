@@ -22,6 +22,9 @@ const TraceDiagram = lazy(async () => ({ default: (await import('@/components/Tr
 const AnalysisChat = lazy(async () => ({ default: (await import('@/components/AnalysisChat')).AnalysisChat }))
 const LogDetail = lazy(async () => ({ default: (await import('@/components/LogDetail')).LogDetail }))
 const DIAGRAM_PAGE_SIZE = 25
+// 超过该条数视为超大调用链:对话/流程图首次构建需全量解析,提示可能较慢。
+// 纯提示不设机制,summary.request_count 在进入页面时已就绪。
+const LARGE_TRACE_HINT_THRESHOLD = 20000
 
 export function TraceDetail() {
   const { t, i18n } = useTranslation()
@@ -345,8 +348,13 @@ export function TraceDetail() {
           {timelineError ? (
             <ViewLoadError message={t('timeline.load_failed')} onRetry={() => setViewReload(value => value + 1)} />
           ) : !timeline ? (
-            <div className="flex min-h-[20vh] items-center justify-center">
+            <div className="flex min-h-[20vh] flex-col items-center justify-center gap-3">
               <Spinner />
+              {summary.request_count >= LARGE_TRACE_HINT_THRESHOLD && (
+                <p className="max-w-md px-4 text-center text-xs text-muted-foreground">
+                  {t('timeline.large_trace_hint', { requests: summary.request_count.toLocaleString() })}
+                </p>
+              )}
             </div>
           ) : (
             <TraceTimelineView
@@ -378,8 +386,13 @@ export function TraceDetail() {
           {diagramError ? (
             <ViewLoadError message={t('timeline.diagram.load_failed')} onRetry={() => setViewReload(value => value + 1)} />
           ) : !diagram ? (
-            <div className="flex min-h-[20vh] items-center justify-center">
+            <div className="flex min-h-[20vh] flex-col items-center justify-center gap-3">
               <Spinner />
+              {summary.request_count >= LARGE_TRACE_HINT_THRESHOLD && (
+                <p className="max-w-md px-4 text-center text-xs text-muted-foreground">
+                  {t('timeline.large_trace_hint', { requests: summary.request_count.toLocaleString() })}
+                </p>
+              )}
             </div>
           ) : (
             <Suspense fallback={<PageLoading className="min-h-[20vh]" />}>

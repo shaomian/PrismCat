@@ -323,6 +323,7 @@
         "tab_conversation": "对话视图",
         "tab_diagram": "流程图",
         "tab_requests": "请求视图",
+        "large_trace_hint": "超大调用链（{{requests}} 条请求），首次构建可能较慢，请稍候。",
         "export": {
             "events": "导出压缩 JSONL",
             "raw": "导出原始 JSONL"

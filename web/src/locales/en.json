@@ -323,6 +323,7 @@
         "tab_conversation": "Conversation",
         "tab_diagram": "Diagram",
         "tab_requests": "Requests",
+        "large_trace_hint": "Very large trace ({{requests}} requests); the first build may take a while.",
         "export": {
             "events": "Export Events JSONL",
             "raw": "Export Raw JSONL"
