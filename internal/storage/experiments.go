@@ -564,23 +564,35 @@ const searchBodyPreviewBytes = 4096
 // "仅失败"收窄。关键词用 LIKE(SQLite 默认对 ASCII 大小写不敏感)匹配
 // 路径、错误文本与两侧正文预览;行内附同样的预览,供命中片段渲染。
 // SupportedPath 过滤留在调用方,SQL 不重复协议知识;offset 是原始行
-// 游标,调用方用 len(rows) 推进。范围圈定与 ExperimentLogs 完全一致。
+// 游标，调用方按实际消费位置推进。范围圈定与 ExperimentLogs 完全一致。
 func (r *SQLiteRepository) SearchExperimentLogs(ctx context.Context, id, query string, errorsOnly bool, limit, offset int) ([]*RequestLog, error) {
-	if limit <= 0 {
-		limit = 200
-	}
-	if limit > 1000 {
-		limit = 1000
-	}
-	if offset < 0 {
-		offset = 0
-	}
 	conditions := []string{
 		"((capture_run_id!='' AND capture_run_id=(SELECT capture_run_id FROM experiment_runs WHERE id=?)) OR trace_id IN (SELECT et.trace_id FROM experiment_run_traces et WHERE run_id=? AND NOT EXISTS(SELECT 1 FROM experiment_trace_snapshots s WHERE s.run_id=et.run_id AND s.trace_id=et.trace_id)) OR EXISTS(SELECT 1 FROM experiment_trace_samples s WHERE s.run_id=? AND s.log_id=l.id))",
 		"method='POST'",
 		"COALESCE(tag,'') NOT LIKE 'prismcat-analysis%'",
 	}
-	args := []any{searchBodyPreviewBytes, searchBodyPreviewBytes, id, id, id}
+	return r.searchReviewLogs(ctx, conditions, []any{id, id, id}, query, errorsOnly, limit, offset)
+}
+
+// SearchReviewLogs 的成员来自报告快照，不依赖当前任务引用，历史追问也保持原范围。
+func (r *SQLiteRepository) SearchReviewLogs(ctx context.Context, ids []string, query string, errorsOnly bool, limit, offset int) ([]*RequestLog, error) {
+	if len(ids) == 0 {
+		return []*RequestLog{}, ctx.Err()
+	}
+	raw, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	return r.searchReviewLogs(ctx, []string{"l.id IN (SELECT value FROM json_each(?))", "method='POST'", "COALESCE(tag,'') NOT LIKE 'prismcat-analysis%'"}, []any{string(raw)}, query, errorsOnly, limit, offset)
+}
+
+func (r *SQLiteRepository) searchReviewLogs(ctx context.Context, conditions []string, scopeArgs []any, query string, errorsOnly bool, limit, offset int) ([]*RequestLog, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	limit = min(limit, 1000)
+	offset = max(0, offset)
+	args := append([]any{searchBodyPreviewBytes, searchBodyPreviewBytes}, scopeArgs...)
 	if errorsOnly {
 		conditions = append(conditions, "(status_code>=400 OR COALESCE(error,'')!='')")
 	}

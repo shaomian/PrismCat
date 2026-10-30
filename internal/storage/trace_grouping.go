@@ -305,7 +305,7 @@ func (r *SQLiteRepository) ApplyTraceGrouping(ctx context.Context, v TraceGroupi
 		a.Locked = true
 		a.Revision++
 		info, _ := json.Marshal(a)
-		if _, err = tx.ExecContext(ctx, `INSERT INTO trace_assignments(log_id,trace_id,trace_seq,parent_log_id,info,locked,features,updated_at) VALUES(?,?,0,'',?,1,'',?) ON CONFLICT(log_id) DO UPDATE SET trace_id=excluded.trace_id,info=excluded.info,locked=1,updated_at=excluded.updated_at`, row.id, target, string(info), time.Now().UnixMilli()); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO trace_assignments(log_id,trace_id,trace_seq,parent_log_id,info,locked,features,updated_at) VALUES(?,?,0,'',?,1,'',?) ON CONFLICT(log_id) DO UPDATE SET trace_id=excluded.trace_id,info=excluded.info,locked=1`, row.id, target, string(info), time.Now().UnixMilli()); err != nil {
 			return result, err
 		}
 		if _, err = tx.ExecContext(ctx, "UPDATE request_logs SET trace_id=?,trace_info=? WHERE id=?", target, string(info), row.id); err != nil {
@@ -453,11 +453,7 @@ func (a *AsyncRepository) ApplyTraceGrouping(ctx context.Context, v TraceGroupin
 	}
 	result, err := repo.ApplyTraceGrouping(ctx, v)
 	if err == nil && a.correlator != nil {
-		if observations, e := repo.loadObservations(); e == nil {
-			for _, o := range observations {
-				a.correlator.Restore(o)
-			}
-		}
+		a.reloadCorrelator(repo)
 	}
 	return result, err
 }

@@ -1,12 +1,14 @@
 package storage
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log"
 	"strings"
 	"time"
 
+	"github.com/shaomian/PrismCat/internal/config"
 	"github.com/shaomian/PrismCat/internal/httpbody"
 	"github.com/shaomian/PrismCat/internal/trace"
 )
@@ -91,7 +93,7 @@ func (a *AsyncRepository) correlationObservation(entry *RequestLog) *trace.Obser
 	if !f.Valid && (!trace.SupportedPath(entry.Path) || entry.Method != "POST" || (len(req) == 0 && !entry.CorrelationFinal)) {
 		return nil
 	}
-	o := &trace.Observation{LogID: entry.ID, Scope: entry.Upstream, CreatedAt: entry.CreatedAt, Request: f}
+	o := &trace.Observation{LogID: entry.ID, Scope: entry.Upstream, CreatedAt: entry.CreatedAt, ObservedAt: time.Now(), Request: f}
 	if entry.CorrelationFinal && !entry.ResponseBodyCaptureTruncated && entry.StatusCode >= 200 && entry.StatusCode < 300 {
 		o.Response = trace.ParseResponse(f.Format, featureBody(entry.ResponseBodyRaw, entry.ResponseHeaders, false), entry.Streaming)
 	}
@@ -99,6 +101,29 @@ func (a *AsyncRepository) correlationObservation(entry *RequestLog) *trace.Obser
 		o.Assignment = trace.Assignment{TraceID: entry.TraceID, SessionID: "explicit-" + entry.TraceID, Source: "explicit", Reason: "explicit_header", State: "declared"}
 	}
 	return o
+}
+
+func (a *AsyncRepository) correlationPolicy() config.CorrelationConfig {
+	if a.cfg != nil {
+		return a.cfg.CorrelationSnapshot()
+	}
+	return config.NormalizeCorrelation(config.CorrelationConfig{})
+}
+
+// Called at startup or under correlationMu after manual grouping changes.
+func (a *AsyncRepository) reloadCorrelator(store *SQLiteRepository) {
+	policy := a.correlationPolicy()
+	now := time.Now()
+	a.correlator = trace.NewCorrelator()
+	a.correlator.Tune(policy.MaxEntries, policy.IdleWindow())
+	if observations, err := store.loadObservations(policy, now); err == nil {
+		for _, o := range observations {
+			a.correlator.Restore(o)
+		}
+	} else {
+		log.Printf("trace correlation recovery failed: %v", err)
+	}
+	a.correlator.Prune(now)
 }
 
 func (a *AsyncRepository) processCorrelation(o *trace.Observation, entry *RequestLog) {
@@ -112,16 +137,39 @@ func (a *AsyncRepository) processCorrelation(o *trace.Observation, entry *Reques
 	a.correlationMu.Lock()
 	defer a.correlationMu.Unlock()
 	// 配置热更新跟随:每条观测处理前对齐一次内存边界,成本是一次快照读
-	idleWindow := trace.DefaultIdle
-	if a.cfg != nil {
-		snapshot := a.cfg.CorrelationSnapshot()
-		a.correlator.Tune(snapshot.MaxEntries, snapshot.IdleWindow())
-		idleWindow = snapshot.IdleWindow()
-	}
+	policy := a.correlationPolicy()
+	a.correlator.Tune(policy.MaxEntries, policy.IdleWindow())
 	// A final snapshot may have been queued before the user removed its trace.
 	var deleted bool
-	if err := store.db.QueryRow("SELECT EXISTS(SELECT 1 FROM deleted_log_ids WHERE id=?)", entry.ID).Scan(&deleted); err != nil || deleted {
+	var features, info sql.NullString
+	var err error
+	if a.correlator.HasObservation(entry.ID) {
+		err = store.db.QueryRow("SELECT EXISTS(SELECT 1 FROM deleted_log_ids WHERE id=?)", entry.ID).Scan(&deleted)
+	} else {
+		err = store.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM deleted_log_ids WHERE id=?),a.features,a.info
+			FROM (SELECT 1) LEFT JOIN trace_assignments a ON a.log_id=?`, entry.ID, entry.ID).Scan(&deleted, &features, &info)
+	}
+	if err != nil || deleted {
 		return
+	}
+	// Recover only this request's own identity after expiry or restart. Old
+	// features are not reintroduced into the shared matching index.
+	if info.Valid {
+		var previous trace.Observation
+		_ = json.Unmarshal([]byte(features.String), &previous)
+		if o.Assignment.Source == "" {
+			_ = json.Unmarshal([]byte(info.String), &o.Assignment)
+		}
+		o.RootTraceID, o.RootSessionID = previous.RootTraceID, previous.RootSessionID
+		if o.RootTraceID == "" {
+			o.RootTraceID, o.RootSessionID = o.Assignment.TraceID, o.Assignment.SessionID
+		}
+		if !o.Request.Valid {
+			o.Request = previous.Request
+		}
+	}
+	if o.ObservedAt.IsZero() {
+		o.ObservedAt = time.Now()
 	}
 	if entry.CaptureRunID != "" && o.Assignment.Source != "explicit" {
 		if assignment, ok := store.captureAssignment(entry.CaptureRunID); ok {
@@ -134,12 +182,11 @@ func (a *AsyncRepository) processCorrelation(o *trace.Observation, entry *Reques
 			log.Printf("trace correlation persistence failed: %v", err)
 			continue
 		}
-		changed.Assignment = assignment
-		a.correlator.Restore(changed)
+		a.correlator.UpdateAssignment(changed.LogID, assignment)
 	}
 	// Feature summaries are recoverable only within the active idle window.
 	if time.Since(a.correlationPruned) > time.Minute {
-		if _, err := store.db.Exec("UPDATE trace_assignments SET features='' WHERE features!='' AND updated_at<?", time.Now().Add(-idleWindow).UnixMilli()); err != nil {
+		if _, err := store.db.Exec("UPDATE trace_assignments SET features='' WHERE features!='' AND updated_at<?", time.Now().Add(-policy.IdleWindow()).UnixMilli()); err != nil {
 			log.Printf("trace feature cleanup failed: %v", err)
 		}
 		a.correlationPruned = time.Now()
@@ -211,11 +258,7 @@ func (a *AsyncRepository) AssignTrace(id, target string, revision int64) (trace.
 	}
 	assignment, err := repo.AssignTrace(id, target, revision)
 	if err == nil && a.correlator != nil {
-		if observations, loadErr := a.inner.(*SQLiteRepository).loadObservations(); loadErr == nil {
-			for _, o := range observations {
-				a.correlator.Restore(o)
-			}
-		}
+		a.reloadCorrelator(a.inner.(*SQLiteRepository))
 	}
 	return assignment, err
 }

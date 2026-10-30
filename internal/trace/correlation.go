@@ -27,9 +27,19 @@ type Observation struct {
 	LogID         string     `json:"log_id"`
 	Scope         string     `json:"scope"`
 	CreatedAt     time.Time  `json:"created_at"`
+	ObservedAt    time.Time  `json:"observed_at,omitempty"`
 	Request       Features   `json:"request"`
 	Response      Features   `json:"response"`
 	Assignment    Assignment `json:"assignment"`
+}
+
+// ActiveAt is the last request/response observation, not the request start.
+// Older persisted observations use CreatedAt until storage supplies updated_at.
+func (o Observation) ActiveAt() time.Time {
+	if !o.ObservedAt.IsZero() {
+		return o.ObservedAt
+	}
+	return o.CreatedAt
 }
 
 // Correlator is owned by the repository's serialized correlation worker.
@@ -40,6 +50,7 @@ type Correlator struct {
 	waiters    map[string]map[string]bool
 	maxEntries int
 	idle       time.Duration
+	now        time.Time
 }
 
 // 索引边界的默认值。config 包负责校验和归一化(见 NormalizeCorrelation),
@@ -47,6 +58,7 @@ type Correlator struct {
 const (
 	DefaultMaxEntries = 2048
 	DefaultIdle       = 30 * time.Minute
+	MaxEvents         = 65536
 )
 
 func NewCorrelator() *Correlator {
@@ -55,11 +67,26 @@ func NewCorrelator() *Correlator {
 
 // Tune 调整索引边界,供配置热更新复用。非正值忽略,保持当前值。
 func (c *Correlator) Tune(maxEntries int, idle time.Duration) {
+	changed := false
 	if maxEntries > 0 {
+		changed = changed || maxEntries != c.maxEntries
 		c.maxEntries = maxEntries
 	}
 	if idle > 0 {
+		changed = changed || idle != c.idle
 		c.idle = idle
+	}
+	if changed {
+		c.Prune(c.now)
+	}
+}
+
+func (c *Correlator) HasObservation(id string) bool { return c.nodes[id] != nil }
+
+// Persisted revisions/redirects do not refresh evidence or restore evicted nodes.
+func (c *Correlator) UpdateAssignment(id string, assignment Assignment) {
+	if o := c.nodes[id]; o != nil {
+		o.Assignment = assignment
 	}
 }
 
@@ -327,8 +354,12 @@ func (c *Correlator) Restore(o Observation) {
 
 // Observe returns this decision and any previously waiting requests now resolved.
 func (c *Correlator) Observe(o Observation) []Observation {
-	if previous := c.nodes[o.LogID]; previous != nil {
+	previous := c.nodes[o.LogID]
+	c.Prune(o.ActiveAt())
+	known := o.Assignment
+	if previous != nil {
 		o.Assignment = previous.Assignment
+		known = previous.Assignment
 		o.RootTraceID = previous.RootTraceID
 		o.RootSessionID = previous.RootSessionID
 		if !o.Request.Valid {
@@ -348,7 +379,14 @@ func (c *Correlator) Observe(o Observation) []Observation {
 	if o.Request.NativeSession != "" {
 		o.RootSessionID = "session-" + key(o.Scope, "native_session", o.Request.NativeSession)
 	}
-	o.Assignment = c.decide(&o)
+	// Expiry limits evidence for other requests; it does not undo the confirmed
+	// membership of this same request when its final response arrives much later.
+	decision := c.decide(&o)
+	if known.TraceID != "" && known.State != "unresolved" && (c.nodes[o.LogID] == nil || decision.Reason == "pending_reference" || decision.Reason == "new_task") {
+		o.Assignment = known
+	} else {
+		o.Assignment = decision
+	}
 	c.nodes[o.LogID] = &o
 	changed := []Observation{o}
 	// Keep missing protocol references until a parent response is observed.
@@ -397,13 +435,22 @@ func (c *Correlator) Observe(o Observation) []Observation {
 			changed[i] = *n
 		}
 	}
-	c.cleanup(o.CreatedAt)
+	c.Prune(o.ActiveAt())
 	return changed
+}
+
+// Prune applies current bounds before matching and after a batch of restores.
+// Late observations must not move the expiry clock backwards.
+func (c *Correlator) Prune(now time.Time) {
+	if now.After(c.now) {
+		c.now = now
+	}
+	c.cleanup(c.now)
 }
 
 func (c *Correlator) cleanup(now time.Time) {
 	for id, n := range c.nodes {
-		if now.Sub(n.CreatedAt) > c.idle {
+		if now.Sub(n.ActiveAt()) > c.idle {
 			delete(c.nodes, id)
 		}
 	}
@@ -411,14 +458,19 @@ func (c *Correlator) cleanup(now time.Time) {
 	for _, n := range c.nodes {
 		eventCount += len(n.Request.Events) + len(n.Response.Events)
 	}
-	if len(c.nodes) > c.maxEntries || eventCount > 65536 {
+	if len(c.nodes) > c.maxEntries || eventCount > MaxEvents {
 		nodes := make([]*Observation, 0, len(c.nodes))
 		for _, n := range c.nodes {
 			nodes = append(nodes, n)
 		}
-		sort.Slice(nodes, func(i, j int) bool { return nodes[i].CreatedAt.Before(nodes[j].CreatedAt) })
+		sort.Slice(nodes, func(i, j int) bool {
+			if nodes[i].ActiveAt().Equal(nodes[j].ActiveAt()) {
+				return nodes[i].LogID < nodes[j].LogID
+			}
+			return nodes[i].ActiveAt().Before(nodes[j].ActiveAt())
+		})
 		for _, n := range nodes {
-			if len(c.nodes) <= c.maxEntries && eventCount <= 65536 {
+			if len(c.nodes) <= c.maxEntries && eventCount <= MaxEvents {
 				break
 			}
 			delete(c.nodes, n.LogID)

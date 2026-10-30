@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/shaomian/PrismCat/internal/benchmark"
-	"github.com/shaomian/PrismCat/internal/trace"
 )
 
 type TaskManagementItem struct {
@@ -416,12 +415,7 @@ func (a *AsyncRepository) ApplyTaskManagement(ctx context.Context, v TaskManagem
 	result, err := r.ApplyTaskManagement(ctx, v)
 	if err == nil && v.Action == "delete" && (v.Kind == "trace" || v.Kind == "capture") {
 		if store, ok := a.inner.(*SQLiteRepository); ok && a.correlator != nil {
-			a.correlator = trace.NewCorrelator()
-			if observations, e := store.loadObservations(); e == nil {
-				for _, o := range observations {
-					a.correlator.Restore(o)
-				}
-			}
+			a.reloadCorrelator(store)
 		}
 	}
 	return result, err

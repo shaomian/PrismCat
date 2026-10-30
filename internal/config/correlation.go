@@ -10,7 +10,7 @@ type CorrelationConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`
 	// MaxEntries 内存关联索引的观测条数上限,超出按最旧淘汰。<=0 使用默认值。
 	MaxEntries int `yaml:"max_entries" json:"max_entries"`
-	// IdleMinutes 稀疏调用的匹配窗口(分钟),窗口外的观测不再参与自动关联。<=0 使用默认值。
+	// IdleMinutes 自最近一次请求/最终响应观测起的匹配窗口(分钟)。<=0 使用默认值。
 	IdleMinutes int `yaml:"idle_minutes" json:"idle_minutes"`
 }
 
@@ -46,5 +46,5 @@ func (c CorrelationConfig) IdleWindow() time.Duration {
 func (c *Config) CorrelationSnapshot() CorrelationConfig {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.Correlation
+	return NormalizeCorrelation(c.Correlation)
 }

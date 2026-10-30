@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -535,9 +536,8 @@ func reviewTools() []map[string]any {
 	}})
 }
 
-// reviewSearchWindow 是过滤检索每次拉取的原始行窗口(也是游标推进步长)。
-// 统计的 2000 条上限已取消,数万条的任务靠关键词预过滤,一次拉 200 行原始数据
-// 再在 Go 里过 SupportedPath,保证 24 次调用预算也能覆盖超长任务。
+// reviewSearchWindow 是每次过滤检索的原始行窗口。游标只推进已消费的行，
+// 超出本次展示或返回预算的匹配项由下一次调用继续读取。
 const reviewSearchWindow = 200
 
 // requestMatchSnippet 返回关键词在路径/错误/正文预览中首次命中的前后
@@ -552,18 +552,22 @@ func requestMatchSnippet(query string, log *storage.RequestLog) string {
 		if text == "" {
 			continue
 		}
-		idx := strings.Index(strings.ToLower(text), q)
+		lowered := strings.ToLower(text)
+		idx := strings.Index(lowered, q)
 		if idx < 0 {
 			continue
 		}
-		start := max(idx-45, 0)
-		end := min(idx+len(q)+45, len(text))
+		// 简单大小写映射保持 rune 数量，但 UTF-8 字节长度可能变化。
+		runes := []rune(text)
+		position := utf8.RuneCountInString(lowered[:idx])
+		start := max(position-45, 0)
+		end := min(position+utf8.RuneCountInString(q)+45, len(runes))
 		snippet := strings.TrimSpace(strings.Map(func(r rune) rune {
 			if r == '\n' || r == '\r' || r == '\t' {
 				return ' '
 			}
 			return r
-		}, text[start:end]))
+		}, string(runes[start:end])))
 		return "…" + snippet + "…"
 	}
 	return ""
@@ -611,9 +615,11 @@ func (e *reviewExecutor) ExecuteToolCall(ctx context.Context, name string, args 
 			return "", err
 		}
 		inReport := false
+		var taskLogIDs []string
 		for _, t := range e.tasks {
 			if t.RunID == p.RunID {
 				inReport = true
+				taskLogIDs = t.Metrics.LogIDs
 				break
 			}
 		}
@@ -645,38 +651,55 @@ func (e *reviewExecutor) ExecuteToolCall(ctx context.Context, name string, args 
 				fmt.Fprintf(&b, "next_offset=%d\n", end)
 			}
 		} else {
-			// 带过滤参数:SQL 按任务圈定 + 关键词/失败预筛,Go 再过 SupportedPath
+			// 搜索冻结的任务成员；不能查询当前 run 引用，以免历史追问越界。
 			searcher, ok := e.h.repo.(interface {
-				SearchExperimentLogs(context.Context, string, string, bool, int, int) ([]*storage.RequestLog, error)
+				SearchReviewLogs(context.Context, []string, string, bool, int, int) ([]*storage.RequestLog, error)
 			})
 			if !ok {
 				return "", errors.New("task search unavailable")
 			}
-			rows, err := searcher.SearchExperimentLogs(ctx, p.RunID, strings.TrimSpace(p.Query), p.ErrorsOnly, reviewSearchWindow, max(0, p.Offset))
+			rows, err := searcher.SearchReviewLogs(ctx, taskLogIDs, strings.TrimSpace(p.Query), p.ErrorsOnly, reviewSearchWindow, max(0, p.Offset))
 			if err != nil {
 				return "", err
 			}
-			fmt.Fprintf(&b, "Task %s requests matching filter (query=%q errors_only=%v):\n", p.RunID, p.Query, p.ErrorsOnly)
-			shown := 0
-			for _, log := range rows {
+			fmt.Fprintf(&b, "Task %s requests matching filter (query=%q errors_only=%v):\n", p.RunID, reviewClip(p.Query, 200), p.ErrorsOnly)
+			// 给游标预留空间，不能在最后截断时丢掉继续翻页的入口。
+			outputLimit := min(12000, e.bytes)
+			if b.Len()+128 > outputLimit {
+				return "", errors.New("Evidence budget reached. Report any remaining uncertainty.")
+			}
+			shown, consumed := 0, 0
+			for i, log := range rows {
+				if err := ctx.Err(); err != nil {
+					return "", err
+				}
 				if shown >= 20 {
 					break
 				}
 				if !trace.SupportedPath(log.Path) {
+					consumed = i + 1
 					continue
 				}
-				shown++
-				fmt.Fprintf(&b, "#%d log_id=%s %s %s status=%d latency=%dms", shown, log.ID, log.Method, reviewClip(log.Path, 200), log.StatusCode, log.Latency)
+				var line strings.Builder
+				fmt.Fprintf(&line, "#%d log_id=%s %s %s status=%d latency=%dms", shown+1, log.ID, log.Method, reviewClip(log.Path, 200), log.StatusCode, log.Latency)
 				if p.Query != "" {
 					if match := requestMatchSnippet(p.Query, log); match != "" {
-						fmt.Fprintf(&b, " match: %s", match)
+						fmt.Fprintf(&line, " match: %s", match)
 					}
 				}
-				b.WriteByte('\n')
+				line.WriteByte('\n')
+				if b.Len()+line.Len()+128 > outputLimit {
+					break
+				}
+				b.WriteString(line.String())
+				shown++
+				consumed = i + 1
 			}
-			// 窗口拉满说明后面可能还有原始行;不满即数据见底,不输出 next_offset
-			if len(rows) == reviewSearchWindow {
-				fmt.Fprintf(&b, "next_offset=%d\n", max(0, p.Offset)+len(rows))
+			if len(rows) > 0 && consumed == 0 {
+				return "", errors.New("Evidence budget reached. Report any remaining uncertainty.")
+			}
+			if consumed < len(rows) || len(rows) == reviewSearchWindow {
+				fmt.Fprintf(&b, "next_offset=%d\n", max(0, p.Offset)+consumed)
 			}
 		}
 		out = b.String()
@@ -725,6 +748,21 @@ func (h *Handler) runReview(w http.ResponseWriter, ctx context.Context, repo sto
 		}
 		return err
 	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("review %s panicked: %v", report.ID, recovered)
+			report.Output = nil
+			report.Status = "failed"
+			report.Error = "review_analysis_failed"
+			at := time.Now().UTC()
+			report.FinishedAt = &at
+			if err := repo.FinishReviewReport(report); err != nil {
+				_ = send(map[string]any{"type": "error", "error": "review_save_failed"})
+				return
+			}
+			_ = send(map[string]any{"type": "error", "error": report.Error, "report": publicReview(report)})
+		}
+	}()
 	var body strings.Builder
 	now := time.Now()
 	calls := 0

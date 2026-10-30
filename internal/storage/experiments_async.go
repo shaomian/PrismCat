@@ -106,3 +106,17 @@ func (a *AsyncRepository) SearchExperimentLogs(ctx context.Context, id, query st
 	}
 	return searcher.SearchExperimentLogs(ctx, id, query, errorsOnly, limit, offset)
 }
+
+// SearchReviewLogs 将冻结的报告成员范围原样传给存储层。
+func (a *AsyncRepository) SearchReviewLogs(ctx context.Context, ids []string, query string, errorsOnly bool, limit, offset int) ([]*RequestLog, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	repo, ok := a.inner.(interface {
+		SearchReviewLogs(context.Context, []string, string, bool, int, int) ([]*RequestLog, error)
+	})
+	if !ok {
+		return nil, errors.New("review search unavailable")
+	}
+	return repo.SearchReviewLogs(ctx, ids, query, errorsOnly, limit, offset)
+}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shaomian/PrismCat/internal/config"
 	"github.com/shaomian/PrismCat/internal/trace"
 )
 
@@ -243,9 +244,10 @@ func (r *SQLiteRepository) storeObservation(o trace.Observation, manual bool) (t
 	}
 	var old trace.Assignment
 	var oldJSON, oldFeatures string
+	var oldUpdatedAt int64
 	var seq int
 	var locked bool
-	err = tx.QueryRow("SELECT info,trace_seq,locked,features FROM trace_assignments WHERE log_id=?", o.LogID).Scan(&oldJSON, &seq, &locked, &oldFeatures)
+	err = tx.QueryRow("SELECT info,trace_seq,locked,features,updated_at FROM trace_assignments WHERE log_id=?", o.LogID).Scan(&oldJSON, &seq, &locked, &oldFeatures, &oldUpdatedAt)
 	if err != nil && err != sql.ErrNoRows {
 		return trace.Assignment{}, err
 	}
@@ -296,14 +298,21 @@ func (r *SQLiteRepository) storeObservation(o trace.Observation, manual bool) (t
 		if json.Unmarshal([]byte(oldFeatures), &previous) == nil {
 			o.Request = previous.Request
 			o.Response = previous.Response
+			// A manual correction changes grouping, not evidence freshness.
+			if manual {
+				o.ObservedAt = time.UnixMilli(oldUpdatedAt)
+			}
 		}
+	}
+	if o.ObservedAt.IsZero() {
+		o.ObservedAt = time.Now()
 	}
 	features, _ := json.Marshal(o) // assignment is restored from info on load
 	var parent string
 	if len(o.Assignment.Parents) == 1 {
 		parent = o.Assignment.Parents[0]
 	}
-	if _, err = tx.Exec(`INSERT INTO trace_assignments(log_id,trace_id,trace_seq,parent_log_id,info,locked,features,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(log_id) DO UPDATE SET trace_id=excluded.trace_id,trace_seq=excluded.trace_seq,parent_log_id=excluded.parent_log_id,info=excluded.info,locked=excluded.locked,features=CASE WHEN excluded.features='' THEN trace_assignments.features ELSE excluded.features END,updated_at=excluded.updated_at`, o.LogID, o.Assignment.TraceID, seq, parent, string(info), o.Assignment.Locked, string(features), time.Now().UnixMilli()); err != nil {
+	if _, err = tx.Exec(`INSERT INTO trace_assignments(log_id,trace_id,trace_seq,parent_log_id,info,locked,features,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(log_id) DO UPDATE SET trace_id=excluded.trace_id,trace_seq=excluded.trace_seq,parent_log_id=excluded.parent_log_id,info=excluded.info,locked=excluded.locked,features=CASE WHEN excluded.features='' THEN trace_assignments.features ELSE excluded.features END,updated_at=excluded.updated_at`, o.LogID, o.Assignment.TraceID, seq, parent, string(info), o.Assignment.Locked, string(features), o.ObservedAt.UnixMilli()); err != nil {
 		return trace.Assignment{}, err
 	}
 	if _, err = tx.Exec("UPDATE request_logs SET trace_id=?,trace_seq=?,parent_log_id=?,trace_info=? WHERE id=?", o.Assignment.TraceID, seq, parent, string(info), o.LogID); err != nil {
@@ -340,8 +349,9 @@ func (r *SQLiteRepository) AssignTrace(logID, traceID string, revision int64) (t
 	return r.storeObservation(trace.Observation{LogID: logID, Scope: log.Upstream, CreatedAt: log.CreatedAt, Assignment: a}, true)
 }
 
-func (r *SQLiteRepository) loadObservations() ([]trace.Observation, error) {
-	rows, err := r.db.Query("SELECT features,info FROM trace_assignments WHERE updated_at>? AND features!='' ORDER BY updated_at DESC LIMIT 2048", time.Now().Add(-30*time.Minute).UnixMilli())
+func (r *SQLiteRepository) loadObservations(policy config.CorrelationConfig, now time.Time) ([]trace.Observation, error) {
+	policy = config.NormalizeCorrelation(policy)
+	rows, err := r.db.Query("SELECT features,info,updated_at FROM trace_assignments WHERE updated_at>=? AND features!='' ORDER BY updated_at DESC,log_id DESC LIMIT ?", now.Add(-policy.IdleWindow()).UnixMilli(), policy.MaxEntries)
 	if err != nil {
 		return nil, err
 	}
@@ -350,14 +360,16 @@ func (r *SQLiteRepository) loadObservations() ([]trace.Observation, error) {
 	events := 0
 	for rows.Next() {
 		var features, info string
-		if err := rows.Scan(&features, &info); err != nil {
+		var updatedAt int64
+		if err := rows.Scan(&features, &info, &updatedAt); err != nil {
 			return nil, err
 		}
 		var o trace.Observation
 		if json.Unmarshal([]byte(features), &o) == nil {
 			_ = json.Unmarshal([]byte(info), &o.Assignment)
+			o.ObservedAt = time.UnixMilli(updatedAt)
 			events += len(o.Request.Events) + len(o.Response.Events)
-			if events > 65536 {
+			if events > trace.MaxEvents {
 				break
 			}
 			observations = append(observations, o)

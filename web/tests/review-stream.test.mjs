@@ -5,7 +5,7 @@ import { createServer } from 'vite'
 async function withReview(run) {
   const originalFetch = globalThis.fetch
   const server = await createServer({ appType: 'custom', logLevel: 'silent', server: { middlewareMode: true } })
-  try { await run(await server.ssrLoadModule('/src/lib/review-stream.ts')) }
+  try { await run(await server.ssrLoadModule('/src/lib/review-stream.ts'), await server.ssrLoadModule('/src/lib/review.ts')) }
   finally { globalThis.fetch = originalFetch; await server.close() }
 }
 const event = value => `data: ${JSON.stringify(value)}\n\n`
@@ -71,5 +71,114 @@ test('review stream reports truncation and supports cancellation without leaving
     await pending
     assert.equal(getReviewSession('cancel').running, false)
     assert.equal(getReviewSession('cancel').error, 'review_canceled')
+  })
+})
+
+test('deleting the cached report clears its result and activity and notifies subscribers', async () => {
+  await withReview(async ({ startReview, getReviewSession, subscribeReview, deleteReviewReport }) => {
+    globalThis.fetch = async (_url, init) => init.method === 'DELETE'
+      ? new Response('{"status":"ok"}')
+      : response(event({ type: 'ready', report_id: 'report' })
+        + event({ type: 'tool', name: 'get_task_requests', args: '{}' })
+        + event({ type: 'tool_result', name: 'get_task_requests', chars: 5 })
+        + event({ type: 'done', report: { id: 'report', status: 'completed' } }))
+    await startReview('delete', {})
+    const previousVersion = getReviewSession('delete').version
+    let notifications = 0
+    const unsubscribe = subscribeReview('delete', () => notifications++)
+    await deleteReviewReport('delete', 'report')
+    const session = getReviewSession('delete')
+    assert.equal(session.report, null)
+    assert.equal(session.reportId, '')
+    assert.deepEqual(session.calls, [])
+    assert.equal(session.error, '')
+    assert.equal(session.version, previousVersion + 1)
+    assert.equal(notifications, 1)
+    unsubscribe()
+    // Returning to the card uses the same cache, now without the deleted result.
+    assert.equal(getReviewSession('delete').report, null)
+  })
+})
+
+test('deleting another historical report or failing deletion preserves the current report', async () => {
+  await withReview(async ({ startReview, getReviewSession, deleteReviewReport }) => {
+    globalThis.fetch = async () => response(event({ type: 'done', report: { id: 'current', status: 'completed' } }))
+    await startReview('history', {})
+    const current = getReviewSession('history')
+    globalThis.fetch = async () => new Response('{"status":"ok"}')
+    await deleteReviewReport('history', 'old')
+    assert.equal(getReviewSession('history'), current)
+    globalThis.fetch = async () => new Response('{"error":"delete failed"}', { status: 500 })
+    await assert.rejects(deleteReviewReport('history', 'current'))
+    assert.equal(getReviewSession('history'), current)
+  })
+})
+
+test('a delayed deletion cannot clear a newer completed analysis', async () => {
+  await withReview(async ({ startReview, getReviewSession, deleteReviewReport }) => {
+    globalThis.fetch = async () => response(event({ type: 'done', report: { id: 'old', status: 'completed' } }))
+    await startReview('race', {})
+    let finishDelete
+    globalThis.fetch = async (_url, init) => init.method === 'DELETE'
+      ? new Promise(resolve => { finishDelete = resolve })
+      : response(event({ type: 'ready', report_id: 'new' })
+        + event({ type: 'tool', name: 'get_request_detail', args: '{}' })
+        + event({ type: 'done', report: { id: 'new', status: 'completed' } }))
+    const deleting = deleteReviewReport('race', 'old')
+    await startReview('race', {})
+    const current = getReviewSession('race')
+    finishDelete(new Response('{"status":"ok"}'))
+    await deleting
+    assert.equal(getReviewSession('race'), current)
+    assert.equal(current.report.id, 'new')
+    assert.equal(current.calls.length, 1)
+  })
+})
+
+test('deletion leaves an analysis that is still starting untouched', async () => {
+  await withReview(async ({ startReview, getReviewSession, deleteReviewReport }) => {
+    let finishDelete, startResponse
+    globalThis.fetch = async (_url, init) => new Promise(resolve => {
+      if (init.method === 'DELETE') finishDelete = resolve
+      else startResponse = resolve
+    })
+    const deleting = deleteReviewReport('starting', 'old')
+    const running = startReview('starting', {})
+    const current = getReviewSession('starting')
+    assert.equal(current.running, true)
+    finishDelete(new Response('{"status":"ok"}'))
+    await deleting
+    assert.equal(getReviewSession('starting'), current)
+    startResponse(response(event({ type: 'done', report: { id: 'new', status: 'completed' } })))
+    await running
+    assert.equal(getReviewSession('starting').report.id, 'new')
+  })
+})
+
+test('deleting a failed report clears its cached error and tool activity', async () => {
+  await withReview(async ({ startReview, getReviewSession, deleteReviewReport }) => {
+    globalThis.fetch = async (_url, init) => init.method === 'DELETE'
+      ? new Response('{"status":"ok"}')
+      : response(event({ type: 'ready', report_id: 'failed' })
+        + event({ type: 'tool', name: 'get_task_requests', args: '{}' })
+        + event({ type: 'error', error: 'review_analysis_failed' }))
+    await startReview('failed-card', {})
+    assert.ok(getReviewSession('failed-card').error)
+    await deleteReviewReport('failed-card', 'failed')
+    assert.equal(getReviewSession('failed-card').error, '')
+    assert.equal(getReviewSession('failed-card').reportId, '')
+    assert.deepEqual(getReviewSession('failed-card').calls, [])
+  })
+})
+
+test('history offset returns to an existing page after deleting its last report', async () => {
+  await withReview(async (_stream, { reviewHistoryOffset }) => {
+    assert.equal(reviewHistoryOffset(10, 11), 10)
+    assert.equal(reviewHistoryOffset(10, 10), 0)
+    assert.equal(reviewHistoryOffset(20, 20), 10)
+    assert.equal(reviewHistoryOffset(10, 1), 0)
+    assert.equal(reviewHistoryOffset(0, 0), 0)
+    assert.equal(reviewHistoryOffset(10, 0), 0)
+    assert.equal(reviewHistoryOffset(10, 19), 10)
   })
 })

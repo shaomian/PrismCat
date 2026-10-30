@@ -25,6 +25,9 @@ export const saveTemplate = (value: ReviewTemplate) => {
   return request<ReviewTemplate>(`/api/review-templates${value.id ? '/' + encodeURIComponent(value.id) : ''}`, jsonInit(value.id ? 'PUT' : 'POST', payload))
 }
 export const fetchReports = (id: string, offset = 0) => request<{ reports: ReportSummary[]; total: number }>(`${reviewBase(id)}/reports?offset=${offset}&limit=10`)
+export function reviewHistoryOffset(offset: number, total: number) {
+  return Math.min(Math.max(0, offset), Math.floor(Math.max(0, total - 1) / 10) * 10)
+}
 export const fetchReport = (id: string, report: string) => request<ReviewReport>(`${reviewBase(id)}/reports/${encodeURIComponent(report)}`)
 export const deleteReport = (id: string, report: string) => request<{ status: string }>(`${reviewBase(id)}/reports/${encodeURIComponent(report)}`, { method: 'DELETE' })
 export const fetchReviewLog = (id: string, report: string, log: string) => request<import('./api').RequestLog>(`${reviewBase(id)}/reports/${encodeURIComponent(report)}/logs/${encodeURIComponent(log)}`)

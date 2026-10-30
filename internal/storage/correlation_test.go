@@ -165,7 +165,7 @@ func TestPersistentSequenceAndFeatureRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	observations, err := r.loadObservations()
+	observations, err := r.loadObservations(config.CorrelationConfig{}, time.Now())
 	if err != nil || len(observations) != 1 || observations[0].Response.ResponseID != "response-one" {
 		t.Fatalf("features not recovered: %+v %v", observations, err)
 	}

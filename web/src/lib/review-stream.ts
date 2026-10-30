@@ -1,5 +1,5 @@
 import { apiRequest, jsonInit } from './api'
-import { reviewBase, type ReviewReport } from './review'
+import { deleteReport, reviewBase, type ReviewReport } from './review'
 
 /** 一次工具查证的执行明细,供"分析过程"展开视图使用 */
 export interface ReviewToolCall {
@@ -37,6 +37,13 @@ function update(id: string, value: Partial<Session>) {
   listeners.get(id)?.forEach(fn => fn())
 }
 export function stopReview(id: string) { controllers.get(id)?.abort() }
+export async function deleteReviewReport(id: string, reportId: string) {
+  await deleteReport(id, reportId)
+  const session = getReviewSession(id)
+  // A new analysis may have started while DELETE was in flight.
+  if (session.running || (session.report?.id ?? session.reportId) !== reportId) return
+  update(id, { report: null, reportId: '', calls: [], error: '', phase: 'preparing', version: session.version + 1 })
+}
 export async function startReview(id: string, payload: object) {
   if (getReviewSession(id).running) return
   const controller = new AbortController()
