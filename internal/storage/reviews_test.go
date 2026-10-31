@@ -169,3 +169,49 @@ func TestDeleteReviewReport(t *testing.T) {
 		t.Fatalf("double delete accepted: %v", err)
 	}
 }
+
+func TestReviewProtectionBatchIsUniqueAndAtomic(t *testing.T) {
+	r := mustNewSQLiteRepoForTest(t)
+	defer r.Close()
+	e := testExperiment(t, r)
+	report := benchmark.ReviewReport{ID: "batch", ExperimentID: e.ID, Status: "completed", CreatedAt: time.Now(), Tasks: []benchmark.ReviewTask{
+		{Metrics: benchmark.Metrics{LogIDs: []string{"one", "two", "one"}}},
+		{Metrics: benchmark.Metrics{LogIDs: []string{"two", "three"}}},
+	}}
+	if err := r.CreateReviewReport(report); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := r.db.QueryRow("SELECT COUNT(*) FROM review_card_logs WHERE experiment_id=?", e.ID).Scan(&count); err != nil || count != 3 {
+		t.Fatalf("protection union: count=%d err=%v", count, err)
+	}
+	if _, err := r.db.Exec("INSERT INTO deleted_log_ids VALUES('deleted',?)", time.Now().UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	report.ID = "deleted-source"
+	report.Tasks = []benchmark.ReviewTask{{Metrics: benchmark.Metrics{LogIDs: []string{"new", "deleted"}}}}
+	if err := r.CreateReviewReport(report); !errors.Is(err, ErrCorrelationConflict) {
+		t.Fatalf("deleted source was accepted: %v", err)
+	}
+	if _, err := r.GetReviewReport(report.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("failed snapshot was persisted: %v", err)
+	}
+	if err := r.db.QueryRow("SELECT COUNT(*) FROM review_card_logs WHERE log_id='new'").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("failed report left protection rows: count=%d err=%v", count, err)
+	}
+	// An insertion failure after the report INSERT must roll back both writes.
+	if _, err := r.db.Exec("CREATE TRIGGER fail_test_protection BEFORE INSERT ON review_card_logs WHEN NEW.log_id='fail' BEGIN SELECT RAISE(ABORT,'test failure'); END"); err != nil {
+		t.Fatal(err)
+	}
+	report.ID = "rollback"
+	report.Tasks = []benchmark.ReviewTask{{Metrics: benchmark.Metrics{LogIDs: []string{"new", "fail"}}}}
+	if err := r.CreateReviewReport(report); err == nil {
+		t.Fatal("failed protection insertion was accepted")
+	}
+	if _, err := r.GetReviewReport(report.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("report survived failed protection insert: %v", err)
+	}
+	if err := r.db.QueryRow("SELECT COUNT(*) FROM review_card_logs WHERE log_id='new'").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("batch was not rolled back: count=%d err=%v", count, err)
+	}
+}

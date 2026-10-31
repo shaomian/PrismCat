@@ -39,6 +39,14 @@ test('Markdown exports the report snapshot, recorded metrics and separate review
   assert.equal(value.output.observations[0].findings[0].value, 'AI incorrectly says 999')
 })
 
+test('Markdown includes the frozen evidence timestamp when present and keeps older reports compatible', () => {
+  const value = report()
+  value.evidence_at = '2026-10-27T09:59:00Z'
+  assert.ok(reportTools.reviewReportMarkdown(value, 'Review', t).includes(value.evidence_at))
+  delete value.evidence_at
+  assert.ok(!reportTools.reviewReportMarkdown(value, 'Review', t).includes('09:59:00'))
+})
+
 test('unknown statistical values stay unknown and genuine zero values remain zero in display and export', () => {
   const value = report()
   const finding = value.output.observations[0].findings[0]

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/shaomian/PrismCat/internal/benchmark"
 	"github.com/shaomian/PrismCat/internal/storage"
-	"github.com/shaomian/PrismCat/internal/trace"
 )
 
 func decodeExperiment(w http.ResponseWriter, r *http.Request, target any) error {
@@ -201,6 +201,18 @@ func (h *Handler) handleExperimentDetail(w http.ResponseWriter, r *http.Request)
 			results = append(results, result)
 		}
 		comparison := benchmark.Compare(experiment, results)
+		if checker, ok := repo.(interface {
+			ExperimentRunsOverlap(context.Context, []string) (bool, error)
+		}); ok {
+			overlap, err := checker.ExperimentRunsOverlap(r.Context(), ids)
+			if err != nil {
+				h.experimentError(w, err)
+				return
+			}
+			if overlap {
+				comparison.Warnings = append(comparison.Warnings, "overlapping_logs")
+			}
+		}
 		// 与 publicReview 同策略:证据清单留在服务端(复盘 AI 用内存中的全量
 		// LogIDs 分页检索),对比/导出响应只携带紧凑指标,避免超大任务的响应
 		// 被数万个日志 ID 撑到数 MB
@@ -305,35 +317,12 @@ func (h *Handler) handleExperimentDetail(w http.ResponseWriter, r *http.Request)
 	h.jsonError(w, "not found", 404)
 }
 
-// experimentStatsLogLimit 是统计的兜底上限。ExperimentLogs 只读元数据列
-// (定长小行,不含正文),十万级也是毫秒级 SQL 与几 MB 内存;上限只防极端任务
-// 拖垮进程。复盘 AI 的证据工具分页遍历同一份 LogIDs,因此这里放开后
-// AI 可检索的日志范围也随之变为全量。
-const experimentStatsLogLimit = 200000
-
+// Statistics consume all captured model metadata; evidence membership is frozen
+// separately when an AI report is created.
 func (h *Handler) measureExperimentRun(r *http.Request, repo storage.ExperimentRepository, run benchmark.Run) (benchmark.Result, error) {
-	logs, err := repo.ExperimentLogs(r.Context(), run.ID, experimentStatsLogLimit+1)
+	metrics, err := storage.FullExperimentMetrics(r.Context(), repo, run.ID)
 	if err != nil {
 		return benchmark.Result{}, err
 	}
-	sampled := len(logs) > experimentStatsLogLimit
-	if sampled {
-		logs = logs[:experimentStatsLogLimit]
-	}
-	samples := []benchmark.Sample{}
-	for _, log := range logs {
-		if err = r.Context().Err(); err != nil {
-			return benchmark.Result{}, err
-		}
-		if log.Method != "POST" || !trace.SupportedPath(log.Path) {
-			continue
-		}
-		samples = append(samples, benchmark.Sample{
-			ID: log.ID, TraceID: log.TraceID, CreatedAt: log.CreatedAt.UnixMilli(),
-			Latency: log.Latency, Status: log.StatusCode, Error: log.Error != "",
-			Incomplete: log.WebSocket != nil && log.WebSocket.ObservationError != "",
-			Input:      log.UsageInputTokens, Output: log.UsageOutputTokens, Total: log.UsageTotalTokens,
-		})
-	}
-	return benchmark.Result{Run: run, Metrics: benchmark.Measure(samples, sampled)}, nil
+	return benchmark.Result{Run: run, Metrics: metrics}, nil
 }

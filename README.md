@@ -6,6 +6,8 @@
 
 > Independently maintained fork of [PrismCat](https://github.com/paopaoandlingyia/PrismCat) — released under the same [MIT License](LICENSE).
 
+v2.4.0 adds full-task statistics and frozen database evidence directories, reuses evidence for follow-ups, and improves review search, report deletion and correlation recovery. See the [release notes](CHANGELOG.md#v240).
+
 v2.3.0 improves dashboard and trace loading, adds batched conversations, paged diagrams and content previews, and fixes trend boundary counts. See the [release notes](CHANGELOG.md#v230).
 
 v2.2.0 adds trace merging and splitting, task pinning and labels, and Markdown report export, with improved trace lists and review pages. See the [release notes](CHANGELOG.md#v220).

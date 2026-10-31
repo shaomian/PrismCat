@@ -1,6 +1,9 @@
 package benchmark
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestBasicMetricsDeduplicateAndUseElapsedTime(t *testing.T) {
 	in, out := int64(100), int64(20)
@@ -48,5 +51,16 @@ func TestComparisonWarnsAboutPartialAndSharedData(t *testing.T) {
 	}
 	if !contains(comparison.Warnings, "task_changed") || !contains(comparison.Warnings, "overlapping_logs") || !contains(comparison.Results[0].Warnings, "partial_usage") || !contains(comparison.Results[0].Warnings, "sampled") || !contains(comparison.Results[1].Warnings, "run_not_completed") {
 		t.Fatalf("missing data warnings: %+v", comparison)
+	}
+}
+
+func TestSummaryAccumulatorDoesNotRetainMembership(t *testing.T) {
+	a := NewSummaryAccumulator()
+	for i := range 10000 {
+		a.Add(Sample{ID: fmt.Sprint(i), TraceID: fmt.Sprint(i), Status: 200, CreatedAt: int64(i), Latency: 5})
+	}
+	m := a.Finish(false)
+	if len(a.seen) != 0 || len(m.LogIDs) != 0 || len(m.TraceIDs) > 20 || m.Requests != 10000 || m.SpanMS == nil || *m.SpanMS != 10004 {
+		t.Fatalf("summary grew with membership: %+v", m)
 	}
 }

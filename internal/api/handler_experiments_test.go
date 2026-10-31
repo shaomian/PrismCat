@@ -201,9 +201,9 @@ func TestExperimentStatisticsCountBeyondLegacySamplingCap(t *testing.T) {
 	if result.Metrics.Sampled {
 		t.Fatal("sampled = true, want false")
 	}
-	// 复盘 AI 的证据分页遍历这份 LogIDs,必须是全量
-	if len(result.Metrics.LogIDs) != total {
-		t.Fatalf("log ids = %d, want %d", len(result.Metrics.LogIDs), total)
+	// Full basic statistics no longer retain an evidence ID list in Go.
+	if len(result.Metrics.LogIDs) != 0 {
+		t.Fatalf("summary retained %d log ids", len(result.Metrics.LogIDs))
 	}
 
 	// 对比接口:统计全量,但响应不携带逐条日志 ID(与 publicReview 同策略)

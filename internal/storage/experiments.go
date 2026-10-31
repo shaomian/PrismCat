@@ -532,7 +532,7 @@ func (r *SQLiteRepository) StopExperimentCapture(id string, revision int64) (ben
 func (r *SQLiteRepository) ExperimentLogs(ctx context.Context, id string, limit int) ([]*RequestLog, error) {
 	rows, err := r.db.QueryContext(ctx, `
 	SELECT id,created_at,method,path,status_code,latency_ms,error,trace_id,COALESCE(websocket_info,''),usage_input_tokens,usage_output_tokens,usage_total_tokens
-	FROM request_logs l WHERE ((capture_run_id!='' AND capture_run_id=(SELECT capture_run_id FROM experiment_runs WHERE id=?)) OR trace_id IN (SELECT et.trace_id FROM experiment_run_traces et WHERE run_id=? AND NOT EXISTS(SELECT 1 FROM experiment_trace_snapshots s WHERE s.run_id=et.run_id AND s.trace_id=et.trace_id)) OR EXISTS(SELECT 1 FROM experiment_trace_samples s WHERE s.run_id=? AND s.log_id=l.id)) AND COALESCE(tag,'') NOT LIKE 'prismcat-analysis%' ORDER BY created_at_unix_ms,id LIMIT ?
+	FROM request_logs l WHERE `+experimentLogScope+` AND COALESCE(tag,'') NOT LIKE 'prismcat-analysis%' ORDER BY created_at_unix_ms,id LIMIT ?
 	`, id, id, id, limit)
 	if err != nil {
 		return nil, err
@@ -567,7 +567,7 @@ const searchBodyPreviewBytes = 4096
 // 游标，调用方按实际消费位置推进。范围圈定与 ExperimentLogs 完全一致。
 func (r *SQLiteRepository) SearchExperimentLogs(ctx context.Context, id, query string, errorsOnly bool, limit, offset int) ([]*RequestLog, error) {
 	conditions := []string{
-		"((capture_run_id!='' AND capture_run_id=(SELECT capture_run_id FROM experiment_runs WHERE id=?)) OR trace_id IN (SELECT et.trace_id FROM experiment_run_traces et WHERE run_id=? AND NOT EXISTS(SELECT 1 FROM experiment_trace_snapshots s WHERE s.run_id=et.run_id AND s.trace_id=et.trace_id)) OR EXISTS(SELECT 1 FROM experiment_trace_samples s WHERE s.run_id=? AND s.log_id=l.id))",
+		experimentLogScope,
 		"method='POST'",
 		"COALESCE(tag,'') NOT LIKE 'prismcat-analysis%'",
 	}

@@ -981,6 +981,8 @@
         "evidence": "View evidence {{index}}",
         "recommendations": "Things to try next time",
         "report_meta": "Reviewer: {{model}} · {{time}}",
+        "evidence_as_of": "Statistics and request scope as of {{time}}",
+        "export_evidence_as_of": "Statistics and request scope as of",
         "analysis_usage": "AI review usage (separate from task usage)",
         "usage_unknown": "The model did not return usage data.",
         "failed": "The operation did not complete. Please try again.",

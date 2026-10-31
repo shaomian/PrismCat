@@ -144,7 +144,7 @@ func TestAIReviewEvidenceScopingSnapshotsAndSuggestions(t *testing.T) {
 	rr = reviewRequest(mux, "GET", path+"/reports/"+report.ID, nil)
 	var public benchmark.ReviewReport
 	json.Unmarshal(rr.Body.Bytes(), &public)
-	if len(public.Tasks[0].Metrics.LogIDs) != 0 || len(report.Tasks[0].Metrics.LogIDs) != 1 {
+	if len(public.Tasks[0].Metrics.LogIDs) != 0 || len(report.Tasks[0].Metrics.LogIDs) != 0 || report.SnapshotID == "" || report.EvidenceAt == nil {
 		t.Fatal("public report leaked IDs or modified stored evidence")
 	}
 	if rr = reviewRequest(mux, "GET", path+"/reports/"+report.ID+"/logs/secret", nil); rr.Code != 404 {
@@ -177,7 +177,8 @@ func TestAIReviewEvidenceScopingSnapshotsAndSuggestions(t *testing.T) {
 	}
 	history, _, _ := repo.ListReviewReports(e.ID, 0, 10)
 	followup, _ := repo.GetReviewReport(history[0].ID)
-	if followup.Tasks[0].Metrics.LogIDs[0] != "a" || followup.ParentID != report.ID {
+	members, err := repo.ReviewSnapshotMembers(context.Background(), followup.SnapshotID, runs[0].ID, []string{"a", "secret"})
+	if err != nil || !members["a"] || members["secret"] || followup.SnapshotID != report.SnapshotID || followup.ParentID != report.ID {
 		t.Fatal("follow-up silently used new task logs")
 	}
 	oldCalls := calls.Load()
@@ -318,7 +319,10 @@ func TestReviewContextDoesNotLoadAllLogs(t *testing.T) {
 		}
 		tasks = append(tasks, task)
 	}
-	text := h.reviewContext(context.Background(), tasks, true)
+	text, err := h.reviewContext(context.Background(), tasks, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if repo.reads > 8*15 || len([]rune(text)) > 50000 {
 		t.Fatalf("unbounded context: reads=%d chars=%d", repo.reads, len([]rune(text)))
 	}

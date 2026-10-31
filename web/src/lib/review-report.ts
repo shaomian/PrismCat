@@ -53,6 +53,7 @@ export function reviewReportMarkdown(report: ReviewReport, title: string, t: TFu
   const item = (label: string, value: string) => { lines.push(`- ${text(label)}: ${text(value)}`) }
   const section = (label: string) => { lines.push('', `## ${text(label)}`, '') }
   item(t('review.export_created'), report.created_at)
+  if (report.evidence_at) item(t('review.export_evidence_as_of'), report.evidence_at)
   item(t('review.export_analysis_model'), report.model || t('review.not_recorded'))
   item(t('review.export_report_id'), report.id)
   if (report.parent_id) item(t('review.export_parent_id'), report.parent_id)

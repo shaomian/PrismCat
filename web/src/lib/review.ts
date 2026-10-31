@@ -11,7 +11,7 @@ export interface ReviewTask { run_id: string; name: string; agent: string; model
 export interface ReviewFinding { run_id: string; value: string; explanation: string; source: 'statistics' | 'logs' | 'inference' | 'unknown'; evidence: string[] }
 export interface ReviewObservation { point_id: string; comparison: string; findings: ReviewFinding[] }
 export interface ReviewOutput { summary: string; observations: ReviewObservation[]; recommendations: string[] }
-export interface ReviewReport { background?: string; id: string; experiment_id: string; parent_id: string; question: string; status: string; config: ReviewConfig; tasks: ReviewTask[]; output?: ReviewOutput; error: string; model: string; usage?: Record<string, unknown>; created_at: string; finished_at?: string }
+export interface ReviewReport { evidence_at?: string; background?: string; id: string; experiment_id: string; parent_id: string; question: string; status: string; config: ReviewConfig; tasks: ReviewTask[]; output?: ReviewOutput; error: string; model: string; usage?: Record<string, unknown>; created_at: string; finished_at?: string }
 export interface ReportSummary { id: string; parent_id: string; question: string; status: string; model: string; created_at: string }
 export const reviewBase = (id: string) => `/api/experiments/${encodeURIComponent(id)}/review`
 async function request<T>(url: string, init: RequestInit = {}): Promise<T> {

@@ -175,7 +175,7 @@ func previewTraceGrouping(ctx context.Context, tx *sql.Tx, v TraceGroupingReques
 			_ = tx.QueryRowContext(ctx, "SELECT COALESCE(json_extract(document,'$.name'),'') FROM trace_metadata WHERE trace_id=?", id).Scan(&p.TargetName)
 		}
 		// Include current experiment references in the preview version, not report bodies.
-		rows, err := tx.QueryContext(ctx, `SELECT er.id,er.revision,e.revision,json_extract(er.document,'$.state')='running' OR EXISTS(SELECT 1 FROM review_reports rr WHERE rr.experiment_id=e.id AND rr.status='running') FROM experiment_run_traces et JOIN experiment_runs er ON er.id=et.run_id JOIN experiments e ON e.id=er.experiment_id WHERE et.trace_id=? ORDER BY er.id`, id)
+		rows, err := tx.QueryContext(ctx, `SELECT er.id,er.revision,e.revision,json_extract(er.document,'$.state')='running' OR EXISTS(SELECT 1 FROM review_reports rr WHERE rr.experiment_id=e.id AND rr.status='running') OR EXISTS(SELECT 1 FROM review_snapshots ss WHERE ss.experiment_id=e.id AND ss.state IN ('building','prepared')) FROM experiment_run_traces et JOIN experiment_runs er ON er.id=et.run_id JOIN experiments e ON e.id=er.experiment_id WHERE et.trace_id=? ORDER BY er.id`, id)
 		if err != nil {
 			return p, err
 		}

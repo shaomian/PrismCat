@@ -162,7 +162,7 @@ func previewTask(ctx context.Context, tx *sql.Tx, request TaskManagementRequest,
 		}
 		active = active || pending
 	case "experiment":
-		err := tx.QueryRowContext(ctx, `SELECT json_extract(document,'$.name'),revision,(SELECT COUNT(*) FROM experiment_runs WHERE experiment_id=e.id),(SELECT COUNT(*) FROM review_reports WHERE experiment_id=e.id),EXISTS(SELECT 1 FROM review_reports WHERE experiment_id=e.id AND status='running') OR EXISTS(SELECT 1 FROM experiment_runs er WHERE er.experiment_id=e.id AND (json_extract(er.document,'$.state')='running' OR EXISTS(SELECT 1 FROM capture_runs c WHERE c.id=er.capture_run_id AND c.stopped_at IS NULL))) FROM experiments e WHERE id=?`, id).Scan(&item.Name, &item.Revision, &item.RunCount, &item.ReportCount, &active)
+		err := tx.QueryRowContext(ctx, `SELECT json_extract(document,'$.name'),revision,(SELECT COUNT(*) FROM experiment_runs WHERE experiment_id=e.id),(SELECT COUNT(*) FROM review_reports WHERE experiment_id=e.id),EXISTS(SELECT 1 FROM review_reports WHERE experiment_id=e.id AND status='running') OR EXISTS(SELECT 1 FROM review_snapshots ss WHERE ss.experiment_id=e.id AND ss.state IN ('building','prepared')) OR EXISTS(SELECT 1 FROM experiment_runs er WHERE er.experiment_id=e.id AND (json_extract(er.document,'$.state')='running' OR EXISTS(SELECT 1 FROM capture_runs c WHERE c.id=er.capture_run_id AND c.stopped_at IS NULL))) FROM experiments e WHERE id=?`, id).Scan(&item.Name, &item.Revision, &item.RunCount, &item.ReportCount, &active)
 		if err != nil {
 			return item, err
 		}
@@ -180,7 +180,7 @@ func previewTask(ctx context.Context, tx *sql.Tx, request TaskManagementRequest,
 			return item, err
 		}
 	case "run":
-		if err := tx.QueryRowContext(ctx, `SELECT json_extract(document,'$.name'),revision,json_extract(document,'$.state')='running' OR EXISTS(SELECT 1 FROM capture_runs c WHERE c.id=er.capture_run_id AND c.stopped_at IS NULL) OR EXISTS(SELECT 1 FROM review_reports WHERE experiment_id=er.experiment_id AND status='running') FROM experiment_runs er WHERE id=? AND experiment_id=?`, id, request.ExperimentID).Scan(&item.Name, &item.Revision, &active); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT json_extract(document,'$.name'),revision,json_extract(document,'$.state')='running' OR EXISTS(SELECT 1 FROM capture_runs c WHERE c.id=er.capture_run_id AND c.stopped_at IS NULL) OR EXISTS(SELECT 1 FROM review_reports WHERE experiment_id=er.experiment_id AND status='running') OR EXISTS(SELECT 1 FROM review_snapshots ss WHERE ss.experiment_id=er.experiment_id AND ss.state IN ('building','prepared')) FROM experiment_runs er WHERE id=? AND experiment_id=?`, id, request.ExperimentID).Scan(&item.Name, &item.Revision, &active); err != nil {
 			return item, err
 		}
 	}
@@ -236,6 +236,8 @@ func taskReferences(ctx context.Context, tx *sql.Tx, kind, id string) ([]TaskRef
 	}
 	query := `SELECT e.id,COALESCE(json_extract(e.document,'$.name'),e.id) FROM experiments e WHERE ` + direct + ` OR EXISTS(SELECT 1 FROM experiment_runs er JOIN request_logs l ON l.capture_run_id=er.capture_run_id AND er.capture_run_id!='' WHERE er.experiment_id=e.id AND ` + predicate + `) OR EXISTS(SELECT 1 FROM review_card_logs cl JOIN request_logs l ON l.id=cl.log_id WHERE cl.experiment_id=e.id AND ` + predicate + `)`
 	args := []any{id, id, id}
+	query += ` OR EXISTS(SELECT 1 FROM review_snapshot_logs sm JOIN review_snapshots ss ON ss.id=sm.snapshot_id JOIN request_logs l ON l.id=sm.log_id WHERE ss.experiment_id=e.id AND ` + predicate + `)`
+	args = append(args, id)
 	query += ` OR EXISTS(SELECT 1 FROM experiment_trace_samples s JOIN experiment_runs er ON er.id=s.run_id JOIN request_logs l ON l.id=s.log_id WHERE er.experiment_id=e.id AND ` + predicate + `)`
 	args = append(args, id)
 	if kind == "capture" { // A run may import a trace whose requests belong to this capture.
@@ -380,7 +382,7 @@ func deleteTask(ctx context.Context, tx *sql.Tx, request TaskManagementRequest, 
 		}
 		return 0, exec("DELETE FROM capture_runs WHERE id=?", id)
 	case "experiment":
-		for _, query := range []string{"DELETE FROM experiment_run_traces WHERE run_id IN (SELECT id FROM experiment_runs WHERE experiment_id=?)", "DELETE FROM experiment_runs WHERE experiment_id=?", "DELETE FROM review_reports WHERE experiment_id=?", "DELETE FROM review_card_logs WHERE experiment_id=?", "DELETE FROM experiments WHERE id=?"} {
+		for _, query := range []string{"DELETE FROM experiment_run_traces WHERE run_id IN (SELECT id FROM experiment_runs WHERE experiment_id=?)", "DELETE FROM experiment_runs WHERE experiment_id=?", "DELETE FROM review_reports WHERE experiment_id=?", "DELETE FROM review_card_logs WHERE experiment_id=?", "DELETE FROM review_snapshot_logs WHERE snapshot_id IN (SELECT id FROM review_snapshots WHERE experiment_id=?)", "DELETE FROM review_snapshots WHERE experiment_id=?", "DELETE FROM experiments WHERE id=?"} {
 			if err := exec(query, id); err != nil {
 				return 0, err
 			}

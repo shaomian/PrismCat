@@ -14,6 +14,7 @@ func (r *SQLiteRepository) migrateTraceRetention() error {
  OR EXISTS(SELECT 1 FROM experiment_runs er JOIN experiments e ON e.id=er.experiment_id WHERE json_extract(e.document,'$.keep')=1 AND ((er.capture_run_id!='' AND er.capture_run_id=l.capture_run_id) OR EXISTS(SELECT 1 FROM experiment_run_traces et WHERE et.run_id=er.id AND et.trace_id=l.trace_id AND NOT EXISTS(SELECT 1 FROM experiment_trace_snapshots s WHERE s.run_id=et.run_id AND s.trace_id=et.trace_id)) OR EXISTS(SELECT 1 FROM experiment_trace_samples s WHERE s.run_id=er.id AND s.log_id=l.id)))
  OR EXISTS(SELECT 1 FROM review_card_logs cl JOIN experiments ce ON ce.id=cl.experiment_id WHERE cl.log_id=l.id AND json_extract(ce.document,'$.keep')=1)
  OR EXISTS(SELECT 1 FROM review_card_logs cl JOIN review_reports rr ON rr.experiment_id=cl.experiment_id WHERE cl.log_id=l.id AND rr.status='running')
+ OR EXISTS(SELECT 1 FROM review_snapshot_logs sl JOIN review_snapshots ss ON ss.id=sl.snapshot_id JOIN experiments se ON se.id=ss.experiment_id WHERE sl.log_id=l.id AND (ss.state IN ('building','prepared') OR json_extract(se.document,'$.keep')=1 OR EXISTS(SELECT 1 FROM review_reports WHERE experiment_id=ss.experiment_id AND status='running' AND ` + reportSnapshotExpr + `=ss.id)))
  OR EXISTS(SELECT 1 FROM capture_runs c WHERE c.id=l.capture_run_id AND c.stopped_at IS NULL)
  OR ((l.status_code=0 AND COALESCE(l.error,'')='') AND l.created_at_unix_ms>(CAST(strftime('%s','now') AS INTEGER)*1000-86400000))
  THEN 1 ELSE 0 END)=0`)

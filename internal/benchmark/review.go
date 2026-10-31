@@ -104,6 +104,8 @@ type ReviewOutput struct {
 	Recommendations []string            `json:"recommendations"`
 }
 type ReviewReport struct {
+	SnapshotID   string         `json:"snapshot_id,omitempty"`
+	EvidenceAt   *time.Time     `json:"evidence_at,omitempty"`
 	Background   string         `json:"background"`
 	ID           string         `json:"id"`
 	ExperimentID string         `json:"experiment_id"`

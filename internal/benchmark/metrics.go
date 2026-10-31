@@ -27,13 +27,61 @@ type Metrics struct {
 	Sampled      bool     `json:"sampled"`
 }
 
-// Measure uses log metadata only. Missing usage stays unknown; overlapping
-// requests contribute their wall-clock span, rather than summed latency.
-func Measure(samples []Sample, sampled bool) Metrics {
-	m := Metrics{TraceIDs: []string{}, LogIDs: []string{}, Sampled: sampled}
-	seen, traces := map[string]bool{}, map[string]bool{}
-	var begin, end int64
-	completed := false
+// Accumulator computes metadata statistics one row at a time. Only membership
+// IDs are retained, for frozen review evidence and overlapping-run warnings.
+// The zero value is ready to use.
+type Accumulator struct {
+	metrics    Metrics
+	seen       map[string]bool
+	traces     map[string]bool
+	begin, end int64
+	completed  bool
+	summary    bool
+}
+
+// NewSummaryAccumulator consumes unique database rows without retaining their IDs.
+// Trace IDs are a bounded display summary; overlap checks use database membership.
+func NewSummaryAccumulator() *Accumulator { return &Accumulator{summary: true} }
+
+func (a *Accumulator) Count() int { return a.metrics.Requests }
+
+func (a *Accumulator) Add(s Sample) {
+	if a.traces == nil {
+		if !a.summary {
+			a.seen = map[string]bool{}
+		}
+		a.traces = map[string]bool{}
+		a.metrics.LogIDs = []string{}
+	}
+	if !a.summary && a.seen[s.ID] {
+		return
+	}
+	if !a.summary {
+		a.seen[s.ID] = true
+	}
+	m := &a.metrics
+	if m.Requests == 0 || s.CreatedAt < a.begin {
+		a.begin = s.CreatedAt
+	}
+	m.Requests++
+	if !a.summary {
+		m.LogIDs = append(m.LogIDs, s.ID)
+	}
+	if s.TraceID != "" && (!a.summary || len(a.traces) < 20) {
+		a.traces[s.TraceID] = true
+	}
+	if s.Error || s.Status >= 400 {
+		m.Errors++
+	}
+	if s.Incomplete || (s.Status == 0 && !s.Error) {
+		m.Incomplete++
+	} else {
+		finish := s.CreatedAt + max(s.Latency, 0)
+		if !a.completed || finish > a.end {
+			a.end = finish
+		}
+		a.completed = true
+	}
 	sum := func(target **int64, value *int64) {
 		if value != nil {
 			if *target == nil {
@@ -42,52 +90,46 @@ func Measure(samples []Sample, sampled bool) Metrics {
 			**target += *value
 		}
 	}
-	for _, s := range samples {
-		if seen[s.ID] {
-			continue
-		}
-		seen[s.ID] = true
-		if m.Requests == 0 || s.CreatedAt < begin {
-			begin = s.CreatedAt
-		}
-		m.Requests++
-		m.LogIDs = append(m.LogIDs, s.ID)
-		if s.TraceID != "" {
-			traces[s.TraceID] = true
-		}
-		if s.Error || s.Status >= 400 {
-			m.Errors++
-		}
-		if s.Incomplete || (s.Status == 0 && !s.Error) {
-			m.Incomplete++
-		} else {
-			finish := s.CreatedAt + max(s.Latency, 0)
-			if !completed || finish > end {
-				end = finish
-			}
-			completed = true
-		}
-		sum(&m.InputTokens, s.Input)
-		sum(&m.OutputTokens, s.Output)
-		total := s.Total
-		if total == nil && s.Input != nil && s.Output != nil {
-			v := *s.Input + *s.Output
-			total = &v
-		}
-		sum(&m.TotalTokens, total)
-		if s.Input != nil && s.Output != nil {
-			m.UsageKnown++
-		}
+	sum(&m.InputTokens, s.Input)
+	sum(&m.OutputTokens, s.Output)
+	total := s.Total
+	if total == nil && s.Input != nil && s.Output != nil {
+		v := *s.Input + *s.Output
+		total = &v
 	}
-	if completed {
-		span := max(end-begin, 0)
-		m.SpanMS = &span
+	sum(&m.TotalTokens, total)
+	if s.Input != nil && s.Output != nil {
+		m.UsageKnown++
 	}
-	for id := range traces {
+}
+
+// Finish returns the final metrics; callers must not add more samples afterward.
+func (a *Accumulator) Finish(sampled bool) Metrics {
+	m := a.metrics
+	m.Sampled = sampled
+	if m.LogIDs == nil {
+		m.LogIDs = []string{}
+	}
+	m.TraceIDs = make([]string, 0, len(a.traces))
+	for id := range a.traces {
 		m.TraceIDs = append(m.TraceIDs, id)
 	}
 	sort.Strings(m.TraceIDs)
+	if a.completed {
+		span := max(a.end-a.begin, 0)
+		m.SpanMS = &span
+	}
 	return m
+}
+
+// Measure uses log metadata only. Missing usage stays unknown; overlapping
+// requests contribute their wall-clock span, rather than summed latency.
+func Measure(samples []Sample, sampled bool) Metrics {
+	var accumulator Accumulator
+	for _, sample := range samples {
+		accumulator.Add(sample)
+	}
+	return accumulator.Finish(sampled)
 }
 
 type Result struct {

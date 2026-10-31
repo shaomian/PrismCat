@@ -36,7 +36,10 @@ func (r *SQLiteRepository) migrateReviews() error {
  CREATE INDEX IF NOT EXISTS idx_review_reports_card ON review_reports(experiment_id,created_at DESC,id DESC);
  CREATE UNIQUE INDEX IF NOT EXISTS idx_review_reports_active ON review_reports(experiment_id) WHERE status='running';
  UPDATE review_reports SET status='interrupted',document=json_set(document,'$.status','interrupted') WHERE status='running';`)
-	return err
+	if err != nil {
+		return err
+	}
+	return r.migrateReviewSnapshots()
 }
 func (r *SQLiteRepository) GetReviewTemplate(id string) (benchmark.ReviewTemplate, error) {
 	var v benchmark.ReviewTemplate
@@ -155,10 +158,29 @@ func (r *SQLiteRepository) ListReviewReports(id string, offset, limit int) ([]be
 	return values, total, rows.Err()
 }
 func (r *SQLiteRepository) CreateReviewReport(v benchmark.ReviewReport) error {
+	if v.SnapshotID != "" {
+		return r.createSnapshotReport(v)
+	}
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
+	// Prepare the unique protection set before taking the shared log-writer lock.
+	logIDs := []string{}
+	seen := map[string]bool{}
+	for _, task := range v.Tasks {
+		for _, id := range task.Metrics.LogIDs {
+			if !seen[id] {
+				seen[id] = true
+				logIDs = append(logIDs, id)
+			}
+		}
+	}
+	ids, err := json.Marshal(logIDs)
+	if err != nil {
+		return err
+	}
+	document, protectionIDs := string(raw), string(ids)
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
 
@@ -179,8 +201,6 @@ func (r *SQLiteRepository) CreateReviewReport(v benchmark.ReviewReport) error {
 	if exists == 0 {
 		return sql.ErrNoRows
 	}
-	logIDs := []string{}
-	seen := map[string]bool{}
 	for _, task := range v.Tasks {
 		if v.ParentID == "" && task.RunID != "" {
 			if err = tx.QueryRow("SELECT COUNT(*) FROM experiment_runs WHERE id=? AND experiment_id=?", task.RunID, v.ExperimentID).Scan(&exists); err != nil {
@@ -190,40 +210,26 @@ func (r *SQLiteRepository) CreateReviewReport(v benchmark.ReviewReport) error {
 				return ErrCorrelationConflict
 			}
 		}
-		for _, id := range task.Metrics.LogIDs {
-			if !seen[id] {
-				seen[id] = true
-				logIDs = append(logIDs, id)
-			}
-		}
 	}
 	if len(logIDs) > 0 {
-		ids, _ := json.Marshal(logIDs)
-		if err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM json_each(?) v JOIN deleted_log_ids d ON d.id=v.value)", string(ids)).Scan(&exists); err != nil {
+		if err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM json_each(?) v JOIN deleted_log_ids d ON d.id=v.value)", protectionIDs).Scan(&exists); err != nil {
 			return err
 		}
 		if exists > 0 {
 			return ErrCorrelationConflict
 		}
 	}
-	_, err = tx.Exec("INSERT INTO review_reports VALUES(?,?,?,?,?,?,?,?)", v.ID, v.ExperimentID, v.Status, v.Model, v.Question, v.ParentID, v.CreatedAt.UnixMilli(), string(raw))
+	_, err = tx.Exec("INSERT INTO review_reports VALUES(?,?,?,?,?,?,?,?)", v.ID, v.ExperimentID, v.Status, v.Model, v.Question, v.ParentID, v.CreatedAt.UnixMilli(), document)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return ErrCorrelationConflict
 		}
 		return err
 	}
-	statement, err := tx.Prepare("INSERT INTO review_card_logs VALUES(?,?) ON CONFLICT(experiment_id,log_id) DO NOTHING")
-	if err != nil {
+	// One set-based statement replaces one Exec per log while keeping the report
+	// and all retention protection in the same transaction.
+	if _, err = tx.Exec("INSERT INTO review_card_logs(experiment_id,log_id) SELECT ?,value FROM json_each(?) WHERE true ON CONFLICT(experiment_id,log_id) DO NOTHING", v.ExperimentID, protectionIDs); err != nil {
 		return err
-	}
-	defer statement.Close()
-	for _, task := range v.Tasks {
-		for _, id := range task.Metrics.LogIDs {
-			if _, err = statement.Exec(v.ExperimentID, id); err != nil {
-				return err
-			}
-		}
 	}
 	err = tx.Commit()
 	return err
@@ -251,8 +257,14 @@ func (r *SQLiteRepository) FinishReviewReport(v benchmark.ReviewReport) error {
 func (r *SQLiteRepository) DeleteReviewReport(id, experimentID string) error {
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	var status string
-	if err := r.db.QueryRow("SELECT status FROM review_reports WHERE id=? AND experiment_id=?", id, experimentID).Scan(&status); err != nil {
+	var snapshot string
+	if err := tx.QueryRow("SELECT status,"+reportSnapshotExpr+" FROM review_reports WHERE id=? AND experiment_id=?", id, experimentID).Scan(&status, &snapshot); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return sql.ErrNoRows
 		}
@@ -261,6 +273,15 @@ func (r *SQLiteRepository) DeleteReviewReport(id, experimentID string) error {
 	if status == "running" {
 		return ErrReportActive
 	}
-	_, err := r.db.Exec("DELETE FROM review_reports WHERE id=?", id)
-	return err
+	if snapshot != "" {
+		// Removing the final report releases its directory, but preserves the
+		// card's existing sticky retention contract without copying log bodies.
+		if _, err = tx.Exec(`INSERT INTO review_card_logs(experiment_id,log_id) SELECT ?,m.log_id FROM review_snapshot_logs m WHERE m.snapshot_id=? AND NOT EXISTS(SELECT 1 FROM review_reports WHERE id!=? AND `+reportSnapshotExpr+`=?) GROUP BY m.log_id ON CONFLICT(experiment_id,log_id) DO NOTHING`, experimentID, snapshot, id, snapshot); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec("DELETE FROM review_reports WHERE id=?", id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

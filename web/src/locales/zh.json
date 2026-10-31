@@ -977,6 +977,8 @@
         "evidence": "查看依据 {{index}}",
         "recommendations": "下一次可以尝试",
         "report_meta": "分析模型：{{model}} · {{time}}",
+        "evidence_as_of": "统计与请求范围截至：{{time}}",
+        "export_evidence_as_of": "统计与请求范围截至",
         "analysis_usage": "本次 AI 复盘用量（与任务用量分开）",
         "usage_unknown": "没有收到模型用量数据。",
         "failed": "操作未完成，请稍后重试。",

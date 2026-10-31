@@ -1,5 +1,33 @@
 # Release notes / 更新记录
 
+## v2.4.0
+
+### 新增与改进
+
+- **任务全量统计**：内置 SQLite 逐行累计全部已记录模型请求的耗时跨度、Token、请求数和错误数，取消前 200000 条截断；辅助请求与复盘自身流量不计入，未知用量和未完成请求保留原有标识。统计不再常驻完整日志 ID 清单，任务交集由数据库检查。
+- **冻结证据目录**：新报告在一致数据视图中分批建立只含成员关系的目录，不复制正文；请求分页、关键词／失败过滤、详情与引用校验统一使用该目录，任务后来新增请求或修改引用不会改变旧报告范围。
+- **追问与目录回收**：追问共享原目录，重新分析建立新目录；删除父报告不影响仍引用目录的追问，最后一份引用报告删除后回收目录，并保持卡片既有日志保留规则。准备失败、取消或重启后清理未完成目录。
+- **复盘查询与交互**：提供关键词和仅失败请求过滤、工具查证过程及历史报告删除；修复分页游标漏项、搜索突破报告范围、删除后缓存和末页状态残留，以及 Unicode 命中片段异常。异常分析会保存失败状态。
+- **调用链关联一致性**：关联窗口与索引上限可配置，运行、重启恢复及手动整理后重建索引使用同一策略；过期证据在匹配前清理，长请求晚到的最终响应保留已确认归属。增加超大调用链首次构建提示。
+- **统计截止时间**：新报告和 Markdown 导出显示统计与请求范围的截止时间；运行中的请求之后仍可能补全状态、用量和正文，已有统计值保持生成时的快照。
+
+### 升级说明
+
+- 兼容已有配置、SQLite 数据及分离正文文件；首次启动自动创建目录表，无需手动迁移。旧报告按原清单与统计范围读取，不自动重算或重建历史日志。
+- 全量统计覆盖本次范围内已记录的模型请求；AI 的抽样、查证轮次与读取预算继续独立受限，不能视为 AI 已阅读全部日志。关键词检索覆盖保存的正文预览，原文按现有采集与读取上限按需加载。
+- 重建并重启程序以应用更新。使用说明见 [对比实验与 AI 复盘](EXPERIMENTS_CN.md) 和 [自动调用链](AUTO_TRACE_CN.md)。
+
+### English
+
+- Stream full recorded model-request statistics without the 200000-request prefix cap or an in-memory membership list; retain unknown-usage, incomplete-request and overlapping-task warnings.
+- Freeze report membership in batched SQLite directories. Use the same scope for pagination, filtered search, details and citation validation, while keeping original bodies in their existing storage.
+- Share directories across follow-ups and collect them after their final report reference is deleted, preserving card retention rules and cleaning up interrupted preparation.
+- Add filtered evidence search, tool activity and historical report deletion; fix skipped search pages, scope drift, stale deletion state, Unicode snippets and failed-analysis finalization.
+- Apply configurable correlation bounds consistently to recovery and live matching; preserve confirmed membership for late final responses and show an initial-build hint for very large traces.
+- Show the frozen statistics timestamp in reports and Markdown exports.
+
+Existing configuration, SQLite data, body files and historical reports remain compatible. Startup adds the directory tables automatically; historical reports retain their original scope and statistics. AI evidence budgets remain bounded, and keyword search covers saved previews. Rebuild and restart to apply the update.
+
 ## v2.3.0
 
 ### 新增与改进
