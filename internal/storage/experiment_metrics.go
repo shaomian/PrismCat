@@ -10,7 +10,20 @@ import (
 	"github.com/shaomian/PrismCat/internal/trace"
 )
 
-const experimentLogScope = `((capture_run_id!='' AND capture_run_id=(SELECT capture_run_id FROM experiment_runs WHERE id=?)) OR trace_id IN (SELECT et.trace_id FROM experiment_run_traces et WHERE run_id=? AND NOT EXISTS(SELECT 1 FROM experiment_trace_snapshots s WHERE s.run_id=et.run_id AND s.trace_id=et.trace_id)) OR EXISTS(SELECT 1 FROM experiment_trace_samples s WHERE s.run_id=? AND s.log_id=l.id))`
+// Build candidates through the capture, trace and frozen-member
+// indexes, then fetch matching logs by rowid. Integer candidates avoid a second
+// string-key index lookup for every log in a large task. Rowids are local to
+// this query only; persisted evidence continues to use stable log IDs.
+// An OR over request_logs scans unrelated history and repeats the frozen-member
+// lookup for every row. IN deduplicates overlaps; UNION ALL avoids building a
+// second temporary set for the same candidates.
+const experimentLogScope = `l.rowid IN (
+ SELECT cl.rowid FROM experiment_runs er JOIN request_logs cl ON cl.capture_run_id=er.capture_run_id WHERE er.id=? AND er.capture_run_id!=''
+ UNION ALL
+ SELECT tl.rowid FROM experiment_run_traces et JOIN request_logs tl ON tl.trace_id=et.trace_id WHERE et.run_id=? AND NOT EXISTS(SELECT 1 FROM experiment_trace_snapshots s WHERE s.run_id=et.run_id AND s.trace_id=et.trace_id)
+ UNION ALL
+ SELECT fl.rowid FROM experiment_trace_samples s JOIN request_logs fl ON fl.id=s.log_id WHERE s.run_id=?
+)`
 
 // MeasureExperimentRun keeps older repository integrations working while SQLite
 // streams lightweight rows instead of retaining a RequestLog and Sample per row.
@@ -56,8 +69,8 @@ type sampleQueryer interface {
 }
 
 func walkExperimentSamples(ctx context.Context, reader sampleQueryer, id string, visit func(benchmark.Sample) (bool, error)) error {
-	// Filter method/path in Go: using the method index here makes SQLite sort
-	// the entire task before yielding rows instead of walking its time index.
+	// Filter method/path in Go so SQLite fetches only indexed scope candidates,
+	// instead of choosing the method index and visiting unrelated requests.
 	rows, err := reader.QueryContext(ctx, `SELECT id,created_at,method,path,status_code,latency_ms,COALESCE(error,'')!='',trace_id,COALESCE(websocket_info,''),usage_input_tokens,usage_output_tokens,usage_total_tokens
 		FROM request_logs l WHERE `+experimentLogScope+` AND COALESCE(tag,'') NOT LIKE 'prismcat-analysis%' ORDER BY created_at_unix_ms,id`, id, id, id)
 	if err != nil {

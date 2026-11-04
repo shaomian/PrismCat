@@ -20,7 +20,7 @@
 
 ## 环境与常用命令
 
-Go 版本以 `go.mod` 为准（当前最低 1.25.7）；发布工作流和 Docker 使用 Node.js 24。前端使用 npm 和已提交的 `web/package-lock.json`。
+Go 版本以 `go.mod` 为准（当前最低 1.27.3）；发布工作流和 Docker 使用 Node.js 24。前端使用 npm 和已提交的 `web/package-lock.json`。
 
 后端命令在仓库根目录执行：
 

@@ -1,5 +1,15 @@
 # Release notes / 更新记录
 
+## v2.4.1
+
+- 修复整理调用链后，实验统计反复扫描冻结成员导致的慢查询；启动时自动补齐成员索引，兼容已有数据和报告。
+- 实验统计、证据目录准备和任务重叠检查通过索引获取相关请求，在数据库内合并去重，避免小任务反复扫描无关历史日志；保留原有时间顺序与冻结范围。
+- 本地构建最低 Go 版本、二进制发布和 Docker 构建统一升级到 Go 1.27.3，包含新版标准库安全修复。需重新构建并替换程序或镜像才会生效；已有发布产物不会自动更新。
+
+- Fix slow statistics for reorganized traces with an automatically added frozen-member index, preserving existing data and reports.
+- Fetch experiment candidates through indexes and deduplicate them inside SQLite for statistics, evidence preparation and overlap checks, preserving chronological order and frozen membership without scanning unrelated history.
+- Require Go 1.27.3 for source builds and use it for binary releases and Docker builds to include standard-library security fixes. Rebuild and replace the executable or image to apply them; existing release artifacts remain unchanged.
+
 ## v2.4.0
 
 ### 新增与改进

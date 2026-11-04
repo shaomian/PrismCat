@@ -6,6 +6,8 @@
 
 > Independently maintained fork of [PrismCat](https://github.com/paopaoandlingyia/PrismCat) — released under the same [MIT License](LICENSE).
 
+v2.4.1 fixes slow statistics for reorganized tasks and full-history scans for small tasks, and upgrades the build toolchain to Go 1.27.3. See the [release notes](CHANGELOG.md#v241).
+
 v2.4.0 adds full-task statistics and frozen database evidence directories, reuses evidence for follow-ups, and improves review search, report deletion and correlation recovery. See the [release notes](CHANGELOG.md#v240).
 
 v2.3.0 improves dashboard and trace loading, adds batched conversations, paged diagrams and content previews, and fixes trend boundary counts. See the [release notes](CHANGELOG.md#v230).
@@ -189,7 +191,7 @@ Built to run as a silent, 24/7 black box — you never have to "remember to star
 
 ## Build and Run from Source
 
-Install Go (see `go.mod` for the required version) and Node.js (24 recommended), then use an entry point in the repository root:
+Install Go (1.27.3 or newer, as specified in `go.mod`) and Node.js (24 recommended), then use an entry point in the repository root:
 
 | Platform | Entry point |
 |----------|-------------|

@@ -51,6 +51,7 @@ func (r *SQLiteRepository) migrateTraceGrouping() error {
  CREATE TABLE IF NOT EXISTS experiment_trace_snapshots(run_id TEXT NOT NULL,trace_id TEXT NOT NULL,PRIMARY KEY(run_id,trace_id));
  CREATE TABLE IF NOT EXISTS experiment_trace_samples(run_id TEXT NOT NULL,trace_id TEXT NOT NULL,log_id TEXT NOT NULL,PRIMARY KEY(run_id,trace_id,log_id));
  CREATE INDEX IF NOT EXISTS idx_experiment_sample_log ON experiment_trace_samples(log_id);
+ CREATE INDEX IF NOT EXISTS idx_experiment_sample_run_log ON experiment_trace_samples(run_id,log_id);
  DROP TRIGGER IF EXISTS restore_trace_assignment;
  CREATE TRIGGER restore_trace_assignment AFTER UPDATE OF trace_id,parent_log_id,trace_seq ON request_logs
  WHEN EXISTS(SELECT 1 FROM trace_assignments a WHERE a.log_id=NEW.id AND (a.trace_id != COALESCE(NEW.trace_id,'') OR a.trace_seq != COALESCE(NEW.trace_seq,0) OR a.parent_log_id != COALESCE(NEW.parent_log_id,'')))

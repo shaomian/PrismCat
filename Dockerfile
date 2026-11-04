@@ -7,7 +7,7 @@ COPY web/ ./
 RUN npm run build
 
 # --- 第二阶段：构建后端 ---
-FROM golang:1.25.7 AS backend-builder
+FROM golang:1.27.3 AS backend-builder
 WORKDIR /app
 COPY go.mod go.sum ./
 ENV GOTOOLCHAIN=auto
