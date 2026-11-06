@@ -63,9 +63,11 @@ export function StatsCards({ stats, loading }: StatsCardsProps) {
                 <div key={card.title} className={cn('bg-card px-3 py-2', loading && 'animate-pulse')}>
                     <div className="text-xs text-muted-foreground">{card.title}</div>
                     <div className="mt-0.5 flex items-center justify-between gap-2">
+                        {/* 数字是卡片唯一的主角:text-2xl + semibold 立起层级,
+                            标题和 sparkline 都只是陪衬,不要再给它们加戏 */}
                         <span
                             className={cn(
-                                'text-xl tabular-nums',
+                                'text-2xl font-semibold tracking-tight tabular-nums',
                                 card.tone === 'danger' && (stats?.error_count ?? 0) > 0 ? 'text-danger' : 'text-foreground',
                             )}
                         >

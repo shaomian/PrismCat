@@ -46,6 +46,8 @@ export function Login({ setupRequired, onSignedIn }: LoginProps) {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      {/* 品牌母题:页面顶部一条 2px 光谱细线,登录页是门脸,细线落在最高处 */}
+      <div aria-hidden="true" className="prism-hairline h-[2px] w-full" />
       <header className="flex w-full items-center justify-between px-4 py-4 sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
           <PrismCatLogo className="h-9 w-9" />
@@ -129,7 +131,7 @@ export function Login({ setupRequired, onSignedIn }: LoginProps) {
                         setPassword(event.target.value)
                         if (error) setError('')
                       }}
-                      className="h-11 pr-11"
+                      className="h-10 pr-10"
                       placeholder={setupRequired ? t('auth.new_password_placeholder') : t('auth.password_placeholder')}
                       aria-invalid={error ? 'true' : 'false'}
                       autoComplete={setupRequired ? 'new-password' : 'current-password'}
@@ -158,7 +160,7 @@ export function Login({ setupRequired, onSignedIn }: LoginProps) {
                         setConfirmPassword(event.target.value)
                         if (error) setError('')
                       }}
-                      className="h-11"
+                      className="h-10"
                       placeholder={t('auth.confirm_password_placeholder')}
                       aria-invalid={error ? 'true' : 'false'}
                       autoComplete="new-password"
@@ -173,7 +175,7 @@ export function Login({ setupRequired, onSignedIn }: LoginProps) {
                   ) : null}
                 </div>
 
-                <Button type="submit" size="lg" className="h-11 w-full" disabled={isSubmitting}>
+                <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
                   {setupRequired ? t('auth.setup_submit') : t('auth.sign_in')}
                   <ArrowRight className="h-4 w-4" />
                 </Button>

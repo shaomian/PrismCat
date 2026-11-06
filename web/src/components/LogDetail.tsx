@@ -403,7 +403,7 @@ export function LogDetail({
         // overflow-hidden 和圆角必须同时存在:header(bg-card)和滚动区(bg-muted/30)都是直角,
         // 不裁剪就会盖在 16px 圆角上,看起来像两层边角对不齐
         "w-full p-0 flex flex-col overflow-hidden bg-background",
-        panelWidthMode === 'wide' && "border-l border-border sm:rounded-l-2xl sm:max-w-6xl",
+        panelWidthMode === 'wide' && "border-l border-border sm:rounded-l-xl sm:max-w-6xl",
         panelWidthMode === 'full' && "border-0 sm:rounded-none sm:max-w-none"
     )
     // 请求/响应 只作为分组标题浮在背景上,每个可折叠块自己是一张卡。
@@ -664,7 +664,7 @@ export function LogDetail({
                                     value={annotationNote}
                                     onChange={(event) => setAnnotationNote(event.target.value)}
                                     placeholder={t('log_annotation.note_placeholder')}
-                                    className={cn('min-h-20 resize-y rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm leading-relaxed transition-colors placeholder:text-muted-foreground/70 focus-visible:bg-background', FOCUS_RING)}
+                                    className={cn('min-h-20 resize-y rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm leading-relaxed transition-colors placeholder:text-muted-foreground/50 focus-visible:bg-background', FOCUS_RING)}
                                 />
                                 <div className="space-y-2">
                                     <div className="relative">
@@ -673,7 +673,7 @@ export function LogDetail({
                                             value={annotationLabels}
                                             onChange={(event) => setAnnotationLabels(event.target.value)}
                                             placeholder={t('log_annotation.labels_placeholder')}
-                                            className={cn('h-10 w-full rounded-lg border border-border bg-muted/40 pl-9 pr-3 text-sm transition-colors placeholder:text-muted-foreground/70 focus-visible:bg-background', FOCUS_RING)}
+                                            className={cn('h-10 w-full rounded-lg border border-border bg-muted/40 pl-9 pr-3 text-sm transition-colors placeholder:text-muted-foreground/50 focus-visible:bg-background', FOCUS_RING)}
                                         />
                                     </div>
                                     <Button

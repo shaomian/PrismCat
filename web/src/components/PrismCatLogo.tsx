@@ -19,9 +19,11 @@ export function PrismCatLogo({ className }: PrismCatLogoProps) {
             className={cn("w-10 h-10", className)}
         >
             <defs>
+                {/* 渐变与 primary 同源(紫→青的光谱切片),不要另起色号。
+                    用逗号 hsl 语法保证 SVG presentation attribute 兼容 */}
                 <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#3B82F6" />
-                    <stop offset="100%" stopColor="#8B5CF6" />
+                    <stop offset="0%" stopColor="hsl(263, 70%, 50%)" />
+                    <stop offset="100%" stopColor="hsl(185, 90%, 45%)" />
                 </linearGradient>
 
                 <filter id={glowId} x="-20%" y="-20%" width="140%" height="140%">

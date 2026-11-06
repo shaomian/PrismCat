@@ -39,10 +39,10 @@ export function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 
-// 状态码颜色
+// 状态码颜色。3xx 是重定向不是警告,归 info;4xx 客户端错误归 warning;5xx 才用 danger
 export function getStatusColor(code: number): string {
   if (code >= 200 && code < 300) return 'text-success'
-  if (code >= 300 && code < 400) return 'text-warning'
+  if (code >= 300 && code < 400) return 'text-info'
   if (code >= 400 && code < 500) return 'text-warning'
   if (code >= 500) return 'text-danger'
   return 'text-muted-foreground'

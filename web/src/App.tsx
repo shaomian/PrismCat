@@ -266,9 +266,10 @@ function AppLayout({ onSignOut }: AppLayoutProps) {
           )}
         </header>
 
-        {/* 页面标题栏 - 给内容区一个"顶" */}
+        {/* 页面标题栏 - 给内容区一个"顶"。标题是全页层级的锚点,
+            要比侧栏正文(text-sm)高半档,否则进入页面第一眼找不到重心 */}
         <div className="sticky top-0 z-20 hidden h-12 shrink-0 items-center border-b border-border bg-background px-5 md:flex">
-          <h1 className="text-sm font-medium text-foreground">{t(pageTitle)}</h1>
+          <h1 className="text-base font-semibold text-foreground">{t(pageTitle)}</h1>
         </div>
 
         {/* 主内容 */}

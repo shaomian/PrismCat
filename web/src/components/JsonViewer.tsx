@@ -163,7 +163,7 @@ function LargeTextPreview({ text, searchTerm, maxMatches }: { text: string; sear
 
     return (
         <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground/60">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground/70">
                 <span>{t('json_viewer.large_text')}</span>
                 <span>{formatSize(text.length)}</span>
                 <button
@@ -392,7 +392,7 @@ function CollapsibleNode({ data, label, isRoot = false, isArrayItem = false, ini
         return (
             <div>
                 {showLabel && <span className="text-info font-semibold mr-1">"<HighlightText text={label} searchTerm={searchTerm} maxMatches={getSearchMatchLimit(searchPlan, keySearchSlot(nodePath))} />": </span>}
-                <span className="text-muted-foreground/60">{open}{close}</span>{suffix}
+                <span className="text-muted-foreground/70">{open}{close}</span>{suffix}
             </div>
         );
     }
@@ -405,13 +405,13 @@ function CollapsibleNode({ data, label, isRoot = false, isArrayItem = false, ini
                 onClick={() => setExpanded(!expanded)}
             >
                 {showLabel && <span className="text-info font-semibold mr-1">"<HighlightText text={label} searchTerm={searchTerm} maxMatches={getSearchMatchLimit(searchPlan, keySearchSlot(nodePath))} />": </span>}
-                <span className="text-muted-foreground/60">{open}</span>
+                <span className="text-muted-foreground/70">{open}</span>
                 {!expanded && (
                     <>
                         <span className="mx-1 px-1 py-0.5 rounded bg-muted/50 text-xs text-muted-foreground font-medium">
                             {isArray ? t('json_viewer.items', { count: data.length }) : t('json_viewer.keys', { count: entries.length })}
                         </span>
-                        <span className="text-muted-foreground/60">{close}</span>{suffix}
+                        <span className="text-muted-foreground/70">{close}</span>{suffix}
                     </>
                 )}
             </div>
@@ -420,7 +420,7 @@ function CollapsibleNode({ data, label, isRoot = false, isArrayItem = false, ini
             {expanded && (
                 <div className="ml-[1ch] border-l border-muted-foreground/15 pl-[1ch]">
                     {renderedEntries.map(([key, value], idx) => {
-                        const comma = idx < renderedEntries.length - 1 ? <span className="text-muted-foreground/40">,</span> : null;
+                        const comma = idx < renderedEntries.length - 1 ? <span className="text-muted-foreground/50">,</span> : null;
                         const childPath = childNodePath(nodePath, key);
                         if (typeof value === 'object' && value !== null) {
                             const forceExpandChild = shouldForceExpandArrayChild(idx, value);
@@ -456,7 +456,7 @@ function CollapsibleNode({ data, label, isRoot = false, isArrayItem = false, ini
             {/* Footer: } or ] */}
             {expanded && (
                 <div>
-                    <span className="text-muted-foreground/60">{close}</span>{suffix}
+                    <span className="text-muted-foreground/70">{close}</span>{suffix}
                 </div>
             )}
         </>

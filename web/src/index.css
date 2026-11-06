@@ -6,6 +6,12 @@
 
 /* 颜色 token 只在本块声明一次,不要拆出第二个 @theme 重复定义 */
 @theme {
+  /* 字体的单一来源:body 和 pre/code 都引用这两个 var,不要再各写一份栈。
+     Fira Code 已打包,JetBrains Mono 作为本机字体的备用位;
+     Noto Sans SC 守尾是为了代码里的中文字形不乱 fallback */
+  --font-sans: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'Fira Code', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', monospace;
+
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
   --color-card: hsl(var(--card));
@@ -97,9 +103,14 @@
   --border: 0 0% 89%;
   --input: 0 0% 89%;
   --ring: 263 65% 48%;
-  /* 两档圆角: 容器 rounded-lg = 8px,控件 rounded-md = 6px。
+  /* 三档圆角: 控件 rounded-md = 6px,容器 rounded-lg = 8px,
+     全高抽屉等大面积浮层 rounded-xl = 12px。
      容器比控件更圆,层级才立得住;一刀切会显得平板 */
   --radius: 0.5rem;
+
+  /* 平铺元素一律不用阴影,层级由 1px 边框表达;阴影只留给真浮层(弹窗/抽屉/日期浮层),
+     统一走 --popover-shadow,深浅色各自取值 */
+  --popover-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.05);
 
   --chart-1: 263 70% 50%;
   --chart-2: 215 70% 50%;
@@ -138,6 +149,8 @@
   --border: 0 0% 20%;
   --input: 0 0% 20%;
   --ring: 263 75% 70%;
+
+  --popover-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.4);
 
   --search-highlight: rgb(234 88 12 / 0.45);
   --search-highlight-ring: rgb(251 146 60 / 0.6);
@@ -183,10 +196,10 @@ input[type="number"] {
   border-radius: 2px;
 }
 
-/* 代码块样式 */
+/* 代码块样式:与 font-mono 类共用同一个 @theme token,避免两套等宽栈并存 */
 pre,
 code {
-  font-family: 'Fira Code', 'JetBrains Mono', Consolas, Monaco, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', monospace;
+  font-family: var(--font-mono);
 }
 
 /* 动画 - fadeIn 之前引用但未定义,animate-fade-in 曾静默失效;
@@ -207,7 +220,7 @@ code {
   animation: fadeIn 0.2s ease-out;
 }
 
-/* 棱镜渐变 */
+/* 棱镜渐变:完整光谱只留给门脸大光斑(登录页),UI 内部的品牌母题用下面的细线 */
 .prism-gradient {
   background: linear-gradient(135deg,
       hsl(var(--color-prism-violet)) 0%,
@@ -215,6 +228,15 @@ code {
       hsl(var(--color-prism-cyan)) 50%,
       hsl(var(--color-prism-green)) 75%,
       hsl(var(--color-prism-yellow)) 100%);
+}
+
+/* 品牌母题:紫→青的光谱细线,带透明收尾。每屏最多出现在一个"门脸"位置,
+   用多了就从点缀变成装饰条 */
+.prism-hairline {
+  background: linear-gradient(90deg,
+      hsl(var(--color-prism-violet)),
+      hsl(var(--color-prism-cyan)) 55%,
+      transparent 100%);
 }
 
 .prism-gradient-text {
@@ -233,14 +255,14 @@ code {
   border: 1px solid hsl(var(--border)) !important;
   color: hsl(var(--foreground)) !important;
   font-family: inherit !important;
-  border-radius: 0.4rem !important;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--popover-shadow) !important;
 }
 
 .react-datepicker__header {
   background-color: hsl(var(--muted)) !important;
   border-bottom: 1px solid hsl(var(--border)) !important;
-  border-radius: 0.4rem 0.4rem 0 0 !important;
+  border-radius: var(--radius) var(--radius) 0 0 !important;
 }
 
 .react-datepicker__current-month,
@@ -351,7 +373,7 @@ code {
     /* Inter 负责拉丁,Noto Sans SC 负责中文。两者 x-height 接近,
        混排时不会出现中文比英文粗一档、大一号的割裂感。
        Noto Sans SC 只打包了 UI 文案用到的字形,见 scripts/build-font.mjs */
-    font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    font-family: var(--font-sans);
     min-height: 100vh;
   }
 

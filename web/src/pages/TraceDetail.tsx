@@ -513,7 +513,7 @@ export function TraceDetail() {
                       />
                     </div>
                   </div>
-                  <span className="text-xs text-muted-foreground/60 shrink-0">
+                  <span className="text-xs text-muted-foreground/70 shrink-0">
                     {new Date(req.created_at).toLocaleTimeString()}
                   </span>
                 </div>
@@ -529,7 +529,7 @@ export function TraceDetail() {
       </div>}
       {/* Time range footer */}
       {requests.length > 0 && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground/60 px-1">
+        <div className="flex items-center justify-between text-xs text-muted-foreground/70 px-1">
           <span>{formatDate(new Date(summary.first_time).toISOString(), i18n.language)}</span>
           <span className="font-mono">{formatLatency(summary.total_latency_ms)} {t('traces.total_span')}</span>
           <span>{formatDate(new Date(summary.last_time).toISOString(), i18n.language)}</span>

@@ -3,6 +3,7 @@ import { BookmarkCheck, ChevronRight, Clock3, Inbox, Network, Server, SlidersHor
 import type { RequestLog } from '@/lib/api'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { Badge } from '@/components/ui/badge'
 import {
     Table,
     TableBody,
@@ -27,12 +28,13 @@ interface LogTableProps {
     selectedId?: string
 }
 
-function getStatusBadgeColor(code: number): string {
-    if (code >= 200 && code < 300) return 'bg-success/10 text-success'
-    if (code >= 300 && code < 400) return 'bg-warning/10 text-warning'
-    if (code >= 400 && code < 500) return 'bg-warning/10 text-warning'
-    if (code >= 500) return 'bg-danger/10 text-danger'
-    return 'bg-muted text-muted-foreground'
+/** 状态码 → Badge 语义变体,与 lib/utils.ts getStatusColor 同一规则,两处别分叉 */
+function getStatusBadgeVariant(code: number): 'success' | 'info' | 'warning' | 'danger' | 'secondary' {
+    if (code >= 200 && code < 300) return 'success'
+    if (code >= 300 && code < 400) return 'info'
+    if (code >= 400 && code < 500) return 'warning'
+    if (code >= 500) return 'danger'
+    return 'secondary'
 }
 
 /** 拖拽选中行内文字(比如复制路径)后,mouseup 仍会在行上触发 click。
@@ -148,14 +150,12 @@ function MobileLogCard({
                         >
                             {log.method}
                         </span>
-                        <span
-                            className={cn(
-                                'inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium',
-                                getStatusBadgeColor(log.status_code)
-                            )}
+                        <Badge
+                            variant={getStatusBadgeVariant(log.status_code)}
+                            className="font-mono font-medium"
                         >
                             {log.status_code || '---'}
-                        </span>
+                        </Badge>
                         <span className="inline-flex items-center gap-1 rounded bg-background px-2.5 py-1 text-xs font-semibold text-muted-foreground">
                             <Server className="h-3 w-3" />
                             <span className="truncate max-w-[160px]">
@@ -199,7 +199,7 @@ function MobileLogCard({
                     <div className="space-y-1.5">
                         <div className="font-mono text-xs leading-relaxed text-foreground break-all">
                             {log.path}
-                            {log.query && <span className="text-muted-foreground/80">?{log.query}</span>}
+                            {log.query && <span className="text-muted-foreground/70">?{log.query}</span>}
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
                             <span className="inline-flex items-center gap-1">
@@ -336,7 +336,7 @@ export function LogTable({ logs, loading, filtered, onSelect, selectedId }: LogT
                                     <div className="flex items-center gap-2">
                                         <span className="truncate font-mono text-xs text-foreground/90 select-text">
                                             {log.path}
-                                            {log.query && <span className="text-muted-foreground/75">?{log.query}</span>}
+                                            {log.query && <span className="text-muted-foreground/70">?{log.query}</span>}
                                         </span>
                                         {log.trace_id && (
                                             <Tooltip>
@@ -428,7 +428,7 @@ export function LogTable({ logs, loading, filtered, onSelect, selectedId }: LogT
                                     </span>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                    <span className="text-xs text-muted-foreground/85 font-medium">
+                                    <span className="text-xs text-muted-foreground font-medium">
                                         {formatDate(log.created_at, i18n.language)}
                                     </span>
                                 </TableCell>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useId, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
-import { Send, Plus, Trash2, Loader2, Copy, Check, ChevronDown, Braces, AlertCircle } from 'lucide-react'
+import { Send, Plus, Trash2, Loader2, Copy, Check, Braces, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn, getStatusColor, formatSize, generateId, FOCUS_RING, FOCUS_RING_DANGER } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
@@ -11,11 +11,10 @@ import { JsonViewer } from '@/components/JsonViewer'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const
-
-// HTTP 方法不携带成败语义,方法选择器统一中性,不按方法分色(与 lib/utils.ts METHOD_CLASS 同一规则)
-const METHOD_BUTTON_CLASS = 'bg-muted text-muted-foreground border-border'
 
 interface HeaderEntry {
     key: string
@@ -111,8 +110,6 @@ export function Playground() {
     const [copiedField, setCopiedField] = useState<string | null>(null)
 
     // UI state
-    const [methodOpen, setMethodOpen] = useState(false)
-    const [upstreamOpen, setUpstreamOpen] = useState(false)
     const [activeTab, setActiveTab] = useState<RequestTab>('body')
     const [requestBodyViewMode, setRequestBodyViewMode] = useState<RequestBodyViewMode>('raw')
     const [responseViewMode, setResponseViewMode] = useState<ResponseViewMode>('pretty')
@@ -295,40 +292,24 @@ export function Playground() {
     return (
         <div className="mx-auto w-full max-w-7xl space-y-5 animate-fade-in">
 
-            {/* Unified Address Bar */}
-            <div className="flex flex-wrap items-center gap-2 bg-muted/10 p-1.5 rounded-lg">
+            {/* Unified Address Bar:同一条工具栏上所有控件统一 h-8,与全站工具条一致 */}
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 p-2">
                 {/* Method Selector */}
-                <div className="relative shrink-0">
-                    <button
-                        onClick={() => setMethodOpen(!methodOpen)}
-                        className={cn(
-                            'flex items-center gap-1 px-3 py-2.5 rounded-md border text-xs font-semibold transition-all min-w-[80px] justify-between',
-                            METHOD_BUTTON_CLASS
-                        )}
+                <Select value={method} onValueChange={setMethod}>
+                    <SelectTrigger
+                        aria-label={t('log_table.method')}
+                        className="min-w-[92px] shrink-0 justify-between gap-1 border-border bg-background font-mono text-xs font-semibold"
                     >
-                        {method}
-                        <ChevronDown className="h-3 w-3 opacity-50" />
-                    </button>
-                    {methodOpen && (
-                        <>
-                            <div className="fixed inset-0 z-40" onClick={() => setMethodOpen(false)} />
-                            <div className="absolute top-full left-0 mt-2 z-50 bg-popover border border-border py-1 min-w-[120px] rounded-lg">
-                                {HTTP_METHODS.map((m) => (
-                                    <button
-                                        key={m}
-                                        onClick={() => { setMethod(m); setMethodOpen(false) }}
-                                        className={cn(
-                                            'w-full px-3 py-1.5 text-left text-xs font-medium hover:bg-accent transition-colors',
-                                            m === method && 'bg-accent'
-                                        )}
-                                    >
-                                        {m}
-                                    </button>
-                                ))}
-                            </div>
-                        </>
-                    )}
-                </div>
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {HTTP_METHODS.map((m) => (
+                            <SelectItem key={m} value={m} className="font-mono text-xs font-medium">
+                                {m}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
 
                 <div className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-background p-1">
                     {([
@@ -340,7 +321,7 @@ export function Playground() {
                             type="button"
                             onClick={() => setTargetMode(option.value)}
                             className={cn(
-                                'h-7 rounded-lg px-2.5 text-xs font-semibold transition-all',
+                                'h-6 rounded-sm px-2.5 text-xs font-medium transition-colors',
                                 targetMode === option.value
                                     ? 'bg-secondary text-foreground'
                                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -354,43 +335,32 @@ export function Playground() {
                 {targetMode === 'upstream' ? (
                     <>
                         {/* Upstream Selector */}
-                        <div className="relative shrink-0">
-                            <button
-                                onClick={() => setUpstreamOpen(!upstreamOpen)}
+                        <Select value={upstream} onValueChange={setUpstream}>
+                            <SelectTrigger
+                                aria-label={t('playground.select_upstream')}
                                 className={cn(
-                                    'flex items-center gap-1 px-3 py-2.5 rounded-md border bg-background text-xs font-medium hover:bg-accent transition-all min-w-[90px] justify-between',
-                                    selectedUpstreamMissing ? 'border-warning/50 text-warning' : 'border-input'
+                                    'min-w-[120px] max-w-[220px] shrink-0 justify-between gap-1 border-input bg-background text-xs',
+                                    selectedUpstreamMissing && 'border-warning/50 text-warning'
                                 )}
                             >
-                                <span className="text-foreground/80 truncate max-w-[100px]">{upstream || t('playground.select_upstream')}</span>
-                                <ChevronDown className="h-3 w-3 opacity-50" />
-                            </button>
-                            {upstreamOpen && (
-                                <>
-                                    <div className="fixed inset-0 z-40" onClick={() => setUpstreamOpen(false)} />
-                                    <div className="absolute top-full left-0 mt-2 z-50 bg-popover border border-border py-1 min-w-[180px] rounded-lg">
-                                        {upstreams.map((u) => (
-                                            <button
-                                                key={u.name}
-                                                onClick={() => { setUpstream(u.name); setUpstreamOpen(false) }}
-                                                className={cn(
-                                                    'w-full px-3 py-1.5 text-left text-xs font-medium hover:bg-accent transition-colors',
-                                                    u.name === upstream && 'bg-accent'
-                                                )}
-                                            >
-                                                <span className="font-semibold">{u.name}</span>
-                                                <span className="ml-2 text-muted-foreground font-normal truncate">{u.target}</span>
-                                            </button>
-                                        ))}
-                                        {upstreams.length === 0 && (
-                                            <div className="px-3 py-2 text-xs text-muted-foreground italic">
-                                                {t('playground.no_upstreams')}
-                                            </div>
-                                        )}
+                                <SelectValue placeholder={t('playground.select_upstream')}>
+                                    {upstream || t('playground.select_upstream')}
+                                </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                                {upstreams.map((u) => (
+                                    <SelectItem key={u.name} value={u.name} className="text-xs">
+                                        <span className="font-semibold">{u.name}</span>
+                                        <span className="truncate text-muted-foreground">{u.target}</span>
+                                    </SelectItem>
+                                ))}
+                                {upstreams.length === 0 && (
+                                    <div className="px-2 py-1.5 text-xs italic text-muted-foreground">
+                                        {t('playground.no_upstreams')}
                                     </div>
-                                </>
-                            )}
-                        </div>
+                                )}
+                            </SelectContent>
+                        </Select>
 
                         {/* Path Input */}
                         <input
@@ -398,7 +368,7 @@ export function Playground() {
                             value={path}
                             onChange={(e) => setPath(e.target.value)}
                             placeholder="/v1/chat/completions"
-                            className={cn('flex-1 min-w-[220px] px-3 py-2.5 rounded-md bg-background border border-input text-sm font-mono placeholder:text-muted-foreground/40 transition-all', FOCUS_RING)}
+                            className={cn('h-8 min-w-[220px] flex-1 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground/50 transition-all', FOCUS_RING)}
                         />
                     </>
                 ) : (
@@ -407,7 +377,7 @@ export function Playground() {
                         value={targetUrl}
                         onChange={(e) => setTargetUrl(e.target.value)}
                         placeholder={t('playground.custom_url_placeholder')}
-                        className={cn('flex-1 min-w-[260px] px-3 py-2.5 rounded-md bg-background border border-input text-sm font-mono placeholder:text-muted-foreground/40 transition-all', FOCUS_RING)}
+                        className={cn('h-8 min-w-[260px] flex-1 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground/50 transition-all', FOCUS_RING)}
                     />
                 )}
 
@@ -418,7 +388,7 @@ export function Playground() {
                         sending ||
                         (targetMode === 'upstream' ? !upstream || selectedUpstreamMissing : !targetUrl.trim())
                     }
-                    className="shrink-0 px-5 py-2.5 h-auto font-semibold gap-2 bg-primary hover:bg-primary/90 transition-all"
+                    className="shrink-0 gap-2 px-4"
                 >
                     {sending ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -429,45 +399,19 @@ export function Playground() {
                 </Button>
             </div>
 
-            {/* Request Config Tabs */}
-            <div className="space-y-0">
-                {/* Tab Headers */}
-                <div className="flex items-center gap-1 border-b border-border">
-                    <button
-                        onClick={() => setActiveTab('body')}
-                        className={cn(
-                            'px-4 py-2.5 text-xs font-semibold transition-all border-b-2 -mb-px',
-                            activeTab === 'body'
-                                ? 'border-primary text-foreground'
-                                : 'border-transparent text-muted-foreground/50 hover:text-muted-foreground/80'
-                        )}
-                    >
+            {/* Request Config Tabs:ui/tabs 的 line 变体,与 Traces 页同一形态,不再手搓 border-b-2 页签 */}
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RequestTab)} className="gap-0">
+                <TabsList variant="line" className="w-full justify-start rounded-none border-b border-border pb-1">
+                    <TabsTrigger value="body" className="flex-none px-3">
                         {t('playground.body')}
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('headers')}
-                        className={cn(
-                            'px-4 py-2.5 text-xs font-semibold transition-all border-b-2 -mb-px flex items-center gap-1.5',
-                            activeTab === 'headers'
-                                ? 'border-primary text-foreground'
-                                : 'border-transparent text-muted-foreground/50 hover:text-muted-foreground/80'
-                        )}
-                    >
+                    </TabsTrigger>
+                    <TabsTrigger value="headers" className="flex-none gap-1.5 px-3">
                         {t('playground.headers')}
-                        {headers.length > 0 && (
-                            <span className={cn(
-                                'text-xs font-medium px-1.5 py-0.5 rounded-md',
-                                activeTab === 'headers' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground/50'
-                            )}>
-                                {headers.length}
-                            </span>
-                        )}
-                    </button>
-                </div>
+                        {headers.length > 0 && <Badge variant="secondary">{headers.length}</Badge>}
+                    </TabsTrigger>
+                </TabsList>
 
-                {/* Tab Content: Body */}
-                {activeTab === 'body' && (
-                    <div className="space-y-2 pt-3">
+                <TabsContent value="body" className="space-y-2 pt-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
                                 {body.trim() && (
@@ -522,7 +466,7 @@ export function Playground() {
                                 onChange={(e) => setBody(e.target.value)}
                                 placeholder='{ "model": "gpt-4", "messages": [...] }'
                                 className={cn(
-                                    'w-full h-[260px] px-4 py-3 rounded-md bg-background border text-xs font-mono leading-relaxed placeholder:text-muted-foreground/40 resize-none custom-scrollbar transition-all',
+                                    'w-full h-[260px] px-4 py-3 rounded-md bg-background border text-xs font-mono leading-relaxed placeholder:text-muted-foreground/50 resize-none custom-scrollbar transition-all',
                                     requestBodyJsonError ? 'border-danger' : 'border-input',
                                     requestBodyJsonError ? FOCUS_RING_DANGER : FOCUS_RING,
                                 )}
@@ -535,7 +479,7 @@ export function Playground() {
                                 {body.trim() ? (
                                     <JsonViewer data={parsedRequestBody ?? body} />
                                 ) : (
-                                    <div className="flex h-full items-center justify-center text-xs italic text-muted-foreground/40">
+                                    <div className="flex h-full items-center justify-center text-xs italic text-muted-foreground/50">
                                         {t('playground.empty_state')}
                                     </div>
                                 )}
@@ -552,12 +496,9 @@ export function Playground() {
                                 <span className="min-w-0 break-words font-mono">{requestBodyJsonError}</span>
                             </p>
                         )}
-                    </div>
-                )}
+                </TabsContent>
 
-                {/* Tab Content: Headers */}
-                {activeTab === 'headers' && (
-                    <div className="pt-3 space-y-2">
+                <TabsContent value="headers" className="space-y-2 pt-3">
                         <div className="space-y-1.5 max-h-[240px] overflow-y-auto custom-scrollbar">
                             {headers.map((h) => (
                                 <div key={h.id} className="flex items-center gap-2 group">
@@ -566,18 +507,18 @@ export function Playground() {
                                         value={h.key}
                                         onChange={(e) => handleHeaderChange(h.id, 'key', e.target.value)}
                                         placeholder="Header Name"
-                                        className={cn('w-[35%] sm:w-[30%] px-3 py-2 rounded-lg bg-background border border-input text-xs font-mono font-medium placeholder:text-muted-foreground/40 transition-all', FOCUS_RING)}
+                                        className={cn('h-8 w-[35%] rounded-md border border-input bg-background px-3 text-xs font-mono font-medium placeholder:text-muted-foreground/50 transition-all sm:w-[30%]', FOCUS_RING)}
                                     />
                                     <input
                                         type="text"
                                         value={h.value}
                                         onChange={(e) => handleHeaderChange(h.id, 'value', e.target.value)}
                                         placeholder="Value"
-                                        className={cn('flex-1 px-3 py-2 rounded-lg bg-background border border-input text-xs font-mono placeholder:text-muted-foreground/40 transition-all', FOCUS_RING)}
+                                        className={cn('h-8 flex-1 rounded-md border border-input bg-background px-3 text-xs font-mono placeholder:text-muted-foreground/50 transition-all', FOCUS_RING)}
                                     />
                                     <button
                                         onClick={() => handleRemoveHeader(h.id)}
-                                        className="p-1.5 rounded-lg text-muted-foreground/20 hover:text-danger hover:bg-danger/10 transition-all opacity-0 group-hover:opacity-100"
+                                        className="rounded-md p-1.5 text-muted-foreground/50 opacity-0 transition-all hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
                                     >
                                         <Trash2 className="h-3.5 w-3.5" />
                                     </button>
@@ -593,16 +534,15 @@ export function Playground() {
                             <Plus className="h-3 w-3" />
                             {t('playground.add_header')}
                         </Button>
-                    </div>
-                )}
-            </div>
+                </TabsContent>
+            </Tabs>
 
             {/* Response */}
             {(response || error || sending) && (
                 <div className="rounded-lg border border-border bg-card overflow-hidden">
                     {/* Response Header */}
                     <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-3">
-                        <span className="text-xs font-semibold text-muted-foreground/60">
+                        <span className="text-xs font-semibold text-muted-foreground/70">
                             {t('playground.response')}
                         </span>
                         {sending && (
@@ -678,7 +618,7 @@ export function Playground() {
                     {/* Response Headers */}
                     {response?.headers && Object.keys(response.headers).length > 0 && (
                         <details className="group">
-                            <summary className="px-4 py-2 cursor-pointer text-xs font-semibold text-muted-foreground/40 hover:text-muted-foreground transition-colors select-none">
+                            <summary className="px-4 py-2 cursor-pointer text-xs font-semibold text-muted-foreground/70 hover:text-muted-foreground transition-colors select-none">
                                 {t('playground.response_headers')} ({Object.keys(response.headers).length})
                             </summary>
                             <div className="px-4 pb-3 space-y-1 font-mono text-xs">
@@ -710,7 +650,7 @@ export function Playground() {
 
                     {/* Empty response */}
                     {response && !response.body && !error && (
-                        <div className="p-8 text-center text-xs text-muted-foreground/40 italic">
+                        <div className="p-8 text-center text-xs text-muted-foreground/50 italic">
                             {t('playground.empty_response')}
                         </div>
                     )}

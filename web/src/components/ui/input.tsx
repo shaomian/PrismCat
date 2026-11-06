@@ -27,7 +27,7 @@ function Input({
     <div className="group relative w-full">
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/75 transition-colors group-focus-within:text-primary [&>svg]:h-4 [&>svg]:w-4"
+        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/70 transition-colors group-focus-within:text-primary [&>svg]:h-4 [&>svg]:w-4"
       >
         {startIcon}
       </span>

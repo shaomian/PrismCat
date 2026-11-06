@@ -22,6 +22,7 @@ import { TraceFilters } from '@/components/TraceFilters'
 import { TraceLabels } from '@/components/TraceLabels'
 import { countTraceFilters, defaultTraceFilters, traceListQuery, type TraceListFilters } from '@/lib/trace-filters'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Badge } from '@/components/ui/badge'
 import { correlationSettingsPath, useCorrelationStatus } from '@/lib/trace-capture'
 import { toast } from 'sonner'
 
@@ -34,9 +35,9 @@ function traceListTime(timestamp: number) {
 function TraceErrorBadge({ count }: { count: number }) {
   const { t } = useTranslation()
   if (count <= 0) return null
-  return <span className="inline-flex shrink-0 items-center gap-1 rounded bg-danger/10 px-1.5 py-0.5 text-xs text-danger" title={t('traces.error_count', { count })}>
+  return <Badge variant="danger" title={t('traces.error_count', { count })}>
     <AlertCircle className="size-3" aria-hidden="true" /><span className="sr-only">{t('traces.errors')}: </span>{count}
-  </span>
+  </Badge>
 }
 
 export function Traces() {
@@ -348,9 +349,9 @@ export function Traces() {
                     <td className="px-3 py-3">
                       <div className="flex flex-wrap gap-1">
                         {(trace.upstreams || []).map(u => (
-                          <span key={u} className="inline-flex items-center min-h-5 px-1.5 py-0.5 rounded text-xs font-normal bg-muted text-muted-foreground">
+                          <Badge key={u} variant="secondary">
                             {u}
-                          </span>
+                          </Badge>
                         ))}
                       </div>
                     </td>
@@ -395,9 +396,9 @@ export function Traces() {
                 </div>
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                   {(trace.upstreams || []).map(u => (
-                    <span key={u} className="text-xs font-normal bg-muted text-muted-foreground px-1.5 py-0.5 rounded-md">{u}</span>
+                    <Badge key={u} variant="secondary">{u}</Badge>
                   ))}
-                  <span className="text-xs font-medium bg-muted text-muted-foreground px-1.5 py-0.5 rounded">{trace.request_count} reqs</span>
+                  <Badge variant="secondary" className="font-medium">{trace.request_count} reqs</Badge>
                   <span className="text-xs tabular-nums text-muted-foreground ml-auto">{formatLatency(trace.total_latency_ms)}</span>
                 </div>
                 <div className="mb-2 flex min-h-8 items-center justify-between gap-2">
@@ -412,7 +413,7 @@ export function Traces() {
                     style={{ width: `${Math.max(4, (trace.total_latency_ms / maxLatency) * 100)}%` }}
                   />
                 </div>
-                <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground/60">
+                <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground/70">
                   <span>{t('traces.last_request')}: {traceListTime(trace.last_time)}</span>
                 </div>
               </div>

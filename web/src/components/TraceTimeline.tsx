@@ -142,7 +142,7 @@ const RequestGroup = memo(function RequestGroup({
         </span>
         {request.error && <AlertCircle className="h-3 w-3 text-danger" />}
         <span className="ml-auto text-xs font-mono text-muted-foreground">{formatLatency(request.latency_ms)}</span>
-        <span className="text-xs text-muted-foreground/60">{new Date(request.created_at).toLocaleTimeString()}</span>
+        <span className="text-xs text-muted-foreground/70">{new Date(request.created_at).toLocaleTimeString()}</span>
       </div>
 
       {/* 折叠的历史消息 */}

@@ -113,7 +113,7 @@ export function InfoTooltip({ content }: { content: string }) {
                 <button
                     type="button"
                     onClick={event => event.stopPropagation()}
-                    className="inline-flex h-4 w-4 items-center justify-center rounded-md text-muted-foreground/85 transition-colors hover:text-foreground"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
                     aria-label="More info"
                 >
                     <CircleHelp className="h-3.5 w-3.5" />

@@ -40,7 +40,7 @@ function DateRangePickerFallback() {
     return (
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             <div className="h-8 rounded-md border border-border bg-background sm:min-w-[170px]" />
-            <span className="hidden text-muted-foreground/30 text-sm font-medium mx-1 sm:inline">/</span>
+            <span className="hidden text-muted-foreground/50 text-sm font-medium mx-1 sm:inline">/</span>
             <div className="h-8 rounded-md border border-border bg-background sm:min-w-[170px]" />
         </div>
     )
@@ -357,11 +357,11 @@ export function LogFilters({
             {/* 分页 */}
             <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-muted-foreground/60">
+                    <span className="text-xs font-medium text-muted-foreground/70">
                         {t('filters.total_count', { count: total })}
                     </span>
                     {total > 0 && (
-                        <Badge variant="outline" className="text-xs border-border bg-background text-muted-foreground/75">
+                        <Badge variant="outline" className="text-xs border-border bg-background text-muted-foreground/70">
                             {t('filters.per_page', { count: pageSize })}
                         </Badge>
                     )}
@@ -406,7 +406,7 @@ export function LogFilters({
                             }}
                             className="h-6 w-10 border-0 bg-transparent p-0 text-center font-mono text-xs font-medium text-primary shadow-none focus-visible:ring-0"
                         />
-                        <span className="mx-2 text-muted-foreground/30">/</span>
+                        <span className="mx-2 text-muted-foreground/50">/</span>
                         <span>{totalPages}</span>
                     </div>
 

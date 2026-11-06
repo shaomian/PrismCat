@@ -428,7 +428,7 @@ export function RoutingTab({
 
                     {upstreams.length === 0 ? (
                         <div className="rounded-lg border border-dashed border-input bg-muted/10 px-6 py-20 text-center">
-                            <Upload className="mx-auto mb-4 h-9 w-10 text-muted-foreground/30" />
+                            <Upload className="mx-auto mb-4 h-9 w-10 text-muted-foreground/50" />
                             <p className="text-sm text-foreground/75">
                                 {t('upstream_manager.no_upstreams')}
                             </p>

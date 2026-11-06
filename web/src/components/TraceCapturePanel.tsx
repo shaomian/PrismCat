@@ -154,7 +154,7 @@ export function TraceCapturePanel({ revision, recording, onChanged }: { revision
     </div>}
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     {runs.length === 0 ? <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border py-16 text-center">
-      {loading ? <Loader2 className="size-6 animate-spin text-muted-foreground" /> : <Radio className="size-7 text-muted-foreground/60" />}
+      {loading ? <Loader2 className="size-6 animate-spin text-muted-foreground" /> : <Radio className="size-7 text-muted-foreground/70" />}
       <p className="text-sm text-muted-foreground">{t(loading ? 'common.loading' : error ? 'correlation.failed' : 'correlation.no_captures')}</p>
     </div> : <div className="divide-y divide-border rounded-lg border border-border bg-card px-4 sm:px-5">
       {runs.map(run => <div key={run.id} className={cn('task-item flex flex-col gap-3 py-4 transition-colors sm:flex-row sm:items-center sm:justify-between', selecting && selectedIds.includes(run.id) && 'bg-primary/5')}>
