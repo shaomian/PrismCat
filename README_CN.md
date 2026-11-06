@@ -29,6 +29,8 @@ PrismCat 是一个**自托管的 LLM API 透明代理与调试控制台**。
   <img alt="PrismCat 日志控制台：所有上游的每一条请求，含状态码、token 用量和延迟" src="assets/logs-light.png">
 </picture>
 
+完整备份、Web 导入与重启恢复、命令行迁移步骤见 [备份与迁移](BACKUP_CN.md)。
+
 ## 这些场景你熟悉吗？
 
 | | PrismCat |
@@ -354,7 +356,7 @@ logging_rules:
   model_path_templates: []
 
 storage:
-  retention_days: 30              # 日志保留天数，0 = 永久
+  retention_days: 30              # 日志保留天数，0 = 关闭按天清理
 
 upstreams:
   openai:

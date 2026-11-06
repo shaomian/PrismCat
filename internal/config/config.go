@@ -304,6 +304,8 @@ type StorageConfig struct {
 	BlobDir string `yaml:"blob_dir"`
 	// AsyncBuffer controls the capacity of the async log queue.
 	AsyncBuffer int `yaml:"async_buffer"`
+	// CleanupPaused protects restored history until cleanup is explicitly resumed.
+	CleanupPaused bool `yaml:"cleanup_paused,omitempty"`
 }
 
 // Load 加载配置文件
@@ -313,6 +315,13 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("读取配置文件失败: %w", err)
 	}
 
+	return parseConfig(data, path, true)
+}
+
+// Parse reads portable backup configuration without environment overrides or filesystem writes.
+func Parse(data []byte) (*Config, error) { return parseConfig(data, "", false) }
+
+func parseConfig(data []byte, path string, environment bool) (*Config, error) {
 	c := Config{
 		Server: ServerConfig{
 			Port:                   8711,
@@ -358,59 +367,60 @@ func Load(path string) (*Config, error) {
 	c.fileUIPassword = c.Server.UIPassword
 
 	// 覆盖环境变量 (云端/容器化部署优先)
-	if envAddr := os.Getenv("PRISMCAT_ADDR"); envAddr != "" {
-		c.Server.Addr = envAddr
-	}
-	if envPort := os.Getenv("PRISMCAT_PORT"); envPort != "" {
-		if p, err := parsePort(envPort); err == nil {
-			c.Server.Port = p
+	if environment {
+		if envAddr := os.Getenv("PRISMCAT_ADDR"); envAddr != "" {
+			c.Server.Addr = envAddr
+		}
+		if envPort := os.Getenv("PRISMCAT_PORT"); envPort != "" {
+			if p, err := parsePort(envPort); err == nil {
+				c.Server.Port = p
+			}
+		}
+		if envUIHosts := os.Getenv("PRISMCAT_UI_HOSTS"); envUIHosts != "" {
+			c.Server.UIHosts = splitCSV(envUIHosts)
+		}
+		if envProxyDomains := os.Getenv("PRISMCAT_PROXY_DOMAINS"); envProxyDomains != "" {
+			c.Server.ProxyDomains = splitCSV(envProxyDomains)
+		}
+		if envEnablePathRouting := os.Getenv("PRISMCAT_ENABLE_PATH_ROUTING"); envEnablePathRouting != "" {
+			if enabled, err := strconv.ParseBool(envEnablePathRouting); err == nil {
+				c.Server.EnablePathRouting = enabled
+			}
+		}
+		if envPathRoutingPrefix := os.Getenv("PRISMCAT_PATH_ROUTING_PREFIX"); envPathRoutingPrefix != "" {
+			c.Server.PathRoutingPrefix = envPathRoutingPrefix
+		}
+		if envDB := os.Getenv("PRISMCAT_DB_PATH"); envDB != "" {
+			c.Storage.Database = envDB
+		}
+		if envBlobDir := os.Getenv("PRISMCAT_BLOB_DIR"); envBlobDir != "" {
+			c.Storage.BlobDir = envBlobDir
+		}
+		if envRetention := os.Getenv("PRISMCAT_RETENTION_DAYS"); envRetention != "" {
+			if d, err := parsePort(envRetention); err == nil { // reuse parsePort for int
+				c.Storage.RetentionDays = d
+			}
+		}
+		if envMaxStorage := os.Getenv("PRISMCAT_MAX_STORAGE_BYTES"); envMaxStorage != "" {
+			if n, err := strconv.ParseInt(envMaxStorage, 10, 64); err == nil && n >= 0 {
+				c.Storage.MaxStorageBytes = n
+			}
+		}
+		if envAsyncBuffer := os.Getenv("PRISMCAT_ASYNC_BUFFER"); envAsyncBuffer != "" {
+			if b, err := parsePort(envAsyncBuffer); err == nil {
+				c.Storage.AsyncBuffer = b
+			}
+		}
+		if envPassword := os.Getenv("PRISMCAT_UI_PASSWORD"); envPassword != "" {
+			c.envUIPassword = true
+			c.Server.UIPassword = envPassword
+		}
+		if envOverridesEnabled := os.Getenv("PRISMCAT_REQUEST_OVERRIDES_ENABLED"); envOverridesEnabled != "" {
+			if enabled, err := strconv.ParseBool(envOverridesEnabled); err == nil {
+				c.Overrides.Enabled = enabled
+			}
 		}
 	}
-	if envUIHosts := os.Getenv("PRISMCAT_UI_HOSTS"); envUIHosts != "" {
-		c.Server.UIHosts = splitCSV(envUIHosts)
-	}
-	if envProxyDomains := os.Getenv("PRISMCAT_PROXY_DOMAINS"); envProxyDomains != "" {
-		c.Server.ProxyDomains = splitCSV(envProxyDomains)
-	}
-	if envEnablePathRouting := os.Getenv("PRISMCAT_ENABLE_PATH_ROUTING"); envEnablePathRouting != "" {
-		if enabled, err := strconv.ParseBool(envEnablePathRouting); err == nil {
-			c.Server.EnablePathRouting = enabled
-		}
-	}
-	if envPathRoutingPrefix := os.Getenv("PRISMCAT_PATH_ROUTING_PREFIX"); envPathRoutingPrefix != "" {
-		c.Server.PathRoutingPrefix = envPathRoutingPrefix
-	}
-	if envDB := os.Getenv("PRISMCAT_DB_PATH"); envDB != "" {
-		c.Storage.Database = envDB
-	}
-	if envBlobDir := os.Getenv("PRISMCAT_BLOB_DIR"); envBlobDir != "" {
-		c.Storage.BlobDir = envBlobDir
-	}
-	if envRetention := os.Getenv("PRISMCAT_RETENTION_DAYS"); envRetention != "" {
-		if d, err := parsePort(envRetention); err == nil { // reuse parsePort for int
-			c.Storage.RetentionDays = d
-		}
-	}
-	if envMaxStorage := os.Getenv("PRISMCAT_MAX_STORAGE_BYTES"); envMaxStorage != "" {
-		if n, err := strconv.ParseInt(envMaxStorage, 10, 64); err == nil && n >= 0 {
-			c.Storage.MaxStorageBytes = n
-		}
-	}
-	if envAsyncBuffer := os.Getenv("PRISMCAT_ASYNC_BUFFER"); envAsyncBuffer != "" {
-		if b, err := parsePort(envAsyncBuffer); err == nil {
-			c.Storage.AsyncBuffer = b
-		}
-	}
-	if envPassword := os.Getenv("PRISMCAT_UI_PASSWORD"); envPassword != "" {
-		c.envUIPassword = true
-		c.Server.UIPassword = envPassword
-	}
-	if envOverridesEnabled := os.Getenv("PRISMCAT_REQUEST_OVERRIDES_ENABLED"); envOverridesEnabled != "" {
-		if enabled, err := strconv.ParseBool(envOverridesEnabled); err == nil {
-			c.Overrides.Enabled = enabled
-		}
-	}
-
 	c.Server = normalizeServerConfig(c.Server)
 
 	normalizedUpstreams, err := normalizeUpstreams(c.Upstreams)
@@ -432,16 +442,17 @@ func Load(path string) (*Config, error) {
 	}
 
 	// 确保目录存在
-	dbDir := filepath.Dir(c.Storage.Database)
-	if err := os.MkdirAll(dbDir, 0755); err != nil {
-		return nil, fmt.Errorf("创建数据库目录失败: %w", err)
-	}
-	if c.Storage.BlobStore == "fs" {
-		if err := os.MkdirAll(c.Storage.BlobDir, 0755); err != nil {
-			return nil, fmt.Errorf("创建 blob 目录失败: %w", err)
+	if path != "" {
+		dbDir := filepath.Dir(c.Storage.Database)
+		if err := os.MkdirAll(dbDir, 0755); err != nil {
+			return nil, fmt.Errorf("创建数据库目录失败: %w", err)
+		}
+		if c.Storage.BlobStore == "fs" {
+			if err := os.MkdirAll(c.Storage.BlobDir, 0755); err != nil {
+				return nil, fmt.Errorf("创建 blob 目录失败: %w", err)
+			}
 		}
 	}
-
 	return &c, nil
 }
 

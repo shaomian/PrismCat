@@ -166,8 +166,11 @@ logging_rules:
 storage:
   # SQLite 数据库路径
   database: "./data/prismcat.db"
-  # 日志保留天数；0 = 永久保留
+  # 日志保留天数；0 = 关闭按天清理
   retention_days: 30
+  # Restores set this to true. Resume cleanup in Settings → System → Storage management after verification.
+  # 恢复备份后自动设为 true；检查完成后在设置 → 系统 → 存储管理中恢复清理。
+  cleanup_paused: false
 
   # blob 存储（用于分离大 body）
   blob_store: "fs"

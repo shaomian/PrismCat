@@ -15,6 +15,7 @@ const cleanupPreviewLifetime = 10 * time.Minute
 
 type cleanupPreviewState struct {
 	Token         string                        `json:"token"`
+	CleanupPaused bool                          `json:"cleanup_paused"`
 	Enabled       bool                          `json:"enabled"`
 	RetentionDays int                           `json:"retention_days"`
 	Before        time.Time                     `json:"before"`
@@ -49,8 +50,9 @@ func (h *Handler) handleCleanupPreview(w http.ResponseWriter, r *http.Request) {
 		h.jsonError(w, "cleanup_busy", http.StatusConflict)
 		return
 	}
-	preview := cleanupPreviewState{RetentionDays: h.cfg.StorageSnapshot().RetentionDays}
-	if preview.RetentionDays <= 0 {
+	storageCfg := h.cfg.StorageSnapshot()
+	preview := cleanupPreviewState{RetentionDays: storageCfg.RetentionDays, CleanupPaused: storageCfg.CleanupPaused}
+	if preview.RetentionDays <= 0 || preview.CleanupPaused {
 		h.jsonResponse(w, preview)
 		return
 	}
@@ -120,6 +122,11 @@ func (h *Handler) handleCleanup(w http.ResponseWriter, r *http.Request) {
 	if preview == nil || preview.Token != request.Token || time.Since(preview.CreatedAt) > cleanupPreviewLifetime {
 		h.cleanupMu.Unlock()
 		h.jsonError(w, "cleanup_preview_expired", http.StatusConflict)
+		return
+	}
+	if h.cfg.StorageSnapshot().CleanupPaused {
+		h.cleanupMu.Unlock()
+		h.jsonError(w, "cleanup_paused", http.StatusConflict)
 		return
 	}
 	retentionDays := h.cfg.StorageSnapshot().RetentionDays

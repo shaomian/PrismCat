@@ -25,10 +25,6 @@ type LoggingTabProps = {
     setDetachBodyOver: Dispatch<SetStateAction<number>>
     bodyPreview: number
     setBodyPreview: Dispatch<SetStateAction<number>>
-    retentionDays: number
-    setRetentionDays: Dispatch<SetStateAction<number>>
-    maxStorageGB: number
-    setMaxStorageGB: Dispatch<SetStateAction<number>>
     earlyRequestBodySnapshot: boolean
     setEarlyRequestBodySnapshot: Dispatch<SetStateAction<boolean>>
     storeBase64: boolean
@@ -49,10 +45,6 @@ export function LoggingTab({
     setDetachBodyOver,
     bodyPreview,
     setBodyPreview,
-    retentionDays,
-    setRetentionDays,
-    maxStorageGB,
-    setMaxStorageGB,
     earlyRequestBodySnapshot,
     setEarlyRequestBodySnapshot,
     storeBase64,
@@ -139,45 +131,6 @@ export function LoggingTab({
                                 min="0"
                                 value={bodyPreview}
                                 onChange={e => setBodyPreview(Number(e.target.value))}
-                                className="h-9 w-full rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                            />
-                        </FieldBlock>
-                    </div>
-                </SettingSection>
-
-                <SettingSection
-                    title={t('settings.section_retention')}
-                    description={t('settings.section_retention_desc')}
-                >
-                    <div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
-                        <FieldBlock
-                            label={t('settings.retention_days')}
-                            hint={t('settings.retention_days_hint')}
-                            htmlFor="retention-days"
-                            unit={t('settings.days')}
-                        >
-                            <Input
-                                id="retention-days"
-                                type="number"
-                                min="0"
-                                value={retentionDays}
-                                onChange={e => setRetentionDays(Number(e.target.value))}
-                                className="h-9 w-full rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
-                            />
-                        </FieldBlock>
-                        <FieldBlock
-                            label={t('settings.max_storage_bytes')}
-                            hint={t('settings.max_storage_bytes_hint')}
-                            htmlFor="max-storage"
-                            unit="GB"
-                        >
-                            <Input
-                                id="max-storage"
-                                type="number"
-                                min="0"
-                                step="0.1"
-                                value={maxStorageGB}
-                                onChange={e => setMaxStorageGB(Number(e.target.value))}
                                 className="h-9 w-full rounded-md border-input bg-background text-sm transition-colors focus-visible:bg-background"
                             />
                         </FieldBlock>

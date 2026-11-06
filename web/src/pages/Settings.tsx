@@ -15,6 +15,7 @@ import { PageLoading } from '@/components/PageLoading'
 import { DEFAULT_SSE_KEEPALIVE_INTERVAL_SECONDS, DEFAULT_UPSTREAM_TIMEOUT_SECONDS, fetchUpstreams, addUpstream, removeUpstream, activateUpstreamTarget, fetchConfig, updateConfig, fetchSystemMetrics, fetchUpdateInfo, fetchStorageUsage, fetchModelPathTemplates } from '@/lib/api'
 import type { Upstream, UpstreamTarget, AppConfig, SystemMetrics, UpdateInfo, StorageUsage, LoggingPathFilter, ModelPathTemplate, SSEKeepaliveMode } from '@/lib/api'
 import type { LoggingRulesTab } from '@/pages/LoggingRules'
+import type { StoragePolicy } from '@/lib/storage-policy'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { copyText } from '@/lib/clipboard'
@@ -104,8 +105,6 @@ export function Settings() {
     const [storeBase64, setStoreBase64] = useState(true)
     const [earlyRequestBodySnapshot, setEarlyRequestBodySnapshot] = useState(false)
 
-    const [retentionDays, setRetentionDays] = useState(30)
-    const [maxStorageGB, setMaxStorageGB] = useState(0)
     const [requestOverridesEnabled, setRequestOverridesEnabled] = useState(false)
     const [overrideMaxBodyKB, setOverrideMaxBodyKB] = useState(1024)
     const [overrideRulesText, setOverrideRulesText] = useState('')
@@ -356,8 +355,6 @@ export function Settings() {
             setBodyPreview(Math.round(configData.logging.body_preview_bytes / 1024))
             setStoreBase64(configData.logging.store_base64)
             setEarlyRequestBodySnapshot(configData.logging.early_request_body_snapshot)
-            setRetentionDays(configData.storage.retention_days)
-            setMaxStorageGB(parseFloat((configData.storage.max_storage_bytes / (1024 * 1024 * 1024)).toFixed(2)))
             setEnablePathRouting(configData.server.enable_path_routing)
             setPathRoutingPrefix(configData.server.path_routing_prefix || '/_proxy')
             setRequestOverridesEnabled(configData.request_overrides?.enabled ?? false)
@@ -1103,6 +1100,10 @@ export function Settings() {
         }
     }
 
+    const handleStoragePolicySaved = useCallback((policy: StoragePolicy) => {
+        setConfig(current => current ? { ...current, storage: { ...current.storage, ...policy } } : current)
+    }, [])
+
     const handleSaveAll = async () => {
         setSaving(true)
         try {
@@ -1122,10 +1123,6 @@ export function Settings() {
                     body_preview_bytes: bodyPreview * 1024,
                     store_base64: storeBase64,
                     early_request_body_snapshot: earlyRequestBodySnapshot,
-                },
-                storage: {
-                    retention_days: retentionDays,
-                    max_storage_bytes: Math.round(maxStorageGB * 1024 * 1024 * 1024),
                 },
                 request_overrides: buildOverridesPayload(overrideBindings, overrideRules),
                 usage_extraction: buildUsageExtractionPayload(usageBindings, usageRules),
@@ -1169,7 +1166,7 @@ export function Settings() {
                 t={t}
             />
 
-            <div className="relative z-10 w-full space-y-6 pb-16 animate-fade-in">
+            <div className={`relative z-10 w-full space-y-6 animate-fade-in ${activeTab === 'system' ? '' : 'pb-16'}`}>
 
                 {/* Content Area */}
                 <div>
@@ -1238,10 +1235,6 @@ export function Settings() {
                             setDetachBodyOver={setDetachBodyOver}
                             bodyPreview={bodyPreview}
                             setBodyPreview={setBodyPreview}
-                            retentionDays={retentionDays}
-                            setRetentionDays={setRetentionDays}
-                            maxStorageGB={maxStorageGB}
-                            setMaxStorageGB={setMaxStorageGB}
                             earlyRequestBodySnapshot={earlyRequestBodySnapshot}
                             setEarlyRequestBodySnapshot={setEarlyRequestBodySnapshot}
                             storeBase64={storeBase64}
@@ -1267,6 +1260,7 @@ export function Settings() {
                             updateLoading={updateLoading}
                             updateError={updateError}
                             config={config}
+                            onStoragePolicySaved={handleStoragePolicySaved}
                             loadMetrics={loadMetrics}
                             handleCalculateStorage={handleCalculateStorage}
                             handleCheckUpdate={handleCheckUpdate}

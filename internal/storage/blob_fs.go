@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,6 +29,7 @@ var ErrRefSetEmpty = errors.New("blob gc: reference set is empty but the store i
 // Layout: <baseDir>/<hash[:2]>/<hash>
 type FileBlobStore struct {
 	baseDir string
+	gcMu    sync.RWMutex
 }
 
 func NewFileBlobStore(baseDir string) (*FileBlobStore, error) {
@@ -150,7 +152,11 @@ func isBlobFileName(name string) bool {
 }
 
 func (s *FileBlobStore) GarbageCollect(ctx context.Context, referencedRefs []string, minAge time.Duration) (int, error) {
-	_ = ctx
+	s.gcMu.Lock()
+	defer s.gcMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 
 	referenced := make(map[string]struct{}, len(referencedRefs))
 	for _, ref := range referencedRefs {

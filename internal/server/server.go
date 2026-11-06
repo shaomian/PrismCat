@@ -217,7 +217,10 @@ func New(cfg *config.Config, repo storage.Repository, blobs storage.BlobStore) *
 
 // stopBackground 结束后台清理协程
 func (s *Server) stopBackground() {
-	s.stopTraceCleanupOnce.Do(func() { close(s.stopTraceCleanup) })
+	s.stopTraceCleanupOnce.Do(func() {
+		close(s.stopTraceCleanup)
+		s.api.CloseBackups()
+	})
 }
 
 // Start 启动服务器

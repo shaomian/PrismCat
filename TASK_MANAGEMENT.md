@@ -30,7 +30,7 @@ Batches are checked and applied atomically. One blocked item prevents the entire
 
 ## Manual expired-log cleanup
 
-Use **Settings → Resource usage → Storage usage → Clean expired logs now**. Preview the retention cutoff, eligible logs/traces and retained count before confirming.
+Use **Settings → System → Storage management → Preview cleanup**. Retention days and the storage limit are configured here too. Select **Save policy** after editing; cleanup preview is disabled while changes are unsaved. Preview the retention cutoff, eligible logs/traces and retained count before confirming.
 
 The background job reuses existing whole-trace retention rules, including pinned/saved logs, retained review evidence, active captures and recent unfinished requests. Retention set to zero disables this action. Preview tokens expire and configuration changes require a new preview. Protection is checked again during execution.
 

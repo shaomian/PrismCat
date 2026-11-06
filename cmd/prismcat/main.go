@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shaomian/PrismCat/internal/backup"
 	"github.com/shaomian/PrismCat/internal/config"
+	"github.com/shaomian/PrismCat/internal/instancelock"
 	"github.com/shaomian/PrismCat/internal/server"
 	"github.com/shaomian/PrismCat/internal/storage"
 )
@@ -86,10 +88,37 @@ usage_extraction:
 `
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		if err := runBackup(os.Args[2:], os.Stdout); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	defaultPath := filepath.Join("data", "config.yaml")
 	configPath := flag.String("config", defaultPath, "配置文件路径")
 	showConsole := flag.Bool("console", false, "是否显示控制台窗口")
 	flag.Parse()
+	if imported, err := backup.ApplyPendingImport(context.Background(), *configPath); err != nil {
+		log.Fatalf("应用待恢复备份失败: %v", err)
+	} else if imported != nil {
+		log.Printf("备份导入 %s: %s %s", imported.ID, imported.State, imported.Error)
+	}
+	if backup.PendingRestore(*configPath) {
+		log.Fatal("unfinished restore: run prismcat backup rollback --target <data directory>")
+	}
+	if err := os.MkdirAll(filepath.Dir(*configPath), 0755); err != nil {
+		log.Fatal(err)
+	}
+	configLock, err := instancelock.Acquire(*configPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer configLock.Close()
+	// Recheck under the lock: an interrupted restore may have begun between the
+	// preliminary check and acquiring exclusive access.
+	if backup.PendingRestore(*configPath) {
+		log.Fatal("unfinished restore: run prismcat backup rollback --target <data directory>")
+	}
 
 	// 统一路径处理：如果要使用的是默认路径，但老路径 config.yaml 存在，则尝试迁移或提示
 	if *configPath == defaultPath {
@@ -139,6 +168,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
+	dataLock, err := instancelock.Acquire(cfg.Storage.Database, cfg.Storage.BlobDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dataLock.Close()
 	if err := cfg.EnsureModelPathTemplatesInitialized(); err != nil {
 		log.Fatalf("初始化模型日志路径模板失败: %v", err)
 	}
@@ -179,6 +213,14 @@ func main() {
 		var lastSizeCheck time.Time
 		for {
 			storageCfg := cfg.StorageSnapshot()
+			if storageCfg.CleanupPaused {
+				select {
+				case <-ticker.C:
+					continue
+				case <-stopRetention:
+					return
+				}
+			}
 			var totalDeleted int64
 
 			// 1. Time-based retention.

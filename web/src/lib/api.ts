@@ -689,6 +689,7 @@ export interface AppConfig {
     storage: {
         database: string
         retention_days: number
+        cleanup_paused?: boolean
         max_storage_bytes: number
     }
     request_overrides: {
@@ -980,4 +981,61 @@ export type TraceMetadata = Pick<RequestLog, 'trace_id' | 'trace_seq' | 'trace_a
 export async function fetchTraceMetadata(id: string): Promise<TraceMetadata> {
  const response = await apiRequest(API_BASE + '/logs/' + encodeURIComponent(id) + '/trace', {}, 'correlation.failed')
  return response.json()
+}
+
+
+export interface BackupJob {
+    id: string
+    state: 'running' | 'completed' | 'failed'
+    progress: { phase: 'snapshot' | 'archive' | 'verify'; files: number; bytes: number }
+    created_at: string
+    size: number
+    error?: string
+}
+
+export interface BackupImportJob {
+    id: string
+    state: 'uploading' | 'checking' | 'ready' | 'pending' | 'applying' | 'completed' | 'failed'
+    uploaded_at: string
+    backup_created_at: string
+    source_version: string
+    target_version: string
+    upgrade_required: boolean
+    counts?: Record<string, number>
+    error?: string
+    rollback_directory?: string
+}
+
+export const MAX_BACKUP_IMPORT_BYTES = 8 * 1024 ** 3
+
+export async function fetchBackups(signal?: AbortSignal): Promise<{ backups: BackupJob[]; cleanup_paused: boolean; import_job?: BackupImportJob | null; import_supported?: boolean; import_error?: string }> {
+    const response = await apiRequest(`${API_BASE}/system/backups`, { signal }, 'backups.load_failed')
+    return response.json()
+}
+export async function createBackup(): Promise<BackupJob> {
+    const response = await apiRequest(`${API_BASE}/system/backups`, jsonInit('POST', {}), 'backups.action_failed')
+    return response.json()
+}
+export async function deleteBackup(id: string): Promise<void> {
+    await apiRequest(`${API_BASE}/system/backups/${encodeURIComponent(id)}`, { method: 'DELETE' }, 'backups.action_failed')
+}
+export function backupDownloadUrl(id: string): string {
+    return `${API_BASE}/system/backups/${encodeURIComponent(id)}/download`
+}
+export async function resumeStorageCleanup(): Promise<void> {
+    await apiRequest(`${API_BASE}/system/cleanup/resume`, jsonInit('POST', {}), 'backups.action_failed')
+}
+
+export async function uploadBackup(file: File, signal: AbortSignal): Promise<BackupImportJob> {
+    const response = await apiRequest(`${API_BASE}/system/backup-import`, { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file, signal }, 'backups.import_failed')
+    return response.json()
+}
+
+export async function confirmBackupImport(id: string): Promise<BackupImportJob> {
+    const response = await apiRequest(`${API_BASE}/system/backup-import/${encodeURIComponent(id)}/confirm`, jsonInit('POST', { confirmed: true }), 'backups.import_failed')
+    return response.json()
+}
+
+export async function cancelBackupImport(id: string): Promise<void> {
+    await apiRequest(`${API_BASE}/system/backup-import/${encodeURIComponent(id)}`, { method: 'DELETE' }, 'backups.import_failed')
 }

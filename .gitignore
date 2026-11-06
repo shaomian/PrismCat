@@ -39,3 +39,13 @@ docs/
 .gopath/
 .gotelemetry/
 .claude/
+
+# Offline maintenance locks and recovery state (never commit runtime data).
+backups/
+prismcat-backup-*.zip
+*.prismcat-lock
+.prismcat-restore.json
+.prismcat-install-*/
+.prismcat-rollback-*/
+.prismcat-validate-*/
+.prismcat-backup-*/

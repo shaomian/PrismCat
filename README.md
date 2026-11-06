@@ -29,6 +29,8 @@ Go from inspecting a single request to following a complete Agent task and compa
   <img alt="PrismCat log console: every request across every upstream, with status, tokens and latency" src="assets/logs-light.png">
 </picture>
 
+For full backups, Web import and restore on restart, and CLI migration, see [Backup and migration](BACKUP.md).
+
 ## Sound familiar?
 
 | | PrismCat |
@@ -354,7 +356,7 @@ logging_rules:
   model_path_templates: []
 
 storage:
-  retention_days: 30              # Log retention in days; 0 = keep forever
+  retention_days: 30              # Log retention in days; 0 = disable time-based cleanup
 
 upstreams:
   openai:

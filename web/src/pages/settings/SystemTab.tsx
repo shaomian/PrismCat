@@ -1,18 +1,17 @@
-import {
-    AlertTriangle,
-    Archive,
-    Database,
-    Download,
-    ExternalLink,
-    RefreshCw,
-} from 'lucide-react'
+import { useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
+import { Download, ExternalLink, RefreshCw } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { StorageCleanup } from '@/components/StorageCleanup'
+import { SystemBackups } from '@/components/SystemBackups'
+import { StoragePolicySetting } from '@/components/StoragePolicySetting'
 import type { AppConfig, StorageUsage, SystemMetrics, UpdateInfo } from '@/lib/api'
+import type { StoragePolicy } from '@/lib/storage-policy'
+import { useSystemBackups } from '@/lib/use-system-backups'
 import { cn } from '@/lib/utils'
 import type { TranslationFn } from './helpers'
+import { SettingSection } from './shared'
 
 function formatBytes(value?: number | null): string {
     if (value === undefined || value === null) return '-'
@@ -44,26 +43,12 @@ function formatDuration(seconds?: number | null): string {
     return `${minutes}m ${total % 60}s`
 }
 
-function MetricCard({
-    label,
-    value,
-    detail,
-}: {
-    label: string
-    value: string
-    detail?: string
-}) {
-    return (
-        <div className="rounded-lg border border-border bg-card px-4 py-3">
-            <div className="text-xs text-muted-foreground">{label}</div>
-            <div className="mt-1 text-xl tabular-nums text-foreground">{value}</div>
-            {detail && (
-                <div className="mt-2 text-xs leading-5 text-muted-foreground">
-                    {detail}
-                </div>
-            )}
-        </div>
-    )
+function MetricCard({ label, value, detail }: { label: string; value: string; detail: string }) {
+    return <div className="min-w-0 space-y-1 rounded-md bg-muted/30 px-4 py-3">
+        <div className="text-xs text-muted-foreground">{label}</div>
+        <div className="text-xl font-semibold tabular-nums">{value}</div>
+        <div className="text-xs leading-5 text-muted-foreground">{detail}</div>
+    </div>
 }
 
 type SystemTabProps = {
@@ -81,271 +66,112 @@ type SystemTabProps = {
     updateLoading: boolean
     updateError: string
     config: AppConfig | null
+    onStoragePolicySaved: (policy: StoragePolicy) => void
     loadMetrics: (showLoading?: boolean) => void
     handleCalculateStorage: () => void
     handleCheckUpdate: () => void
 }
 
 export function SystemTab({
-    t,
-    metrics,
-    metricsLoading,
-    metricsError,
-    memoryUsedPercent,
-    metricsUpdatedAt,
-    storageUsage,
-    storageLoading,
-    storageError,
-    storageCalculatedAt,
-    updateInfo,
-    updateLoading,
-    updateError,
-    config,
-    loadMetrics,
-    handleCalculateStorage,
-    handleCheckUpdate,
+    t, metrics, metricsLoading, metricsError, memoryUsedPercent, metricsUpdatedAt,
+    storageUsage, storageLoading, storageError, storageCalculatedAt,
+    updateInfo, updateLoading, updateError, config, onStoragePolicySaved,
+    loadMetrics, handleCalculateStorage, handleCheckUpdate,
 }: SystemTabProps) {
-    return (
-        <div className="mx-auto max-w-7xl space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300 motion-reduce:animate-none motion-reduce:duration-0">
-            {metricsError && (
-                <div className="flex items-start gap-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>{metricsError}</span>
-                </div>
-            )}
+    const backups = useSystemBackups(config?.storage.cleanup_paused ?? false)
+    const { hash } = useLocation()
+    useEffect(() => {
+        if (hash !== '#storage-policy') return
+        const frame = requestAnimationFrame(() => document.getElementById('storage-policy')?.scrollIntoView({ block: 'start' }))
+        return () => cancelAnimationFrame(frame)
+    }, [hash])
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <MetricCard
-                    label={t('settings.system_process_memory')}
-                    value={formatBytes(metrics?.process.rss_bytes)}
-                    detail={t('settings.system_heap_detail', {
-                        alloc: formatBytes(metrics?.process.heap_alloc_bytes),
-                        sys: formatBytes(metrics?.process.heap_sys_bytes),
-                    })}
-                />
-                <MetricCard
-                    label={t('settings.system_process_cpu')}
-                    value={formatPercent(metrics?.process.cpu_percent)}
-                    detail={t('settings.system_cpu_detail', {
-                        seconds: metrics?.process.cpu_seconds?.toFixed(1) ?? '-',
-                    })}
-                />
-                <MetricCard
-                    label={t('settings.system_total_memory')}
-                    value={formatPercent(memoryUsedPercent)}
-                    detail={t('settings.system_memory_detail', {
-                        used: formatBytes(metrics?.memory.used_bytes),
-                        total: formatBytes(metrics?.memory.total_bytes),
-                        source: metrics?.memory.source || '-',
-                    })}
-                />
-                <MetricCard
-                    label={t('settings.system_uptime')}
-                    value={formatDuration(metrics?.runtime.uptime_seconds)}
-                    detail={t('settings.system_runtime_detail', {
-                        goroutines: metrics?.runtime.goroutines ?? '-',
-                        cpu: metrics?.runtime.num_cpu ?? '-',
-                    })}
-                />
+    return <div className="mx-auto max-w-7xl space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300 motion-reduce:animate-none motion-reduce:duration-0">
+        <SettingSection title={t('settings.system_status_title')} description={t('settings.system_status_hint')} action={
+            <Button type="button" variant="outline" size="sm" onClick={() => loadMetrics(true)} disabled={metricsLoading}>
+                <RefreshCw className={cn('size-4', metricsLoading && 'animate-spin')} />{t('common.refresh')}
+            </Button>
+        }>
+            {metricsError && <p role="alert" className="mb-4 text-sm text-danger">{metricsError}</p>}
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <MetricCard label={t('settings.system_process_memory')} value={formatBytes(metrics?.process.rss_bytes)}
+                    detail={t('settings.system_heap_detail', { alloc: formatBytes(metrics?.process.heap_alloc_bytes), sys: formatBytes(metrics?.process.heap_sys_bytes) })} />
+                <MetricCard label={t('settings.system_process_cpu')} value={formatPercent(metrics?.process.cpu_percent)}
+                    detail={t('settings.system_cpu_detail', { seconds: metrics?.process.cpu_seconds?.toFixed(1) ?? '-' })} />
+                <MetricCard label={t('settings.system_total_memory')} value={formatPercent(memoryUsedPercent)}
+                    detail={t('settings.system_memory_detail', { used: formatBytes(metrics?.memory.used_bytes), total: formatBytes(metrics?.memory.total_bytes), source: metrics?.memory.source || '-' })} />
+                <MetricCard label={t('settings.system_uptime')} value={formatDuration(metrics?.runtime.uptime_seconds)}
+                    detail={t('settings.system_runtime_detail', { goroutines: metrics?.runtime.goroutines ?? '-', cpu: metrics?.runtime.num_cpu ?? '-' })} />
             </div>
+            <dl className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs">
+                <div className="flex gap-2"><dt className="text-muted-foreground">{t('settings.system_platform')}</dt><dd>{metrics?.platform || '-'}</dd></div>
+                <div className="flex gap-2"><dt className="text-muted-foreground">{t('settings.system_go_version')}</dt><dd className="break-all">{metrics?.runtime.go_version || '-'}</dd></div>
+                <div className="flex gap-2"><dt className="text-muted-foreground">{t('settings.system_updated_at')}</dt><dd>{metricsUpdatedAt}</dd></div>
+            </dl>
+            <details className="mt-3 text-xs">
+                <summary className="w-fit cursor-pointer text-muted-foreground">{t('settings.system_runtime_details')}</summary>
+                <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-2 rounded-md bg-muted/30 p-3">
+                    <div className="flex gap-2"><dt className="text-muted-foreground">{t('settings.system_pid')}</dt><dd>{metrics?.process.pid ?? '-'}</dd></div>
+                    <div className="flex gap-2"><dt className="text-muted-foreground">{t('settings.system_available_memory')}</dt><dd>{formatBytes(metrics?.memory.available_bytes)}</dd></div>
+                    <div className="flex gap-2"><dt className="text-muted-foreground">{t('settings.system_refresh_interval')}</dt><dd>5s</dd></div>
+                </dl>
+            </details>
+        </SettingSection>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <div className="rounded-md border border-input bg-background px-5 py-4">
-                    <div className="mb-3 text-xs font-semibold text-muted-foreground">
-                        {t('settings.system_runtime')}
-                    </div>
-                    <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
-                        <dt className="text-muted-foreground">{t('settings.system_platform')}</dt>
-                        <dd className="font-mono text-foreground">{metrics?.platform || '-'}</dd>
-                        <dt className="text-muted-foreground">{t('settings.system_pid')}</dt>
-                        <dd className="font-mono text-foreground">{metrics?.process.pid ?? '-'}</dd>
-                        <dt className="text-muted-foreground">{t('settings.system_go_version')}</dt>
-                        <dd className="break-all font-mono text-foreground">{metrics?.runtime.go_version || '-'}</dd>
-                    </dl>
+        <SettingSection title={t('settings.storage_management_title')} description={t('settings.storage_usage_calculated_at', { time: storageCalculatedAt })} action={
+            <Button type="button" variant="outline" size="sm" onClick={handleCalculateStorage} disabled={storageLoading}>
+                <RefreshCw className={cn('size-4', storageLoading && 'animate-spin')} />{t('settings.storage_usage_calculate')}
+            </Button>
+        }>
+            {storageError && <p role="alert" className="mb-4 text-sm text-danger">{storageError}</p>}
+            <div className="grid gap-4 divide-y divide-input sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+                <div className="space-y-2">
+                    <div className="text-xs text-muted-foreground">{t('settings.storage_usage_total')}</div>
+                    <div className="text-xl font-semibold tabular-nums">{formatBytes(storageUsage?.total_bytes)}</div>
+                    <div className="text-xs text-muted-foreground">{t('settings.storage_usage_blob_store', { store: storageUsage?.blob_store || '-' })}</div>
                 </div>
-                <div className="rounded-md border border-input bg-background px-5 py-4">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                        <div className="text-xs font-semibold text-muted-foreground">
-                            {t('settings.system_snapshot')}
-                        </div>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => loadMetrics(true)}
-                            disabled={metricsLoading}
-                            className="h-8 rounded-lg px-2.5 text-xs"
-                        >
-                            <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", metricsLoading && "animate-spin")} />
-                            {t('common.refresh')}
-                        </Button>
-                    </div>
-                    <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
-                        <dt className="text-muted-foreground">{t('settings.system_updated_at')}</dt>
-                        <dd className="font-mono text-foreground">{metricsUpdatedAt}</dd>
-                        <dt className="text-muted-foreground">{t('settings.system_available_memory')}</dt>
-                        <dd className="font-mono text-foreground">{formatBytes(metrics?.memory.available_bytes)}</dd>
-                        <dt className="text-muted-foreground">{t('settings.system_refresh_interval')}</dt>
-                        <dd className="font-mono text-foreground">5s</dd>
-                    </dl>
+                <div className="space-y-2 pt-4 sm:pl-4 sm:pt-0">
+                    <div className="text-xs text-muted-foreground">{t('settings.storage_usage_database')}</div>
+                    <div className="text-xl font-semibold tabular-nums">{formatBytes(storageUsage?.database_bytes)}</div>
+                    <div className="text-xs text-muted-foreground">{storageUsage ? t('settings.storage_usage_files', { count: storageUsage.database_files }) : '-'}</div>
+                </div>
+                <div className="space-y-2 pt-4 sm:pl-4 sm:pt-0">
+                    <div className="text-xs text-muted-foreground">{t('settings.storage_usage_blobs')}</div>
+                    <div className="text-xl font-semibold tabular-nums">{formatBytes(storageUsage?.blob_bytes)}</div>
+                    <div className="text-xs text-muted-foreground">{storageUsage ? t('settings.storage_usage_files', { count: storageUsage.blob_files }) : '-'}</div>
                 </div>
             </div>
+            {config && <StoragePolicySetting policy={config.storage} onSaved={onStoragePolicySaved}
+                cleanupPaused={backups.cleanupPaused} onResumeCleanup={backups.resumeCleanup} onCleanupCompleted={handleCalculateStorage} />}
+        </SettingSection>
 
-            <div className="rounded-md border border-input bg-background px-5 py-4">
-                <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                        <div className="text-xs font-semibold text-muted-foreground">
-                            {t('settings.storage_usage_title')}
-                        </div>
-                        <div className="mt-2 text-sm text-muted-foreground">
-                            {t('settings.storage_usage_calculated_at', {
-                                time: storageCalculatedAt,
-                            })}
-                        </div>
-                    </div>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleCalculateStorage}
-                        disabled={storageLoading}
-                        className="h-9 rounded-md"
-                    >
-                        <RefreshCw className={cn("mr-2 h-4 w-4", storageLoading && "animate-spin")} />
-                        {t('settings.storage_usage_calculate')}
-                    </Button>
+        <SystemBackups status={backups} />
+
+        <section className="space-y-4 rounded-lg border border-input bg-card px-4 py-4 sm:px-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-1">
+                    <h3 className="text-sm font-semibold">{t('settings.update_title')}</h3>
+                    <p className="text-xs text-muted-foreground">{t('settings.update_current_version', { version: config?.version ? `v${config.version.replace(/^v/, '')}` : '-' })}</p>
                 </div>
-
-                {storageError && (
-                    <div className="mb-4 flex items-start gap-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
-                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                        <span>{storageError}</span>
-                    </div>
-                )}
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <div className="rounded-lg border border-input bg-background px-4 py-3">
-                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                            <Archive className="h-3.5 w-3.5" />
-                            {t('settings.storage_usage_total')}
-                        </div>
-                        <div className="text-xl font-semibold text-foreground">
-                            {formatBytes(storageUsage?.total_bytes)}
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                            {t('settings.storage_usage_blob_store', {
-                                store: storageUsage?.blob_store || '-',
-                            })}
-                        </div>
-                    </div>
-                    <div className="rounded-lg border border-input bg-background px-4 py-3">
-                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                            <Database className="h-3.5 w-3.5" />
-                            {t('settings.storage_usage_database')}
-                        </div>
-                        <div className="text-xl font-semibold text-foreground">
-                            {formatBytes(storageUsage?.database_bytes)}
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                            {storageUsage
-                                ? t('settings.storage_usage_files', { count: storageUsage.database_files })
-                                : '-'}
-                        </div>
-                    </div>
-                    <div className="rounded-lg border border-input bg-background px-4 py-3">
-                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                            <Archive className="h-3.5 w-3.5" />
-                            {t('settings.storage_usage_blobs')}
-                        </div>
-                        <div className="text-xl font-semibold text-foreground">
-                            {formatBytes(storageUsage?.blob_bytes)}
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                            {storageUsage
-                                ? t('settings.storage_usage_files', { count: storageUsage.blob_files })
-                                : '-'}
-                        </div>
-                    </div>
-                </div>
-                <StorageCleanup onCompleted={() => { void handleCalculateStorage() }} />
+                <Button type="button" variant="outline" size="sm" onClick={handleCheckUpdate} disabled={updateLoading}>
+                    {t('settings.update_check')}
+                </Button>
             </div>
-
-            <div className="rounded-md border border-input bg-background px-5 py-4">
-                <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                        <div className="text-xs font-semibold text-muted-foreground">
-                            {t('settings.update_title')}
-                        </div>
-                        <div className="mt-2 text-sm text-muted-foreground">
-                            {t('settings.update_current_version', {
-                                version: config?.version ? `v${config.version.replace(/^v/, '')}` : '-',
-                            })}
-                        </div>
-                    </div>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleCheckUpdate}
-                        disabled={updateLoading}
-                        className="h-9 rounded-md"
-                    >
-                        <RefreshCw className={cn("mr-2 h-4 w-4", updateLoading && "animate-spin")} />
-                        {t('settings.update_check')}
-                    </Button>
+            {updateError && <p role="alert" className="text-sm text-danger">{updateError}</p>}
+            {updateInfo && <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                    <Badge variant={updateInfo.update_available ? 'warning' : 'success'}>{t(updateInfo.update_available ? 'settings.update_available' : 'settings.update_latest')}</Badge>
+                    {updateInfo.update_available && <span className="text-xs text-muted-foreground">{t('settings.update_latest_version', { version: updateInfo.latest_tag || `v${updateInfo.latest_version}` })}</span>}
                 </div>
-
-                {updateError && (
-                    <div className="mb-4 flex items-start gap-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
-                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                        <span>{updateError}</span>
-                    </div>
-                )}
-
-                {updateInfo && (
-                    <div className="space-y-4">
-                        <div className="flex flex-wrap items-center gap-3">
-                            <Badge
-                                variant="outline"
-                                className={cn(
-                                    "rounded-md px-3 py-1 text-xs font-semibold",
-                                    updateInfo.update_available
-                                        ? "border-warning/30 bg-warning/10 text-warning"
-                                        : "border-success/30 bg-success/10 text-success"
-                                )}
-                            >
-                                {updateInfo.update_available ? t('settings.update_available') : t('settings.update_latest')}
-                            </Badge>
-                            {updateInfo.update_available && (
-                                <span className="text-sm text-muted-foreground">
-                                    {t('settings.update_latest_version', {
-                                        version: updateInfo.latest_tag || `v${updateInfo.latest_version}`,
-                                    })}
-                                </span>
-                            )}
-                        </div>
-
-                        {updateInfo.update_available && (
-                            <div className="flex flex-wrap gap-2">
-                                {updateInfo.matching_asset && (
-                                    <Button asChild className="h-9 rounded-md">
-                                        <a href={updateInfo.matching_asset.download_url} target="_blank" rel="noreferrer noopener">
-                                            <Download className="mr-2 h-4 w-4" />
-                                            {t('settings.update_download_asset', {
-                                                size: formatBytes(updateInfo.matching_asset.size),
-                                            })}
-                                        </a>
-                                    </Button>
-                                )}
-                                <Button asChild variant="outline" className="h-9 rounded-md">
-                                    <a href={updateInfo.release_url} target="_blank" rel="noreferrer noopener">
-                                        <ExternalLink className="mr-2 h-4 w-4" />
-                                        {t('settings.update_open_release')}
-                                    </a>
-                                </Button>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
-        </div>
-    )
+                {updateInfo.update_available && <div className="flex flex-wrap gap-2">
+                    {updateInfo.matching_asset && <Button asChild size="sm">
+                        <a href={updateInfo.matching_asset.download_url} target="_blank" rel="noreferrer noopener">
+                            <Download className="size-4" />{t('settings.update_download_asset', { size: formatBytes(updateInfo.matching_asset.size) })}
+                        </a>
+                    </Button>}
+                    <Button asChild variant="outline" size="sm"><a href={updateInfo.release_url} target="_blank" rel="noreferrer noopener"><ExternalLink className="size-4" />{t('settings.update_open_release')}</a></Button>
+                </div>}
+            </div>}
+        </section>
+    </div>
 }

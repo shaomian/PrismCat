@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shaomian/PrismCat/internal/backup"
 	"github.com/shaomian/PrismCat/internal/config"
 	"github.com/shaomian/PrismCat/internal/httpbody"
 	"github.com/shaomian/PrismCat/internal/live"
@@ -25,6 +26,7 @@ import (
 	"github.com/shaomian/PrismCat/internal/storageusage"
 	"github.com/shaomian/PrismCat/internal/systemmetrics"
 	"github.com/shaomian/PrismCat/internal/updatecheck"
+	"path/filepath"
 )
 
 // Handler API 处理器
@@ -42,11 +44,12 @@ type Handler struct {
 	cleanupMu      sync.Mutex
 	cleanupJob     *cleanupJobState
 	cleanupPreview *cleanupPreviewState
+	backups        *backup.Manager
 }
 
 // New 创建 API 处理器
 func New(cfg *config.Config, repo storage.Repository, blobs storage.BlobStore, liveRegistry *live.Registry) *Handler {
-	return &Handler{
+	h := &Handler{
 		cfg:          cfg,
 		repo:         repo,
 		blobs:        blobs,
@@ -57,6 +60,16 @@ func New(cfg *config.Config, repo storage.Repository, blobs storage.BlobStore, l
 		tlCache:      newTraceTimelineCache(),
 		reviewActive: map[string]bool{},
 	}
+	if cfg.FilePath() != "" {
+		if snapshotter, ok := repo.(interface {
+			Snapshot(context.Context, string) error
+		}); ok {
+			if store, ok := blobs.(*storage.FileBlobStore); ok {
+				h.backups = backup.NewManager(backup.Source{Config: cfg, Blobs: store, Snapshot: snapshotter.Snapshot}, filepath.Join(filepath.Dir(cfg.FilePath()), "backups"))
+			}
+		}
+	}
+	return h
 }
 
 // RegisterRoutes 注册 API 路由
@@ -75,6 +88,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/system/storage", h.handleSystemStorage)
 	mux.HandleFunc("/api/system/cleanup/preview", h.handleCleanupPreview)
 	mux.HandleFunc("/api/system/cleanup", h.handleCleanup)
+	mux.HandleFunc("/api/system/cleanup/resume", h.handleCleanupResume)
+	mux.HandleFunc("/api/system/backups", h.handleBackups)
+	mux.HandleFunc("/api/system/backups/", h.handleBackupDetail)
+	mux.HandleFunc("/api/system/backup-import", h.handleBackupImport)
+	mux.HandleFunc("/api/system/backup-import/", h.handleBackupImportAction)
 	mux.HandleFunc("/api/task-management/", h.handleTaskManagement)
 	mux.HandleFunc("/api/task-previews/", h.handleTaskPreview)
 	mux.HandleFunc("/api/system/update", h.handleSystemUpdate)
@@ -1017,6 +1035,7 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"storage": map[string]interface{}{
 				"database":          storageCfg.Database,
 				"retention_days":    storageCfg.RetentionDays,
+				"cleanup_paused":    storageCfg.CleanupPaused,
 				"max_storage_bytes": storageCfg.MaxStorageBytes,
 				"blob_store":        storageCfg.BlobStore,
 				"blob_dir":          storageCfg.BlobDir,
