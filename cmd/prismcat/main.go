@@ -190,7 +190,7 @@ func main() {
 	var blobStore storage.BlobStore
 	switch cfg.Storage.BlobStore {
 	case "", "fs":
-		bs, err := storage.NewFileBlobStore(cfg.Storage.BlobDir)
+		bs, err := storage.NewFileBlobStoreWithOptions(cfg.Storage.BlobDir, storage.FileBlobStoreOptions{Chunked: cfg.Storage.BodyChunking})
 		if err != nil {
 			log.Fatalf("初始化 blob 存储失败: %v", err)
 		}

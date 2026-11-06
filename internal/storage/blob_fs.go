@@ -5,11 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,99 +24,53 @@ import (
 var ErrRefSetEmpty = errors.New("blob gc: reference set is empty but the store is not; refusing to delete")
 
 // FileBlobStore stores blobs on the local filesystem under a content-addressed path.
-// Layout: <baseDir>/<hash[:2]>/<hash>
+// Legacy layout: <baseDir>/<hash[:2]>/<hash>. Optional chunked bodies use a
+// sibling .manifest and shared chunks; logical references are unchanged.
 type FileBlobStore struct {
-	baseDir string
-	gcMu    sync.RWMutex
+	baseDir     string
+	chunkWrites bool
+	gcMu        sync.RWMutex
+	ioMu        sync.RWMutex // protects chunk publication/read against GC; separate from backup protection
 }
 
 func NewFileBlobStore(baseDir string) (*FileBlobStore, error) {
+	return NewFileBlobStoreWithOptions(baseDir, FileBlobStoreOptions{})
+}
+
+type FileBlobStoreOptions struct {
+	// Chunked writes use CDC and compression for new large bodies. Readers
+	// always accept both representations, including when this is disabled.
+	Chunked bool
+}
+
+func NewFileBlobStoreWithOptions(baseDir string, options FileBlobStoreOptions) (*FileBlobStore, error) {
 	if baseDir == "" {
 		return nil, errors.New("blob base dir is empty")
 	}
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, err
 	}
-	return &FileBlobStore{baseDir: baseDir}, nil
+	return &FileBlobStore{baseDir: baseDir, chunkWrites: options.Chunked}, nil
 }
 
 func (s *FileBlobStore) Put(ctx context.Context, data []byte) (string, error) {
-	_ = ctx
-
-	sum := sha256.Sum256(data)
-	ref := newSHA256Ref(sum)
-	_, hexHash, _ := parseBlobRef(ref)
-
-	finalPath := s.pathFor(hexHash)
-	if _, err := os.Stat(finalPath); err == nil {
-		// 内容寻址去重命中。刷新 mtime：GC 的 minAge 防线依赖文件时间，
-		// 若保留旧 mtime，新日志引用此 blob 而 GC 恰在引用快照之后运行时，
-		// 会被当作"超龄孤儿"误删（引用它的日志将永远无法恢复 body）
-		now := time.Now()
-		_ = os.Chtimes(finalPath, now, now)
-		return ref, nil
-	}
-
-	dir := filepath.Dir(finalPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", err
-	}
-
-	tmpPath := filepath.Join(dir, ".tmp-"+hexHash+"-"+strconv.FormatInt(time.Now().UnixNano(), 10))
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return "", err
-	}
-
-	// Rename is atomic on the same filesystem.
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		// If another writer won the race, keep the existing blob.
-		if _, statErr := os.Stat(finalPath); statErr == nil {
-			_ = os.Remove(tmpPath)
-			return ref, nil
-		}
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("store blob: %w", err)
-	}
-
-	return ref, nil
+	s.ioMu.RLock()
+	defer s.ioMu.RUnlock()
+	return s.putBody(ctx, data)
 }
 
 func (s *FileBlobStore) Get(ctx context.Context, ref string) ([]byte, error) {
-	_ = ctx
-	_, hexHash, err := parseBlobRef(ref)
-	if err != nil {
-		return nil, err
-	}
-	path := s.pathFor(hexHash)
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrBlobNotFound
-		}
-		return nil, err
-	}
-	return b, nil
+	s.ioMu.RLock()
+	defer s.ioMu.RUnlock()
+	return s.readBody(ctx, ref)
 }
 
 func (s *FileBlobStore) Exists(ctx context.Context, ref string) (bool, error) {
-	_ = ctx
-	_, hexHash, err := parseBlobRef(ref)
-	if err != nil {
-		return false, err
-	}
-	_, err = os.Stat(s.pathFor(hexHash))
-	if err == nil {
-		return true, nil
-	}
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return false, err
+	s.ioMu.RLock()
+	defer s.ioMu.RUnlock()
+	return s.bodyExists(ctx, ref)
 }
 
-// GarbageCollect removes unreferenced blob files.
-// referencedRefs should contain canonical refs stored in the log table (e.g. "sha256:<hex>").
-// minAge avoids deleting blobs created very recently (to reduce races with in-flight log writes).
 // isEmpty 报告仓库里是否一个 blob 文件都没有。命中第一个就返回,不遍历全部。
 func (s *FileBlobStore) isEmpty() (bool, error) {
 	found := false
@@ -127,7 +79,7 @@ func (s *FileBlobStore) isEmpty() (bool, error) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !isBlobFileName(d.Name()) {
+		if d.IsDir() || !isManagedBlobName(d.Name()) {
 			return nil
 		}
 		found = true
@@ -151,6 +103,9 @@ func isBlobFileName(name string) bool {
 	return err == nil
 }
 
+// GarbageCollect marks the live body graph then removes unreferenced files.
+// Live instances must use a positive minAge to protect not-yet-persisted logs;
+// zero is suitable only for a coherent offline reference set.
 func (s *FileBlobStore) GarbageCollect(ctx context.Context, referencedRefs []string, minAge time.Duration) (int, error) {
 	s.gcMu.Lock()
 	defer s.gcMu.Unlock()
@@ -158,89 +113,7 @@ func (s *FileBlobStore) GarbageCollect(ctx context.Context, referencedRefs []str
 		return 0, err
 	}
 
-	referenced := make(map[string]struct{}, len(referencedRefs))
-	for _, ref := range referencedRefs {
-		_, hexHash, err := parseBlobRef(ref)
-		if err != nil {
-			continue
-		}
-		referenced[hexHash] = struct{}{}
-	}
-
-	// 空引用列表 + 非空仓库 = 库和 blob 仓库对不上,而不是全都成了孤儿
-	if len(referenced) == 0 {
-		empty, err := s.isEmpty()
-		if err != nil {
-			return 0, err
-		}
-		if !empty {
-			return 0, ErrRefSetEmpty
-		}
-	}
-
-	var cutoff time.Time
-	if minAge > 0 {
-		cutoff = time.Now().Add(-minAge)
-	}
-
-	deleted := 0
-	err := filepath.WalkDir(s.baseDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-
-		name := d.Name()
-		if !isBlobFileName(name) {
-			// 崩溃残留的写入中间文件（.tmp-*）：既不被引用计数也不被
-			// 磁盘统计，不清就永久泄漏。仅在已知超龄阈值时清理，
-			// 避免与进行中的 Put（temp 文件刚创建）竞态
-			if cutoff.IsZero() || !strings.HasPrefix(name, ".tmp-") {
-				return nil
-			}
-			info, infoErr := d.Info()
-			if infoErr != nil || info.ModTime().After(cutoff) {
-				return nil
-			}
-			if os.Remove(path) == nil {
-				deleted++
-			}
-			return nil
-		}
-		if _, ok := referenced[name]; ok {
-			return nil
-		}
-
-		if !cutoff.IsZero() {
-			info, err := d.Info()
-			if err == nil && info.ModTime().After(cutoff) {
-				return nil
-			}
-		}
-
-		if err := os.Remove(path); err == nil {
-			deleted++
-		}
-		return nil
-	})
-	if err != nil {
-		return deleted, err
-	}
-
-	// Best-effort: remove empty prefix directories.
-	entries, err := os.ReadDir(s.baseDir)
-	if err == nil {
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			_ = os.Remove(filepath.Join(s.baseDir, e.Name()))
-		}
-	}
-
-	return deleted, nil
+	return s.collectBodies(ctx, referencedRefs, minAge)
 }
 
 func (s *FileBlobStore) pathFor(hexHash string) string {

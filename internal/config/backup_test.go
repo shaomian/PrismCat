@@ -69,3 +69,22 @@ func TestResumeCleanupPersistsAndRollsBackOnSaveFailure(t *testing.T) {
 		t.Fatal("failed save disabled protection")
 	}
 }
+
+func TestBodyChunkingIsOptInAndPreservedByConfigurationSnapshots(t *testing.T) {
+	plain, err := Parse([]byte("storage: {}\n"))
+	if err != nil || plain.Storage.BodyChunking {
+		t.Fatal("body chunking must be opt-in", err)
+	}
+	cfg, err := Parse([]byte("storage:\n  body_chunking: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := cfg.BackupSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Parse(data)
+	if err != nil || !loaded.StorageSnapshot().BodyChunking {
+		t.Fatal("storage option lost in portable configuration", err)
+	}
+}

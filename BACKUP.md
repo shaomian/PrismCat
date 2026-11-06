@@ -69,6 +69,8 @@ Restoration validates archive paths, sizes, hashes, database integrity and body 
 
 ## Protection and limits
 
+Optional body chunking does not change the ZIP format: exports reconstruct original bytes and restores install complete raw files. See [body storage notes](BLOB_STORAGE.md) for configuration, compatibility and measured tradeoffs.
+
 Restoration sets `storage.cleanup_paused: true`. Automatic retention, capacity eviction, body GC and manual expired-log cleanup remain paused across restarts. Verify counts, tasks, experiments, reports and bodies, then select **Resume automatic cleanup** in **System → Storage management**. Changing retention settings does not remove this protection.
 
 Deleted, unsaved, truncated or previously redacted content cannot be recovered. SSE/WebSocket connections do not resume; persisted in-flight requests are marked interrupted by restore. Captures and experiment runs are finalized, and running review reports become interrupted. Historical IDs and relationships remain; restoration does not invoke AI.

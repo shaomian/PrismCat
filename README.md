@@ -31,6 +31,8 @@ Go from inspecting a single request to following a complete Agent task and compa
 
 For full backups, Web import and restore on restart, and CLI migration, see [Backup and migration](BACKUP.md).
 
+Optional body chunking and compression are disabled by default and do not rewrite existing data. See [storage notes](BLOB_STORAGE.md).
+
 ## Sound familiar?
 
 | | PrismCat |

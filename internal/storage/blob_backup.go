@@ -1,9 +1,8 @@
 package storage
 
 import (
-	"fmt"
+	"context"
 	"io"
-	"os"
 )
 
 // ProtectBackup must be acquired before taking the database snapshot, and held
@@ -14,34 +13,18 @@ func (s *FileBlobStore) ProtectBackup() func() {
 }
 
 func (s *FileBlobStore) OpenBackupBlob(ref string) (io.ReadCloser, error) {
-	_, hash, err := parseBlobRef(ref)
-	if err != nil {
-		return nil, err
-	}
-	path := s.pathFor(hash)
-	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("blob must be a regular file")
-	}
-	return os.Open(path)
+	// Caller holds ProtectBackup for the whole snapshot/export. Stream original
+	// bytes so format-1 archives remain portable, independent of local chunking.
+	r, _, err := s.openBody(context.Background(), ref)
+	return r, err
 }
 
 func (s *FileBlobStore) BackupBlobSize(ref string) (int64, error) {
-	_, hash, err := parseBlobRef(ref)
+	r, size, err := s.openBody(context.Background(), ref)
 	if err != nil {
 		return 0, err
 	}
-	info, err := os.Lstat(s.pathFor(hash))
-	if err != nil {
-		return 0, err
-	}
-	if !info.Mode().IsRegular() {
-		return 0, fmt.Errorf("blob must be a regular file")
-	}
-	return info.Size(), nil
+	return size, r.Close()
 }
 
 // BackupBlobPath canonicalizes legacy references as well as sha256: references.

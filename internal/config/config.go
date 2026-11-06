@@ -302,6 +302,8 @@ type StorageConfig struct {
 	BlobStore string `yaml:"blob_store"`
 	// BlobDir is used when BlobStore == "fs".
 	BlobDir string `yaml:"blob_dir"`
+	// BodyChunking enables CDC/compression for new large detached bodies.
+	BodyChunking bool `yaml:"body_chunking,omitempty"`
 	// AsyncBuffer controls the capacity of the async log queue.
 	AsyncBuffer int `yaml:"async_buffer"`
 	// CleanupPaused protects restored history until cleanup is explicitly resumed.
