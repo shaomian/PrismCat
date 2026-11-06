@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -14,12 +15,21 @@ import (
 )
 
 func TestChunkedBodyWorksWithExistingDownloadAndSSEBodyEndpoints(t *testing.T) {
+	for _, events := range []int{500, 5000} {
+		t.Run(strconv.Itoa(events), func(t *testing.T) {
+			testOptimizedBodyEndpoints(t, events)
+		})
+	}
+}
+
+func testOptimizedBodyEndpoints(t *testing.T, events int) {
+	t.Helper()
 	dir := t.TempDir()
 	store, err := storage.NewFileBlobStoreWithOptions(filepath.Join(dir, "blobs"), storage.FileBlobStoreOptions{Chunked: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := bytes.Repeat([]byte("event: response.output_text.delta\ndata: {\"delta\":\"tool result\"}\n\n"), 5000)
+	body := bytes.Repeat([]byte("event: response.output_text.delta\ndata: {\"delta\":\"tool result\"}\n\n"), events)
 	ref, err := store.Put(context.Background(), body)
 	if err != nil {
 		t.Fatal(err)

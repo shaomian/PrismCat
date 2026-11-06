@@ -16,6 +16,8 @@ import (
 
 // The optional DB is read-only; only aggregate benchmark metrics are printed.
 // All experimental files are written beneath b.TempDir, never into that DB/store.
+// Every mode syncs each new file and batches directory syncs per body. These are
+// equally durable paths, not an estimate of the default buffered raw writer.
 func BenchmarkBlobStorageDataset(b *testing.B) {
 	var bodies [][]byte
 	if path := os.Getenv("PRISMCAT_BLOB_BENCH_DB"); path != "" {
@@ -47,9 +49,10 @@ func BenchmarkBlobStorageDataset(b *testing.B) {
 		base := contextBody(2 << 20)
 		for i := 1; i <= 24; i++ {
 			bodies = append(bodies, bytes.Clone(base[:i*len(base)/24]))
+			bodies = append(bodies, bytes.Repeat([]byte("event: response.output_text.delta\ndata: {\"delta\":\"tool result\"}\n\n"), i*10))
 		}
 	}
-	for _, mode := range []string{"raw", "default", "zstd", "cdc-zstd"} {
+	for _, mode := range []string{"raw-sync", "zstd-sync", "hybrid-sync"} {
 		b.Run(mode, func(b *testing.B) {
 			enc, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest), zstd.WithEncoderConcurrency(1), zstd.WithWindowSize(chunkMaxSize))
 			defer enc.Close()
@@ -58,7 +61,7 @@ func BenchmarkBlobStorageDataset(b *testing.B) {
 			var input, physical int64
 			var writeTime, readTime time.Duration
 			for range b.N {
-				store, err := NewFileBlobStoreWithOptions(b.TempDir(), FileBlobStoreOptions{Chunked: mode == "cdc-zstd"})
+				store, err := NewFileBlobStoreWithOptions(b.TempDir(), FileBlobStoreOptions{Chunked: mode == "hybrid-sync"})
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -67,7 +70,7 @@ func BenchmarkBlobStorageDataset(b *testing.B) {
 				for _, body := range bodies {
 					input += int64(len(body))
 					var ref string
-					if mode == "cdc-zstd" || mode == "default" {
+					if mode == "hybrid-sync" {
 						ref, err = store.Put(context.Background(), body)
 					} else {
 						sum := sha256.Sum256(body)
@@ -75,10 +78,18 @@ func BenchmarkBlobStorageDataset(b *testing.B) {
 						_, h, _ := parseBlobRef(ref)
 						data := body
 						if _, statErr := os.Stat(store.pathFor(h)); os.IsNotExist(statErr) {
-							if mode == "zstd" {
-								data = enc.EncodeAll(body, nil)
+							if mode == "zstd-sync" {
+								encoded := enc.EncodeAll(body, []byte{1})
+								if len(encoded) < len(body)+1 {
+									data = encoded
+								} else {
+									data = append([]byte{0}, body...)
+								}
 							}
-							err = writeBlobFile(store.pathFor(h), data, false)
+							batch := newBlobWriteBatch(store.baseDir)
+							if err = batch.write(store.pathFor(h), data); err == nil {
+								err = batch.syncDirs()
+							}
 						}
 					}
 					if err != nil {
@@ -90,13 +101,20 @@ func BenchmarkBlobStorageDataset(b *testing.B) {
 				start = time.Now()
 				for i, ref := range refs {
 					var data []byte
-					if mode == "cdc-zstd" || mode == "default" {
+					if mode == "hybrid-sync" {
 						data, err = store.Get(context.Background(), ref)
 					} else {
 						_, h, _ := parseBlobRef(ref)
 						data, err = os.ReadFile(store.pathFor(h))
-						if err == nil && mode == "zstd" {
-							data, err = dec.DecodeAll(data, nil)
+						if err == nil && mode == "zstd-sync" {
+							if data[0] == 1 {
+								data, err = dec.DecodeAll(data[1:], nil)
+							} else {
+								data = data[1:]
+							}
+						}
+						if err == nil && newSHA256Ref(sha256.Sum256(data)) != ref {
+							b.Fatal("whole-body integrity check failed")
 						}
 					}
 					if err != nil || !bytes.Equal(data, bodies[i]) {

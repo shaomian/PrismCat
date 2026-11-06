@@ -12,7 +12,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"time"
 
@@ -57,7 +56,8 @@ var blobCodecs = sync.OnceValues(func() (*bodyCodecs, error) {
 	return &bodyCodecs{e, d}, err
 })
 
-func (s *FileBlobStore) manifestPath(h string) string { return s.pathFor(h) + ".manifest" }
+func (s *FileBlobStore) manifestPath(h string) string   { return s.pathFor(h) + ".manifest" }
+func (s *FileBlobStore) compressedPath(h string) string { return s.pathFor(h) + ".zstd" }
 func (s *FileBlobStore) chunkPath(h string) string {
 	return filepath.Join(s.baseDir, "chunks", h[:2], h+".chunk")
 }
@@ -70,18 +70,21 @@ func (s *FileBlobStore) putBody(ctx context.Context, data []byte) (string, error
 	h := hex.EncodeToString(sum[:])
 	ref := newSHA256Ref(sum)
 	// Preserve legacy files. Publishing a new representation never rewrites one.
-	for _, path := range []string{s.pathFor(h), s.manifestPath(h)} {
+	for _, path := range []string{s.pathFor(h), s.compressedPath(h), s.manifestPath(h)} {
 		if info, err := os.Lstat(path); err == nil {
 			if !info.Mode().IsRegular() {
 				return "", ErrBlobCorrupt
 			}
 			now := time.Now()
+			batch := newBlobWriteBatch(s.baseDir)
+			batch.include(path)
 			if path == s.manifestPath(h) {
 				m, err := s.readManifest(h)
 				if err != nil {
 					return "", err
 				}
 				for _, part := range m.Chunks {
+					batch.include(s.chunkPath(part.Hash))
 					if err = os.Chtimes(s.chunkPath(part.Hash), now, now); err != nil {
 						return "", err
 					}
@@ -90,17 +93,37 @@ func (s *FileBlobStore) putBody(ctx context.Context, data []byte) (string, error
 			if err = os.Chtimes(path, now, now); err != nil {
 				return "", err
 			}
+			if s.chunkWrites || path != s.pathFor(h) {
+				// A concurrent publisher may not have synced the root entry yet.
+				if err = batch.syncDirs(); err != nil {
+					return "", err
+				}
+			}
 			return ref, nil
 		} else if !os.IsNotExist(err) {
 			return "", err
 		}
 	}
-	if !s.chunkWrites || len(data) < chunkBodyThreshold {
+	if !s.chunkWrites {
 		return ref, writeBlobFile(s.pathFor(h), data, false)
 	}
 	codecs, err := blobCodecs()
 	if err != nil {
 		return "", err
+	}
+	batch := newBlobWriteBatch(s.baseDir)
+	if len(data) < chunkBodyThreshold {
+		// Keep small bodies in one file. A distinct suffix leaves all legacy
+		// byte sequences unambiguous, even bodies beginning with zstd magic.
+		path := s.pathFor(h)
+		encoded := codecs.encoder.EncodeAll(data, nil)
+		if len(encoded) < len(data) {
+			path, data = s.compressedPath(h), encoded
+		}
+		if err = batch.write(path, data); err != nil {
+			return "", err
+		}
+		return ref, batch.syncDirs()
 	}
 	m := bodyManifest{Version: 1, Size: int64(len(data))}
 	c := chunker.NewBase(0x3DA3358B4DC173, chunker.WithBaseBoundaries(chunkMinSize, chunkMaxSize), chunker.WithBaseAverageBits(16))
@@ -116,6 +139,9 @@ func (s *FileBlobStore) putBody(ctx context.Context, data []byte) (string, error
 		sum := sha256.Sum256(part)
 		ch := hex.EncodeToString(sum[:])
 		path := s.chunkPath(ch)
+		// Include reused directories too: another writer may have published
+		// an immutable chunk but not yet synced its directory entry.
+		batch.include(path)
 		if info, statErr := os.Lstat(path); statErr == nil {
 			if !info.Mode().IsRegular() {
 				return "", ErrBlobCorrupt
@@ -131,7 +157,7 @@ func (s *FileBlobStore) putBody(ctx context.Context, data []byte) (string, error
 			if len(compressed) >= len(part)+1 {
 				compressed = append([]byte{0}, part...)
 			}
-			if err = writeBlobFile(path, compressed, true); err != nil {
+			if err = batch.write(path, compressed); err != nil {
 				return "", err
 			}
 		}
@@ -145,13 +171,19 @@ func (s *FileBlobStore) putBody(ctx context.Context, data []byte) (string, error
 	if err != nil || len(metadata) > maxBodyManifest {
 		return "", ErrBlobCorrupt
 	}
-	// Publish only after all chunks exist. Interrupted writes leave only orphans.
-	if err = writeBlobFile(s.manifestPath(h), metadata, true); err != nil {
+	// Persist all dependencies before publishing the root. Sync each touched
+	// directory once per phase, rather than again after every shared chunk.
+	if err = batch.syncDirs(); err != nil {
 		return "", err
 	}
-	return ref, nil
+	if err = batch.write(s.manifestPath(h), metadata); err != nil {
+		return "", err
+	}
+	return ref, batch.syncDirs()
 }
 
+// writeBlobFile atomically publishes a file. Durable callers must also sync
+// directory entries, using a body-scoped blobWriteBatch.
 func writeBlobFile(path string, data []byte, durable bool) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -175,20 +207,6 @@ func writeBlobFile(path string, data []byte, durable bool) error {
 		// of the same immutable content-addressed object may have won the race.
 		if info, statErr := os.Lstat(path); statErr != nil || !info.Mode().IsRegular() {
 			return err
-		}
-	}
-	if durable && runtime.GOOS != "windows" {
-		// Also sync parents: newly created prefix directories must survive too.
-		for i := 0; i < 2; i++ {
-			d, err := os.Open(dir)
-			if err != nil {
-				return err
-			}
-			err = errors.Join(d.Sync(), d.Close())
-			if err != nil {
-				return err
-			}
-			dir = filepath.Dir(dir)
 		}
 	}
 	return nil
@@ -247,6 +265,11 @@ func (s *FileBlobStore) openBody(ctx context.Context, ref string) (io.ReadCloser
 	} else if !os.IsNotExist(err) {
 		return nil, 0, err
 	}
+	if data, err := s.readCompressedBody(h); err == nil {
+		return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil
+	} else if !os.IsNotExist(err) {
+		return nil, 0, err
+	}
 	m, err := s.readManifest(h)
 	if os.IsNotExist(err) {
 		err = ErrBlobNotFound
@@ -255,6 +278,49 @@ func (s *FileBlobStore) openBody(ctx context.Context, ref string) (io.ReadCloser
 		return nil, 0, err
 	}
 	return &chunkBodyReader{ctx: ctx, store: s, manifest: m, expected: h, hash: sha256.New()}, m.Size, nil
+}
+
+func (s *FileBlobStore) readCompressedBody(h string) ([]byte, error) {
+	info, err := os.Lstat(s.compressedPath(h))
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() >= chunkBodyThreshold {
+		return nil, ErrBlobCorrupt
+	}
+	f, err := os.Open(s.compressedPath(h))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err = f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() >= chunkBodyThreshold {
+		return nil, ErrBlobCorrupt
+	}
+	encoded, err := io.ReadAll(io.LimitReader(f, chunkBodyThreshold))
+	if err != nil {
+		return nil, err
+	}
+	var header zstd.Header
+	if header.Decode(encoded) != nil || !header.HasFCS || header.FrameContentSize == 0 || header.FrameContentSize >= chunkBodyThreshold {
+		return nil, ErrBlobCorrupt
+	}
+	codecs, err := blobCodecs()
+	if err != nil {
+		return nil, err
+	}
+	data, err := codecs.decoder.DecodeAll(encoded, make([]byte, 0, int(header.FrameContentSize)))
+	if err != nil || len(data) != int(header.FrameContentSize) {
+		return nil, ErrBlobCorrupt
+	}
+	sum := sha256.Sum256(data)
+	if hex.EncodeToString(sum[:]) != h {
+		return nil, ErrBlobCorrupt
+	}
+	return data, nil
 }
 
 func (s *FileBlobStore) readBody(ctx context.Context, ref string) ([]byte, error) {

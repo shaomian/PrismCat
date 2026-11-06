@@ -1,37 +1,41 @@
-# Large body deduplication
+# Body compression and chunk deduplication
 
-Optional content-defined chunking (CDC) and per-chunk Zstandard compression let large detached bodies share identical byte ranges. Reading reconstructs the original bytes and verifies their full SHA-256. Proxy traffic, payloads and UI protocols are unchanged.
+Optional hybrid storage reduces repeated Agent history in detached bodies (Blobs). Reads reconstruct the original bytes; proxy traffic, UI APIs and logical references are unchanged.
 
-## Configuration
+## Enable
+
+Configure and restart:
 
 ```yaml
 storage:
   body_chunking: true
 ```
 
-Restart after changing this setting. It is **disabled by default** because chunking adds hashing, filesystem and decoding costs. Only newly stored detached bodies of at least 128 KiB use this format. Small bodies, existing files and SQLite inline previews are not rewritten.
+Disabled by default. New Blobs use whole-body Zstandard compression below **128 KiB**, and shared content-defined chunks (CDC) plus compression at or above that size. Incompressible bodies or chunks retain their original bytes.
 
-Existing `logging.detach_body_over_bytes` and `logging.body_preview_bytes` settings still determine which bodies are detached. This option does not move historical inline bodies out of SQLite or shrink their previews.
+Existing `logging.detach_body_over_bytes` and `logging.body_preview_bytes` settings still control detachment. **Inline SQLite bodies and previews are not reduced**, and historical files are not migrated. Disabling the option still allows reading all existing representations.
 
-Disabling the option stops new chunked writes; existing chunked bodies remain readable. Older programs cannot directly read the new local layout. Before downgrading, export a full backup and restore into a new directory.
+## Storage and cleanup
 
-## Compatibility and cleanup
+- References remain `sha256:<hash>` of the complete original bytes. Compressed reads verify SHA-256.
+- Legacy files remain at `<body-dir>/<prefix>/<hash>`. Small compressed bodies use `<hash>.zstd`; large bodies use `<hash>.manifest` and shared `chunks/<prefix>/<chunk-hash>.chunk` files.
+- CDC boundaries: 16 KiB minimum, approximately 64 KiB target, 256 KiB maximum. Manifests reference chunks directly, never previous logs.
+- Files are atomically published and synced. Directory syncs are batched per body and phase, persisting dependencies before publishing the manifest.
+- GC retains live and recent unpublished dependencies, rechecks age before deletion and stops on malformed live manifests. Shared chunks are removed only after all roots expire and the grace period passes.
+- Storage accounting uses actual file sizes; body sizes remain logical sizes.
 
-- Public references remain the SHA-256 of the complete original bytes.
-- Legacy bodies stay at `<body-dir>/<prefix>/<hash>`. New manifests use `<hash>.manifest`; chunks use `chunks/<prefix>/<chunk-hash>.chunk`.
-- Chunk boundaries are content-defined: 16 KiB minimum, approximately 64 KiB target and 256 KiB maximum. Incompressible chunks retain their original bytes.
-- Manifests reference chunks directly, not earlier logs. Chunks are persisted before a manifest is published.
-- GC marks live dependencies and recent manifests, rechecks age under the deletion lock, and refuses to proceed with malformed live manifests. Storage accounting uses actual file sizes; log body sizes remain logical sizes.
-- Full backups reconstruct original bodies into the existing format-1 ZIP. Restores install complete legacy files. Backup space estimates use reconstructed sizes.
+Full backups reconstruct original bytes into the existing format-1 ZIP; restores install complete raw files. Backup estimates use reconstructed sizes. Older programs cannot read the new local layout directly: export a full backup and restore into a new directory before downgrading.
 
-## Measurement
+## Verification and tradeoffs
+
+Repeated histories can share bytes. Large unrelated bodies may be slower and occupy more space than whole-body compression. The 128 KiB threshold is an offline Agent-sample compromise, not a universal optimum. Compression, hashing and multiple files add work to the asynchronous log writer; enable according to your workload.
 
 ```sh
 go test ./internal/storage -run '^$' -bench BenchmarkBlobStorageDataset -benchtime=1x -count=3
 ```
 
-Compare `stored-B`, `write-ms` and `read-ms`: `raw` is the original file baseline, `default` exercises the disabled option, `zstd` compresses each body independently, and `cdc-zstd` chunks and compresses. Experimental files are temporary and all readbacks are checked byte for byte.
+`raw-sync`, `zstd-sync` and `hybrid-sync` use equivalent per-file sync and body-scoped directory sync. This does **not** measure the default buffered raw writer's latency. Compare `stored-B`, `write-ms` and `read-ms`. File-size totals exclude filesystem allocation and directory overhead. Synthetic growing prefixes and small SSE samples exercise sharing rather than predict production compression; reads use warm caches, not cold disks or end-to-end proxy traffic.
 
-Optionally set `PRISMCAT_BLOB_BENCH_DB` to an absolute database path to read the latest 100 inline request bodies, capped at 256 MiB. The database is read-only and only aggregate measurements are printed.
+Optionally set `PRISMCAT_BLOB_BENCH_DB` to an absolute database path to read the latest 100 inline request bodies, capped at 256 MiB. Only aggregate metrics are printed and temporary files are removed. Regression tests cover asynchronous SQLite persistence, body downloads/SSE/export, mixed-format backup/restore, shared-chunk cleanup and concurrent access.
 
-Initial measurements show substantial space savings for growing shared prefixes, with slower writes and reads. Mixed small-body samples may occupy more space than independent compression. See [the recorded measurements](BLOB_STORAGE_CN.md) for details. Historical online migration, dictionary training and packed chunk containers are outside this change; search is separate.
+Online historical migration, dictionary training and packed chunk containers are outside this change; search is separate.

@@ -10,7 +10,7 @@ import (
 )
 
 func isManagedBlobName(name string) bool {
-	return isBlobFileName(name) || isBlobFileName(strings.TrimSuffix(name, ".manifest")) || isBlobFileName(strings.TrimSuffix(name, ".chunk"))
+	return isBlobFileName(name) || isBlobFileName(strings.TrimSuffix(name, ".manifest")) || isBlobFileName(strings.TrimSuffix(name, ".chunk")) || isBlobFileName(strings.TrimSuffix(name, ".zstd"))
 }
 
 // Mark the complete live graph before deleting anything. Fresh unpublished
@@ -48,13 +48,20 @@ func (s *FileBlobStore) collectBodies(ctx context.Context, refs []string, minAge
 		return nil
 	}
 	for h := range roots {
-		if info, err := os.Lstat(s.pathFor(h)); err == nil {
-			if !info.Mode().IsRegular() {
-				return 0, ErrBlobCorrupt
+		whole := false
+		for _, path := range []string{s.pathFor(h), s.compressedPath(h)} {
+			if info, err := os.Lstat(path); err == nil {
+				if !info.Mode().IsRegular() {
+					return 0, ErrBlobCorrupt
+				}
+				whole = true
+				break
+			} else if !os.IsNotExist(err) {
+				return 0, err
 			}
+		}
+		if whole {
 			continue
-		} else if !os.IsNotExist(err) {
-			return 0, err
 		}
 		if err := mark(h); err != nil {
 			return 0, err
@@ -114,7 +121,7 @@ func (s *FileBlobStore) collectBodies(ctx context.Context, refs []string, minAge
 			if liveChunks[strings.TrimSuffix(name, ".chunk")] {
 				return nil
 			}
-		} else if roots[strings.TrimSuffix(name, ".manifest")] {
+		} else if roots[strings.TrimSuffix(strings.TrimSuffix(name, ".manifest"), ".zstd")] {
 			return nil
 		}
 		s.ioMu.Lock()

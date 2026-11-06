@@ -24,6 +24,7 @@ func TestChunkedAndLegacyBodiesExportAsPortableFormatOne(t *testing.T) {
 	}
 	bodies := [][]byte{[]byte("small legacy body"), bytes.Repeat([]byte("shared agent history\n"), 50000)}
 	bodies = append(bodies, append(bytes.Clone(bodies[1]), []byte("new command and result")...))
+	bodies = append(bodies, bytes.Repeat([]byte("compressed small body\x00\xff\n"), 1000))
 	var refs []string
 	for i, body := range bodies {
 		ref, err := source.Blobs.Put(ctx, body)
@@ -31,7 +32,7 @@ func TestChunkedAndLegacyBodiesExportAsPortableFormatOne(t *testing.T) {
 			t.Fatal(err)
 		}
 		refs = append(refs, ref)
-		saveFixtureLog(t, repo, []string{"legacy", "first", "next"}[i], ref)
+		saveFixtureLog(t, repo, []string{"legacy", "first", "next", "compressed"}[i], ref)
 	}
 	out := filepath.Join(dir, "portable.zip")
 	manifest, err := Create(ctx, source, out, uuid.NewString(), "online", nil)
@@ -46,7 +47,7 @@ func TestChunkedAndLegacyBodiesExportAsPortableFormatOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, f := range z.File {
-		if strings.Contains(f.Name, ".manifest") || strings.Contains(f.Name, ".chunk") {
+		if strings.Contains(f.Name, ".manifest") || strings.Contains(f.Name, ".chunk") || strings.Contains(f.Name, ".zstd") {
 			t.Fatal("local chunk layout leaked into archive")
 		}
 	}

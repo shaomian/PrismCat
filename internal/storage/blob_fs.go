@@ -24,8 +24,8 @@ import (
 var ErrRefSetEmpty = errors.New("blob gc: reference set is empty but the store is not; refusing to delete")
 
 // FileBlobStore stores blobs on the local filesystem under a content-addressed path.
-// Legacy layout: <baseDir>/<hash[:2]>/<hash>. Optional chunked bodies use a
-// sibling .manifest and shared chunks; logical references are unchanged.
+// Legacy layout: <baseDir>/<hash[:2]>/<hash>. Optimized bodies use a sibling
+// .zstd or .manifest with shared chunks; logical references are unchanged.
 type FileBlobStore struct {
 	baseDir     string
 	chunkWrites bool
@@ -38,8 +38,8 @@ func NewFileBlobStore(baseDir string) (*FileBlobStore, error) {
 }
 
 type FileBlobStoreOptions struct {
-	// Chunked writes use CDC and compression for new large bodies. Readers
-	// always accept both representations, including when this is disabled.
+	// Chunked writes independently compress small bodies and use CDC plus
+	// compression at >=128 KiB. Readers accept all formats even when disabled.
 	Chunked bool
 }
 
