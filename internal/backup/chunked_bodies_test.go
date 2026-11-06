@@ -17,11 +17,6 @@ import (
 func TestChunkedAndLegacyBodiesExportAsPortableFormatOne(t *testing.T) {
 	ctx := context.Background()
 	source, repo, dir := backupFixture(t)
-	var err error
-	source.Blobs, err = storage.NewFileBlobStoreWithOptions(source.Config.StorageSnapshot().BlobDir, storage.FileBlobStoreOptions{Chunked: true})
-	if err != nil {
-		t.Fatal(err)
-	}
 	bodies := [][]byte{[]byte("small legacy body"), bytes.Repeat([]byte("shared agent history\n"), 50000)}
 	bodies = append(bodies, append(bytes.Clone(bodies[1]), []byte("new command and result")...))
 	bodies = append(bodies, bytes.Repeat([]byte("compressed small body\x00\xff\n"), 1000))
@@ -80,11 +75,6 @@ func TestChunkedAndLegacyBodiesExportAsPortableFormatOne(t *testing.T) {
 
 func TestBackupRejectsMissingSharedChunk(t *testing.T) {
 	source, repo, dir := backupFixture(t)
-	var err error
-	source.Blobs, err = storage.NewFileBlobStoreWithOptions(source.Config.StorageSnapshot().BlobDir, storage.FileBlobStoreOptions{Chunked: true})
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx := context.Background()
 	ref, err := source.Blobs.Put(ctx, bytes.Repeat([]byte("shared context"), 50000))
 	if err != nil {

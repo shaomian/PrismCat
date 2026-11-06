@@ -17,7 +17,7 @@ import (
 // The optional DB is read-only; only aggregate benchmark metrics are printed.
 // All experimental files are written beneath b.TempDir, never into that DB/store.
 // Every mode syncs each new file and batches directory syncs per body. These are
-// equally durable paths, not an estimate of the default buffered raw writer.
+// equally durable paths, not an estimate of the original buffered raw writer.
 func BenchmarkBlobStorageDataset(b *testing.B) {
 	var bodies [][]byte
 	if path := os.Getenv("PRISMCAT_BLOB_BENCH_DB"); path != "" {
@@ -61,7 +61,7 @@ func BenchmarkBlobStorageDataset(b *testing.B) {
 			var input, physical int64
 			var writeTime, readTime time.Duration
 			for range b.N {
-				store, err := NewFileBlobStoreWithOptions(b.TempDir(), FileBlobStoreOptions{Chunked: mode == "hybrid-sync"})
+				store, err := NewFileBlobStore(b.TempDir())
 				if err != nil {
 					b.Fatal(err)
 				}

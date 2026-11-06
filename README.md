@@ -31,7 +31,7 @@ Go from inspecting a single request to following a complete Agent task and compa
 
 For full backups, Web import and restore on restart, and CLI migration, see [Backup and migration](BACKUP.md).
 
-Optional body compression and chunk deduplication are disabled by default and do not rewrite existing data. See [storage notes](BLOB_STORAGE.md).
+Detached bodies automatically use compression and chunk deduplication without additional configuration or rewriting existing data. See [storage notes](BLOB_STORAGE.md).
 
 ## Sound familiar?
 

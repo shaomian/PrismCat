@@ -27,7 +27,7 @@ func (b *blobWriteBatch) include(path string) {
 }
 
 func (b *blobWriteBatch) write(path string, data []byte) error {
-	if err := writeBlobFile(path, data, true); err != nil {
+	if err := writeBlobFile(path, data); err != nil {
 		return err
 	}
 	b.include(path)

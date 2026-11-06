@@ -27,30 +27,19 @@ var ErrRefSetEmpty = errors.New("blob gc: reference set is empty but the store i
 // Legacy layout: <baseDir>/<hash[:2]>/<hash>. Optimized bodies use a sibling
 // .zstd or .manifest with shared chunks; logical references are unchanged.
 type FileBlobStore struct {
-	baseDir     string
-	chunkWrites bool
-	gcMu        sync.RWMutex
-	ioMu        sync.RWMutex // protects chunk publication/read against GC; separate from backup protection
+	baseDir string
+	gcMu    sync.RWMutex
+	ioMu    sync.RWMutex // protects chunk publication/read against GC; separate from backup protection
 }
 
 func NewFileBlobStore(baseDir string) (*FileBlobStore, error) {
-	return NewFileBlobStoreWithOptions(baseDir, FileBlobStoreOptions{})
-}
-
-type FileBlobStoreOptions struct {
-	// Chunked writes independently compress small bodies and use CDC plus
-	// compression at >=128 KiB. Readers accept all formats even when disabled.
-	Chunked bool
-}
-
-func NewFileBlobStoreWithOptions(baseDir string, options FileBlobStoreOptions) (*FileBlobStore, error) {
 	if baseDir == "" {
 		return nil, errors.New("blob base dir is empty")
 	}
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, err
 	}
-	return &FileBlobStore{baseDir: baseDir, chunkWrites: options.Chunked}, nil
+	return &FileBlobStore{baseDir: baseDir}, nil
 }
 
 func (s *FileBlobStore) Put(ctx context.Context, data []byte) (string, error) {

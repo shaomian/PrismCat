@@ -93,19 +93,14 @@ func (s *FileBlobStore) putBody(ctx context.Context, data []byte) (string, error
 			if err = os.Chtimes(path, now, now); err != nil {
 				return "", err
 			}
-			if s.chunkWrites || path != s.pathFor(h) {
-				// A concurrent publisher may not have synced the root entry yet.
-				if err = batch.syncDirs(); err != nil {
-					return "", err
-				}
+			// A concurrent publisher may not have synced the root entry yet.
+			if err = batch.syncDirs(); err != nil {
+				return "", err
 			}
 			return ref, nil
 		} else if !os.IsNotExist(err) {
 			return "", err
 		}
-	}
-	if !s.chunkWrites {
-		return ref, writeBlobFile(s.pathFor(h), data, false)
 	}
 	codecs, err := blobCodecs()
 	if err != nil {
@@ -182,9 +177,9 @@ func (s *FileBlobStore) putBody(ctx context.Context, data []byte) (string, error
 	return ref, batch.syncDirs()
 }
 
-// writeBlobFile atomically publishes a file. Durable callers must also sync
+// writeBlobFile syncs and atomically publishes a file. Callers must also sync
 // directory entries, using a body-scoped blobWriteBatch.
-func writeBlobFile(path string, data []byte, durable bool) error {
+func writeBlobFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -195,7 +190,7 @@ func writeBlobFile(path string, data []byte, durable bool) error {
 	}
 	defer os.Remove(f.Name())
 	_, err = f.Write(data)
-	if err == nil && durable {
+	if err == nil {
 		err = f.Sync()
 	}
 	err = errors.Join(err, f.Close())

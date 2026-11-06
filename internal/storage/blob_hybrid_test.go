@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func TestHybridBodyThresholdAndDisabledReaders(t *testing.T) {
+func TestHybridBodyThresholdAndReopenedStore(t *testing.T) {
 	for _, size := range []int{0, 1, 1000, chunkBodyThreshold - 1, chunkBodyThreshold, chunkBodyThreshold + 1} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			s := newChunkStore(t)
@@ -39,14 +39,14 @@ func TestHybridBodyThresholdAndDisabledReaders(t *testing.T) {
 			}
 			assertBody(t, reader, ref, body)
 			if ok, err := reader.Exists(context.Background(), ref); err != nil || !ok {
-				t.Fatal("disabled writer cannot find optimized body", err)
+				t.Fatal("reopened store cannot find optimized body", err)
 			}
 			if same, err := reader.Put(context.Background(), body); err != nil || same != ref {
 				t.Fatal("duplicate body changed reference", err)
 			}
 			if size >= 1000 {
 				if _, err = os.Stat(s.pathFor(h)); !os.IsNotExist(err) {
-					t.Fatal("disabled writer created a second representation", err)
+					t.Fatal("reopened store created a second representation", err)
 				}
 			}
 			out, err := reader.OpenBackupBlob(ref)

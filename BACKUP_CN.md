@@ -75,7 +75,7 @@ prismcat backup restore --file final.zip --target data --replace --keep-server-c
 
 ## 恢复后检查与保护
 
-可选的正文分块去重不改变备份 ZIP 格式：导出时还原完整正文，恢复时安装原始文件。开启方式及读写取舍见 [正文压缩与分块去重](BLOB_STORAGE_CN.md)。
+正文压缩与分块去重不改变备份 ZIP 格式：导出时还原完整正文，恢复时安装原始文件。存储策略及读写取舍见 [正文压缩与分块去重](BLOB_STORAGE_CN.md)。
 
 恢复会设置 `storage.cleanup_paused: true`，暂停自动保留期清理、容量淘汰、正文 GC 和手动过期清理。检查日志数量、任务、实验、复盘和正文后，在“系统 → 存储管理”区块点击“恢复自动清理”。保护状态会跨重启保留，修改保留天数不会自动解除保护。
 

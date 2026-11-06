@@ -28,7 +28,7 @@ func contextBody(size int) []byte {
 
 func newChunkStore(t *testing.T) *FileBlobStore {
 	t.Helper()
-	s, err := NewFileBlobStoreWithOptions(t.TempDir(), FileBlobStoreOptions{Chunked: true})
+	s, err := NewFileBlobStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestLegacyBodiesRemainReadableAndAreNotRewritten(t *testing.T) {
 	sum := sha256.Sum256(body)
 	h := hex.EncodeToString(sum[:])
 	ref := newSHA256Ref(sum)
-	if err := writeBlobFile(s.pathFor(h), body, false); err != nil {
+	if err := writeBlobFile(s.pathFor(h), body); err != nil {
 		t.Fatal(err)
 	}
 	assertBody(t, s, ref, body)
@@ -151,26 +151,26 @@ func TestLegacyBodiesRemainReadableAndAreNotRewritten(t *testing.T) {
 	}
 }
 
-func TestDisablingChunkWritesKeepsExistingChunkedBodiesReadable(t *testing.T) {
+func TestReopenedStoreContinuesHybridWrites(t *testing.T) {
 	s := newChunkStore(t)
 	body := contextBody(256 << 10)
 	ref, err := s.Put(context.Background(), body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plain, err := NewFileBlobStore(s.baseDir)
+	reopened, err := NewFileBlobStore(s.baseDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertBody(t, plain, ref, body)
+	assertBody(t, reopened, ref, body)
 	newBody := append(bytes.Clone(body), []byte("next")...)
-	newRef, err := plain.Put(context.Background(), newBody)
+	newRef, err := reopened.Put(context.Background(), newBody)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, h, _ := parseBlobRef(newRef)
-	if _, err = os.Stat(plain.pathFor(h)); err != nil {
-		t.Fatal("disabled option did not preserve legacy writes", err)
+	if _, err = os.Stat(reopened.manifestPath(h)); err != nil {
+		t.Fatal("reopened store did not keep chunking new bodies", err)
 	}
 	assertBody(t, s, newRef, newBody)
 }

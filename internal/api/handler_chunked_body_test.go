@@ -25,7 +25,7 @@ func TestChunkedBodyWorksWithExistingDownloadAndSSEBodyEndpoints(t *testing.T) {
 func testOptimizedBodyEndpoints(t *testing.T, events int) {
 	t.Helper()
 	dir := t.TempDir()
-	store, err := storage.NewFileBlobStoreWithOptions(filepath.Join(dir, "blobs"), storage.FileBlobStoreOptions{Chunked: true})
+	store, err := storage.NewFileBlobStore(filepath.Join(dir, "blobs"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,8 +34,8 @@ func testOptimizedBodyEndpoints(t *testing.T, events int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A store reopened with chunk writes disabled still services every existing
-	// download/detail/export caller through the unchanged BlobStore interface.
+	// Reopening the store services existing download/detail/export callers
+	// through the unchanged BlobStore interface.
 	reader, err := storage.NewFileBlobStore(filepath.Join(dir, "blobs"))
 	if err != nil {
 		t.Fatal(err)
