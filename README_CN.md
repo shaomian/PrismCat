@@ -6,7 +6,7 @@
 
 > 基于 [PrismCat](https://github.com/paopaoandlingyia/PrismCat) 独立维护的分支 —— 沿用同一 [MIT License](LICENSE)。
 
-v2.4.1 修复整理后任务统计慢查询及小任务全库扫描，并将构建工具链升级至 Go 1.27.3，详见 [更新记录](CHANGELOG.md#v241)。
+v2.5.0 新增完整备份、网页导入与重启恢复，自动压缩和分块去重分离正文，并整理系统设置与界面布局，详见 [更新记录](CHANGELOG.md#v250)。
 
 v2.4.0 新增任务全量统计与数据库冻结证据目录，追问共享原始范围，并改进复盘搜索、报告删除和调用链关联恢复，详见 [更新记录](CHANGELOG.md#v240)。
 

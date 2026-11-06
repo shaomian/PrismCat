@@ -1,5 +1,30 @@
 # Release notes / 更新记录
 
+## v2.5.0
+
+### 新增与改进
+
+- **完整备份与迁移**：网页导出和命令行备份包含 SQLite 一致快照、配置与引用的完整正文；提供校验、恢复预览及回滚能力。
+- **网页导入恢复**：上传备份后检查并预览内容，确认后在用户重启时恢复，避免运行中切换数据库；恢复后暂停自动清理。支持同版本恢复及已验证的 2.4.1 备份升级恢复。
+- **自动正文压缩与去重**：新写入的分离正文小于 128 KiB 时整份压缩，达到阈值时采用内容定义分块并共享相同块，无需开关。压缩无收益的正文或块保留原文，读取校验并还原原始字节。
+- **系统设置与界面**：整理运行状态、存储保留与清理、备份迁移等区块，统一控件和视觉层级，改进窄屏布局。
+
+### 升级说明
+
+- 沿用现有配置、SQLite 数据和原文文件；新存储策略仅影响新写入的分离正文，不自动迁移历史文件，SQLite 内联正文和预览保持原样。
+- 压缩去重减少重复上下文占用，但增加哈希、压缩及文件读写开销；大但不重复的正文不保证获益。
+- 完整备份仍使用 format-1 ZIP，导出时还原原文。旧程序不能直接读取新的压缩与分块文件；降级前请先导出完整备份并恢复到新目录。
+- 重建并重启程序或更新容器后生效。操作说明见 [备份与迁移](BACKUP_CN.md) 和 [正文存储](BLOB_STORAGE_CN.md)。
+
+### English
+
+- Add full Web and CLI backups with consistent SQLite snapshots, configuration and referenced original bodies, plus validation, restore previews and rollback.
+- Upload and inspect backups in the Web UI, then restore on a user-initiated restart. Pause automatic cleanup after restore; support same-version restores and the verified 2.4.1 upgrade path.
+- Automatically compress new detached bodies below 128 KiB and share compressed content-defined chunks at or above the threshold. Retain incompressible bytes and verify exact reconstruction without a configuration switch.
+- Reorganize system settings, storage retention and cleanup, and backup controls; unify UI controls and improve narrow-screen layouts.
+
+Existing configuration, SQLite data and raw body files remain readable. Historical files and inline SQLite previews are not rewritten. Compression and chunking trade read/write work for storage savings; large unrelated bodies may not benefit. Full backups retain format-1 ZIP and reconstruct original bytes. Export a full backup and restore into a new directory before downgrading to an older program. Rebuild and restart to apply the update.
+
 ## v2.4.1
 
 - 修复整理调用链后，实验统计反复扫描冻结成员导致的慢查询；启动时自动补齐成员索引，兼容已有数据和报告。
