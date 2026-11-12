@@ -49,6 +49,7 @@ import {
 export function LogDetail({
     log,
     loading,
+    bodySearchHit,
     onClose,
     onLogChange,
     onNavigateLog,
@@ -70,7 +71,11 @@ export function LogDetail({
         request: false,
         response: false,
     })
-    const [expandedSections, setExpandedSections] = useState(getInitialExpandedSections)
+    const [expandedSections, setExpandedSections] = useState(() => {
+        const sections = getInitialExpandedSections()
+        if (!bodySearchHit) return sections
+        return { ...sections, [bodySearchHit.part === 'request' ? 'requestBody' : 'responseBody']: true }
+    })
     const [requestViewMode, setRequestViewMode] = useState<RequestViewMode>('pretty')
     const [responseViewMode, setResponseViewMode] = useState<ResponseViewMode>('pretty')
     const [requestExpandMode, setRequestExpandMode] = useState<JsonExpandMode>('default')
@@ -88,7 +93,10 @@ export function LogDetail({
     const deferredResponseSearchTerm = useDeferredValue(responseSearchTerm)
     const requestBodyRef = useRef<HTMLDivElement>(null)
     const responseBodyRef = useRef<HTMLDivElement>(null)
+    const searchSnippetRef = useRef<HTMLDivElement>(null)
+    const positionedSearchHit = useRef(false)
     const displayLog = liveLog ?? log
+    const streamingToolHit = Boolean(bodySearchHit?.part === 'response' && bodySearchHit.tool && log?.streaming)
 
     useEffect(() => {
         setLiveLog(null)
@@ -97,16 +105,19 @@ export function LogDetail({
         setBlobErrors({ request: null, response: null })
         setBlobLoading({ request: false, response: false })
         setPreviewOnly({ request: false, response: false })
-        setRequestViewMode('pretty')
-        setResponseViewMode('pretty')
+        setRequestViewMode(bodySearchHit?.part === 'request' && !bodySearchHit.tool ? 'raw' : 'pretty')
+        setResponseViewMode(bodySearchHit?.part === 'response'
+            ? (streamingToolHit ? 'merged' : bodySearchHit.tool ? 'pretty' : 'raw')
+            : 'pretty')
         setRequestExpandMode('default')
         setResponseExpandMode('default')
         setAnnotationPanelOpen(false)
-        setRequestSearchOpen(false)
-        setRequestSearchTerm('')
-        setResponseSearchOpen(false)
-        setResponseSearchTerm('')
-    }, [log?.id])
+        setRequestSearchOpen(bodySearchHit?.part === 'request')
+        setRequestSearchTerm(bodySearchHit?.part === 'request' ? bodySearchHit.match : '')
+        setResponseSearchOpen(bodySearchHit?.part === 'response')
+        setResponseSearchTerm(bodySearchHit?.part === 'response' ? bodySearchHit.match : '')
+        positionedSearchHit.current = false
+    }, [log?.id, bodySearchHit, streamingToolHit])
 
     useEffect(() => {
         setAnnotationNote(displayLog?.annotation?.note ?? '')
@@ -120,8 +131,9 @@ export function LogDetail({
 
     useEffect(() => {
         if (typeof window === 'undefined') return
+        if (bodySearchHit) return
         window.localStorage.setItem(logDetailExpandedStorageKey, JSON.stringify(expandedSections))
-    }, [expandedSections])
+    }, [expandedSections, bodySearchHit])
 
     useEffect(() => {
         if (!log || !shouldSubscribeLive(log)) {
@@ -283,6 +295,27 @@ export function LogDetail({
         clearActiveSearchMatch(responseBodyRef.current)
     }, [effectiveResponseSearchTerm, responseViewMode])
 
+    useEffect(() => {
+        if (!bodySearchHit || positionedSearchHit.current) return
+        const term = bodySearchHit.part === 'request' ? effectiveRequestSearchTerm : effectiveResponseSearchTerm
+        if (term !== bodySearchHit.match) return
+        const container = bodySearchHit.part === 'request' ? requestBodyRef.current : responseBodyRef.current
+        const exact = Array.from(container?.querySelectorAll<HTMLElement>('[data-search-match]') ?? [])
+            .find(match => match.textContent === bodySearchHit.match)
+        if (exact) {
+            positionedSearchHit.current = true
+            exact.setAttribute('data-search-match-active', '')
+            exact.scrollIntoView({ block: 'nearest' })
+        }
+    }, [bodySearchHit, effectiveRequestSearchTerm, effectiveResponseSearchTerm, effectiveRequestBody,
+        effectiveResponseBody, requestViewMode, responseViewMode])
+
+    useEffect(() => {
+        if (bodySearchHit && !positionedSearchHit.current) {
+            searchSnippetRef.current?.scrollIntoView({ block: 'nearest' })
+        }
+    }, [bodySearchHit])
+
     const copiedTimerRef = useRef<number | null>(null)
     useEffect(() => () => {
         if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current)
@@ -398,6 +431,17 @@ export function LogDetail({
     ])
 
     if (!displayLog) return null
+
+    const searchSnippet = bodySearchHit && (
+        <div ref={searchSnippetRef} className="space-y-1 rounded-md border border-border bg-muted/30 px-3 py-2">
+            <p className="text-xs text-muted-foreground">
+                {t('log_body_search.hit')}{bodySearchHit.tool ? ` · ${bodySearchHit.tool}` : ''}
+            </p>
+            <p className="whitespace-pre-wrap break-all font-mono text-xs">
+                {bodySearchHit.before}<mark className="rounded-sm bg-primary/15 text-foreground">{bodySearchHit.match}</mark>{bodySearchHit.after}
+            </p>
+        </div>
+    )
 
     const sheetWidthClassName = cn(
         // overflow-hidden 和圆角必须同时存在:header(bg-card)和滚动区(bg-muted/30)都是直角,
@@ -820,6 +864,7 @@ export function LogDetail({
                             />
                             {expandedSections.requestBody && (
                                 <div className="space-y-3 pb-3">
+                                    {bodySearchHit?.part === 'request' && searchSnippet}
                                     {displayLog.request_body_ref && (
                                         <BlobPanel
                                             blobRef={displayLog.request_body_ref}
@@ -966,6 +1011,7 @@ export function LogDetail({
                             />
                             {expandedSections.responseBody && (
                                 <div className="space-y-3 pb-3">
+                                    {bodySearchHit?.part === 'response' && searchSnippet}
                                     {displayLog.streaming && responseViewMode === 'merged' && mergedResponse && (
                                         <div className="flex items-center gap-1.5 px-1 text-xs font-mono text-muted-foreground">
                                             <Layers className="h-3 w-3 shrink-0" />

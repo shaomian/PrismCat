@@ -85,6 +85,26 @@
         "sign_out": "退出登录",
         "security_note": "登录状态将持久化在当前浏览器中。"
     },
+    "log_body_search": {
+        "title": "查找正文",
+        "placeholder": "输入命令或错误文本",
+        "trace_scope": "在此调用链的请求和响应正文中按原文匹配，区分大小写。",
+        "query_limit": "最多输入 256 个字符。",
+        "count": "已查 {{scanned, number}} 条",
+        "progress": "已查 {{scanned, number}} / {{total, number}} 条",
+        "matches": "命中 {{count, number}} 条",
+        "searching": "正在查找…",
+        "limited": "本次未查完，请重试。",
+        "incomplete": "{{count, number}} 条日志的正文可能未查全。",
+        "continue": "继续查更早",
+        "hit": "调用链搜索命中",
+        "empty": "未找到匹配",
+        "not_shown": "未在当前列表显示",
+        "request": "请求",
+        "response": "响应",
+        "failed": "正文搜索失败，请重试。",
+        "busy": "已有正文搜索正在运行，请稍后再试。"
+    },
     "filters": {
         "advanced": "筛选",
         "search_path": "搜索路径...",

@@ -12,6 +12,7 @@ var (
 	ErrBlobNotFound    = errors.New("blob not found")
 	ErrInvalidBlobRef  = errors.New("invalid blob ref")
 	ErrUnsupportedAlgo = errors.New("unsupported blob hash algorithm")
+	ErrBlobTooLarge    = errors.New("blob exceeds read limit")
 )
 
 // BlobStore stores detached request/response bodies by content address.

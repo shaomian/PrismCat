@@ -45,6 +45,7 @@ type Handler struct {
 	cleanupJob     *cleanupJobState
 	cleanupPreview *cleanupPreviewState
 	backups        *backup.Manager
+	bodySearchMu   sync.Mutex
 }
 
 // New 创建 API 处理器
@@ -75,6 +76,7 @@ func New(cfg *config.Config, repo storage.Repository, blobs storage.BlobStore, l
 // RegisterRoutes 注册 API 路由
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/logs", h.handleLogs)
+	mux.HandleFunc("/api/logs/body-search", h.handleBodySearch)
 	mux.HandleFunc("/api/logs/export", h.handleLogsExport)
 	mux.HandleFunc("/api/logs/", h.handleLogDetail)
 	mux.HandleFunc("/api/stats", h.handleStats)

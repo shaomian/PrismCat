@@ -1,5 +1,29 @@
 # Release notes / 更新记录
 
+## v2.6.0
+
+### 新增与改进
+
+- **调用链正文搜索**：在单个调用链内搜索请求与响应正文，可查找 Agent 命令、错误文本及普通内容；尚未在对话列表按需加载的请求同样参与搜索。
+- **长调用链分批续查**：每批限制日志条数、读取字节与执行时间，显示累计进度，并可继续查找更早日志，避免一次搜索长期占用存储和内存。
+- **命中定位**：优先展示原始工具调用，点击结果直接打开对应日志、选择合适的正文视图并高亮匹配文本；正文只读到预览时明确提示可能漏查。
+- **分离正文兼容性**：为搜索增加有界读取，兼容早期未写入 frame size 的短 zstd 正文，同时保持内容哈希校验。
+
+### 升级说明
+
+- 无配置项和数据库迁移；已有 SQLite 日志、分离正文、备份与保留策略保持兼容。
+- 搜索仅在用户操作时执行，只覆盖当前调用链；单批最多扫描 500 条日志、读取 128 MiB，并在 5 秒后允许继续查找更早内容。
+- 日志总列表继续只搜索路径，不增加全库正文扫描。重建并重启程序或更新容器后生效。
+
+### English
+
+- Search request and response bodies within one trace, including Agent commands, errors, and requests not yet rendered by the on-demand conversation list.
+- Bound each scan by log count, bytes, and elapsed time, report cumulative progress, and continue into older logs without holding a long database cursor.
+- Prefer original tool-call matches and open the matching log with the relevant body view and highlighted text; report bodies that could only be searched partially.
+- Add bounded detached-body reads and retain compatibility with older short zstd frames that omitted their content size, while still verifying content hashes.
+
+No configuration or database migration is required. Existing logs, detached bodies, backups, and retention behavior remain compatible. Search runs only on demand within the current trace. The global log list continues to search paths only. Rebuild and restart, or update the container, to apply the release.
+
 ## v2.5.0
 
 ### 新增与改进

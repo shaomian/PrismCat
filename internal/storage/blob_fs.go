@@ -51,7 +51,14 @@ func (s *FileBlobStore) Put(ctx context.Context, data []byte) (string, error) {
 func (s *FileBlobStore) Get(ctx context.Context, ref string) ([]byte, error) {
 	s.ioMu.RLock()
 	defer s.ioMu.RUnlock()
-	return s.readBody(ctx, ref)
+	return s.readBody(ctx, ref, -1)
+}
+
+// GetLimited rejects bodies whose logical size exceeds maxBytes.
+func (s *FileBlobStore) GetLimited(ctx context.Context, ref string, maxBytes int64) ([]byte, error) {
+	s.ioMu.RLock()
+	defer s.ioMu.RUnlock()
+	return s.readBody(ctx, ref, maxBytes)
 }
 
 func (s *FileBlobStore) Exists(ctx context.Context, ref string) (bool, error) {

@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   Network, ArrowLeft, Clock, AlertCircle, Layers, Activity,
-  MessagesSquare, ListTree, GitBranch, FileDown, Sparkles, ListChecks, X, ChevronLeft, ChevronRight,
+  MessagesSquare, ListTree, GitBranch, FileDown, Sparkles, ListChecks, X, ChevronLeft, ChevronRight, Search,
 } from 'lucide-react'
 import { fetchTraceDetail, fetchTraceTimeline, fetchTraceTimelineEntry, fetchTraceDiagram, fetchLog, traceExportUrl, type TraceDetail as TraceDetailType, type TraceTimeline, type RequestLog, type TraceMetadata, type TraceDiagram as TraceDiagramData } from '@/lib/api'
 import { cn, formatLatency, formatDate, getStatusColor, METHOD_CLASS } from '@/lib/utils'
@@ -15,7 +15,9 @@ import { TraceGroupingDialog } from '@/components/TraceGroupingDialog'
 import type { GroupingAction } from '@/lib/trace-grouping'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { TraceTimelineView } from '@/components/TraceTimeline'
+import { TRACE_TIMELINE_PAGE_SIZE, TraceTimelineView } from '@/components/TraceTimeline'
+import { BodySearch } from '@/components/BodySearch'
+import type { BodySearchHit } from '@/lib/api'
 import { toast } from 'sonner'
 
 const TraceDiagram = lazy(async () => ({ default: (await import('@/components/TraceDiagram')).TraceDiagram }))
@@ -35,11 +37,15 @@ export function TraceDetail() {
 
   const [detail, setDetail] = useState<TraceDetailType | null>(null)
   const [timeline, setTimeline] = useState<TraceTimeline | null>(null)
+  const [timelinePage, setTimelinePage] = useState({ traceId, limit: TRACE_TIMELINE_PAGE_SIZE })
+  const timelineRequestLimit = timelinePage.traceId === traceId ? timelinePage.limit : TRACE_TIMELINE_PAGE_SIZE
   const [diagram, setDiagram] = useState<TraceDiagramData | null>(null)
   const [diagramView, setDiagramView] = useState<'sequence' | 'dependencies'>('sequence')
   const [diagramOffset, setDiagramOffset] = useState(0)
   const [loading, setLoading] = useState(true)
   const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null)
+  const [selectedSearchHit, setSelectedSearchHit] = useState<BodySearchHit | null>(null)
+  const [openSearchKey, setOpenSearchKey] = useState<string | null>(null)
   const [analysisOpen, setAnalysisOpen] = useState(false)
   const [requestPage, setRequestPage] = useState({ traceId, offset: 0 })
   const [groupingAction, setGroupingAction] = useState<GroupingAction | null>(null)
@@ -48,6 +54,8 @@ export function TraceDetail() {
   const chosen = selection.traceId === traceId ? selection.ids : []
   const toggleRequest = (id: string) => setSelection({ traceId, active: true, ids: chosen.includes(id) ? chosen.filter(value => value !== id) : [...chosen, id] })
   const [assignmentRevision, setAssignmentRevision] = useState(0)
+  const searchKey = `${traceId}:${assignmentRevision}`
+  const searchOpen = openSearchKey === searchKey
   const [loadingFullLogIds, setLoadingFullLogIds] = useState<Set<string>>(new Set())
   const fullEventsInFlight = useRef(new Set<string>())
   const timelineLoaded = useRef('')
@@ -154,6 +162,11 @@ export function TraceDetail() {
   const requests = useMemo(() => detail?.requests ?? [], [detail?.requests])
   const requestOffset = Math.min(requestPage.traceId === traceId ? requestPage.offset : 0, Math.max(0, Math.ceil(requests.length / 50) - 1) * 50)
   const visibleRequests = requests.slice(requestOffset, requestOffset + 50)
+  const searchVisibleLogIds = !searchOpen ? undefined : tab === 'requests'
+    ? new Set(visibleRequests.map(request => request.id))
+    : tab === 'conversation' && timeline
+      ? new Set(timeline.requests.slice(0, timelineRequestLimit).map(request => request.log_id))
+      : undefined
   const pageIds = visibleRequests.map(request => request.id)
   const summary = detail?.summary
   const diagramTotal = diagram?.request_total ?? requests.length
@@ -173,15 +186,16 @@ export function TraceDetail() {
   // 序号守卫：快速点开/切上一条下一条时丢弃过期响应。
   const selectSeq = useRef(0)
   const [selectedLogLoading, setSelectedLogLoading] = useState(false)
-  const openLog = useCallback(async (log: RequestLog) => {
+  const openLog = useCallback(async (log: RequestLog | string, hit?: BodySearchHit) => {
     const seq = ++selectSeq.current
-    setSelectedLog(log)
+    setSelectedSearchHit(hit ?? null)
+    setSelectedLog(typeof log === 'string' ? null : log)
     setSelectedLogLoading(false)
     // body 已就位（fetchLog 回填或注解更新写回的完整对象）则无需再拉
-    if (log.request_body !== undefined || log.response_body !== undefined) return
+    if (typeof log !== 'string' && (log.request_body !== undefined || log.response_body !== undefined)) return
     setSelectedLogLoading(true)
     try {
-      const full = await fetchLog(log.id)
+      const full = await fetchLog(typeof log === 'string' ? log : log.id)
       if (selectSeq.current !== seq) return
       startTransition(() => {
         setSelectedLog(full)
@@ -200,6 +214,7 @@ export function TraceDetail() {
   const handleCloseLog = useCallback(() => {
     selectSeq.current++
     setSelectedLog(null)
+    setSelectedSearchHit(null)
     setSelectedLogLoading(false)
   }, [])
 
@@ -230,6 +245,7 @@ export function TraceDetail() {
     setDiagram(null)
     setDiagramOffset(0)
     setTimeline(null)
+    setTimelinePage({ traceId, limit: TRACE_TIMELINE_PAGE_SIZE })
     timelineLoaded.current = ''
     diagramCache.current.clear()
     setAssignmentRevision(previous => previous + 1)
@@ -306,7 +322,7 @@ export function TraceDetail() {
           </span>
         ))}
         {traceId && (
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex flex-wrap items-center gap-1.5">
             <Button variant="default" size="sm" className="gap-1.5 h-7 text-xs" onClick={() => setAnalysisOpen(true)}>
               <Sparkles className="h-3 w-3" />
               {t('analysis.open_button')}
@@ -328,7 +344,11 @@ export function TraceDetail() {
       </div>
 
       {/* 视图切换：对话时间线 / 请求列表 */}
-      <Tabs value={tab} onValueChange={setTab}>
+      <Tabs value={tab} onValueChange={value => {
+        setTab(value)
+        if (tab === 'conversation') setTimelinePage({ traceId, limit: TRACE_TIMELINE_PAGE_SIZE })
+      }}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
         <TabsList>
           <TabsTrigger value="conversation" className="gap-1.5">
             <MessagesSquare className="h-3.5 w-3.5" />
@@ -343,6 +363,20 @@ export function TraceDetail() {
             {t('timeline.tab_requests')}
           </TabsTrigger>
         </TabsList>
+          {traceId && (
+            <Button type="button" variant="ghost" size="sm" aria-expanded={searchOpen}
+              aria-controls={searchOpen ? 'trace-body-search' : undefined}
+              className={cn('h-8 text-muted-foreground', searchOpen && 'bg-accent text-foreground')}
+              onClick={() => setOpenSearchKey(searchOpen ? null : searchKey)}>
+              <Search className="size-4" />
+              {t('log_body_search.title')}
+            </Button>
+          )}
+        </div>
+        {traceId && searchOpen && (
+          <BodySearch key={searchKey} traceId={traceId} requestCount={summary.request_count} visibleLogIds={searchVisibleLogIds}
+            onOpenLog={hit => void openLog(requests.find(log => log.id === hit.log_id) ?? hit.log_id, hit)} />
+        )}
 
         <TabsContent value="conversation" className="pt-4">
           {timelineError ? (
@@ -359,6 +393,11 @@ export function TraceDetail() {
           ) : (
             <TraceTimelineView
               requests={timeline.requests}
+              requestLimit={timelineRequestLimit}
+              onLoadMore={() => setTimelinePage(page => ({
+                traceId,
+                limit: (page.traceId === traceId ? page.limit : TRACE_TIMELINE_PAGE_SIZE) + TRACE_TIMELINE_PAGE_SIZE,
+              }))}
               onOpenLog={handleOpenLog}
               onLoadFull={handleLoadFullEvents}
               loadingFullLogIds={loadingFullLogIds}
@@ -546,7 +585,9 @@ export function TraceDetail() {
         else handleAssignmentChanged({ trace_id: traceId })
       }} />}
       {selectedLog && <Suspense fallback={<PageLoading className="min-h-[20vh]" />}><LogDetail
+        key={selectedSearchHit?.log_id}
         log={selectedLog}
+        bodySearchHit={selectedSearchHit ?? undefined}
         loading={selectedLogLoading}
         onClose={handleCloseLog}
         onNavigateLog={handleNavigateLog}

@@ -9,7 +9,7 @@ import { cn, formatLatency, getStatusColor } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
 const PREVIEW_CHARS = 600
-const REQUEST_PAGE_SIZE = 20
+export const TRACE_TIMELINE_PAGE_SIZE = 20
 const EVENT_PAGE_SIZE = 20
 
 const ROLE_STYLE: Record<string, { icon: typeof User; badge: string; accent: string }> = {
@@ -192,17 +192,20 @@ const RequestGroup = memo(function RequestGroup({
 
 export function TraceTimelineView({
   requests,
+  requestLimit = TRACE_TIMELINE_PAGE_SIZE,
+  onLoadMore,
   onOpenLog,
   onLoadFull,
   loadingFullLogIds,
 }: {
   requests: TimelineRequest[]
+  requestLimit?: number
+  onLoadMore?: () => void
   onOpenLog?: (logId: string) => void
   onLoadFull?: (logId: string) => void
   loadingFullLogIds?: Set<string>
 }) {
   const { t } = useTranslation()
-  const [requestLimit, setRequestLimit] = useState(REQUEST_PAGE_SIZE)
   if (requests.length === 0) {
     return <div className="py-12 text-center text-sm text-muted-foreground">{t('timeline.empty')}</div>
   }
@@ -218,7 +221,7 @@ export function TraceTimelineView({
           />
         </div>
       ))}
-      {requests.length > requestLimit && <Button variant="outline" size="sm" onClick={() => setRequestLimit(limit => limit + REQUEST_PAGE_SIZE)}>
+      {requests.length > requestLimit && <Button variant="outline" size="sm" onClick={onLoadMore}>
         {t('timeline.show_more_requests', { count: requests.length - requestLimit })}
       </Button>}
     </div>

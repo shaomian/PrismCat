@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -11,10 +12,12 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 func TestHybridBodyThresholdAndReopenedStore(t *testing.T) {
-	for _, size := range []int{0, 1, 1000, chunkBodyThreshold - 1, chunkBodyThreshold, chunkBodyThreshold + 1} {
+	for _, size := range []int{0, 1, 128, 1000, chunkBodyThreshold - 1, chunkBodyThreshold, chunkBodyThreshold + 1} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			s := newChunkStore(t)
 			body := bytes.Repeat([]byte("a"), size)
@@ -27,7 +30,7 @@ func TestHybridBodyThresholdAndReopenedStore(t *testing.T) {
 			switch {
 			case size >= chunkBodyThreshold:
 				path = s.manifestPath(h)
-			case size >= 1000:
+			case size >= 128:
 				path = s.compressedPath(h)
 			}
 			if _, err = os.Stat(path); err != nil {
@@ -44,7 +47,7 @@ func TestHybridBodyThresholdAndReopenedStore(t *testing.T) {
 			if same, err := reader.Put(context.Background(), body); err != nil || same != ref {
 				t.Fatal("duplicate body changed reference", err)
 			}
-			if size >= 1000 {
+			if size >= 128 {
 				if _, err = os.Stat(s.pathFor(h)); !os.IsNotExist(err) {
 					t.Fatal("reopened store created a second representation", err)
 				}
@@ -62,6 +65,29 @@ func TestHybridBodyThresholdAndReopenedStore(t *testing.T) {
 				t.Fatal("backup reports compressed size", size, err)
 			}
 		})
+	}
+}
+
+func TestLegacyShortCompressedBodyWithoutFrameSize(t *testing.T) {
+	s := newChunkStore(t)
+	body := bytes.Repeat([]byte("short SSE payload\n"), 10)
+	encoder, err := zstd.NewWriter(nil, zstd.WithSingleSegment(false), zstd.WithEncoderConcurrency(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer encoder.Close()
+	encoded := encoder.EncodeAll(body, nil)
+	var header zstd.Header
+	if err := header.Decode(encoded); err != nil || header.HasFCS {
+		t.Fatalf("fixture must have no frame content size: %v", err)
+	}
+	ref := newSHA256Ref(sha256.Sum256(body))
+	if err := writeBlobFile(s.compressedPath(mustHexHash(t, ref)), encoded); err != nil {
+		t.Fatal(err)
+	}
+	assertBody(t, s, ref, body)
+	if _, err := s.GetLimited(context.Background(), ref, int64(len(body)-1)); !errors.Is(err, ErrBlobTooLarge) {
+		t.Fatalf("bounded read accepted an oversized body: %v", err)
 	}
 }
 

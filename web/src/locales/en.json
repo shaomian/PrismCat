@@ -85,6 +85,28 @@
         "sign_out": "Sign out",
         "security_note": "Session persists in this browser."
     },
+    "log_body_search": {
+        "title": "Find in bodies",
+        "placeholder": "Enter a command or error text",
+        "trace_scope": "Find case-sensitive text in request and response bodies in this trace.",
+        "query_limit": "Enter up to 256 characters.",
+        "count": "Searched {{scanned, number}} logs",
+        "progress": "Searched {{scanned, number}} / {{total, number}} logs",
+        "matches_one": "{{count, number}} match",
+        "matches_other": "{{count, number}} matches",
+        "searching": "Searching…",
+        "limited": "The search did not finish. Try again.",
+        "incomplete_one": "The body of {{count, number}} log may not have been fully searched.",
+        "incomplete_other": "Bodies of {{count, number}} logs may not have been fully searched.",
+        "continue": "Search earlier logs",
+        "hit": "Trace search match",
+        "empty": "No matches found",
+        "not_shown": "Not shown in this view",
+        "request": "Request",
+        "response": "Response",
+        "failed": "Body search failed. Try again.",
+        "busy": "A body search is already running. Try again shortly."
+    },
     "filters": {
         "advanced": "Filters",
         "search_path": "Search path...",

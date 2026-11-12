@@ -6,7 +6,7 @@
 
 > Independently maintained fork of [PrismCat](https://github.com/paopaoandlingyia/PrismCat) — released under the same [MIT License](LICENSE).
 
-v2.5.0 adds full backups, Web import and restore on restart, automatic detached-body compression and chunk deduplication, and clearer system settings and UI layouts. See the [release notes](CHANGELOG.md#v250).
+v2.6.0 adds trace body search for commands, errors, and requests not yet rendered in the page, with bounded continuation and direct match navigation. See the [release notes](CHANGELOG.md#v260).
 
 v2.4.0 adds full-task statistics and frozen database evidence directories, reuses evidence for follow-ups, and improves review search, report deletion and correlation recovery. See the [release notes](CHANGELOG.md#v240).
 

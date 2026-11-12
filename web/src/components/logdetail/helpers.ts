@@ -1,8 +1,9 @@
-import type { LiveLogEvent, RequestLog } from '@/lib/api'
+import type { BodySearchHit, LiveLogEvent, RequestLog } from '@/lib/api'
 
 export interface LogDetailProps {
     log: RequestLog | null
     loading?: boolean
+    bodySearchHit?: BodySearchHit
     onClose: () => void
     onLogChange?: (log: RequestLog) => void
     onNavigateLog?: (direction: LogNavigationDirection) => void

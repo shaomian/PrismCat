@@ -389,6 +389,34 @@ export async function fetchLogs(filter: LogFilter = {}, signal?: AbortSignal): P
     return response.json()
 }
 
+export interface BodySearchHit {
+    log_id: string
+    created_at: string
+    upstream: string
+    method: string
+    path: string
+    part: 'request' | 'response'
+    tool?: string
+    before: string
+    match: string
+    after: string
+}
+
+export interface BodySearchResult {
+    hits: BodySearchHit[]
+    scanned: number
+    matched: number
+    incomplete: number
+    limited: boolean
+    next?: { time_ms: number; id: string }
+}
+
+export async function searchTraceBodies(traceId: string, query: string, signal: AbortSignal, before?: BodySearchResult['next']): Promise<BodySearchResult> {
+    const params = new URLSearchParams({ trace_id: traceId })
+    const response = await apiRequest(`${API_BASE}/logs/body-search?${params}`, { ...jsonInit('POST', { query, before }), signal }, 'log_body_search.failed')
+    return response.json()
+}
+
 export function buildLogsExportUrl(filter: LogFilter = {}, includeBody = true): string {
     const params = new URLSearchParams()
     Object.entries(filter).forEach(([key, value]) => {

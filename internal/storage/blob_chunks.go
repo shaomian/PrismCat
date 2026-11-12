@@ -48,7 +48,7 @@ type bodyCodecs struct {
 }
 
 var blobCodecs = sync.OnceValues(func() (*bodyCodecs, error) {
-	e, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest), zstd.WithEncoderConcurrency(1), zstd.WithWindowSize(chunkMaxSize))
+	e, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest), zstd.WithEncoderConcurrency(1), zstd.WithWindowSize(chunkMaxSize), zstd.WithSingleSegment(true))
 	if err != nil {
 		return nil, err
 	}
@@ -300,15 +300,24 @@ func (s *FileBlobStore) readCompressedBody(h string) ([]byte, error) {
 		return nil, err
 	}
 	var header zstd.Header
-	if header.Decode(encoded) != nil || !header.HasFCS || header.FrameContentSize == 0 || header.FrameContentSize >= chunkBodyThreshold {
+	if header.Decode(encoded) != nil || header.Skippable {
 		return nil, ErrBlobCorrupt
+	}
+	// Earlier writers could omit the frame size on short bodies. Decode with
+	// the same bounded capacity and verify the complete original hash.
+	size := chunkBodyThreshold - 1
+	if header.HasFCS {
+		if header.FrameContentSize == 0 || header.FrameContentSize >= chunkBodyThreshold {
+			return nil, ErrBlobCorrupt
+		}
+		size = int(header.FrameContentSize)
 	}
 	codecs, err := blobCodecs()
 	if err != nil {
 		return nil, err
 	}
-	data, err := codecs.decoder.DecodeAll(encoded, make([]byte, 0, int(header.FrameContentSize)))
-	if err != nil || len(data) != int(header.FrameContentSize) {
+	data, err := codecs.decoder.DecodeAll(encoded, make([]byte, 0, size))
+	if err != nil || len(data) == 0 || len(data) > size || (header.HasFCS && len(data) != size) {
 		return nil, ErrBlobCorrupt
 	}
 	sum := sha256.Sum256(data)
@@ -318,7 +327,7 @@ func (s *FileBlobStore) readCompressedBody(h string) ([]byte, error) {
 	return data, nil
 }
 
-func (s *FileBlobStore) readBody(ctx context.Context, ref string) ([]byte, error) {
+func (s *FileBlobStore) readBody(ctx context.Context, ref string, maxBytes int64) ([]byte, error) {
 	r, size, err := s.openBody(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -328,6 +337,9 @@ func (s *FileBlobStore) readBody(ctx context.Context, ref string) ([]byte, error
 	// for large agent histories. Chunk decompression stays bounded separately.
 	if size < 0 || uint64(size) > uint64(^uint(0)>>1) {
 		return nil, ErrBlobCorrupt
+	}
+	if maxBytes >= 0 && size > maxBytes {
+		return nil, ErrBlobTooLarge
 	}
 	data := make([]byte, int(size))
 	if _, err = io.ReadFull(r, data); err != nil {
